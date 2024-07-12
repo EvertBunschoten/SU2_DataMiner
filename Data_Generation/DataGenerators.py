@@ -76,14 +76,17 @@ class DataGenerator_CoolProp:
             self.__e_min = 1e32
             self.__e_max = -1e32 
             for p,T in zip(P_dataset, T_dataset):
-                self.__fluid.update(CP.PT_INPUTS, p, T)
-                rho = self.__fluid.rhomass()
-                e = self.__fluid.umass()
-                self.__rho_max = max(rho, self.__rho_max)
-                self.__rho_min = min(rho, self.__rho_min)
-                self.__e_max = max(e, self.__e_max)
-                self.__e_min = min(e, self.__e_min)
-            rho_range = np.linspace(self.__rho_min, self.__rho_max, self.__Np_P)
+                try:
+                    self.__fluid.update(CP.PT_INPUTS, p, T)
+                    rho = self.__fluid.rhomass()
+                    e = self.__fluid.umass()
+                    self.__rho_max = max(rho, self.__rho_max)
+                    self.__rho_min = min(rho, self.__rho_min)
+                    self.__e_max = max(e, self.__e_max)
+                    self.__e_min = min(e, self.__e_min)
+                except:
+                    pass 
+            rho_range = (self.__rho_min - self.__rho_max)* (np.cos(np.linspace(0, 0.5*np.pi, self.__Np_P))) + self.__rho_max
             e_range = np.linspace(self.__e_min, self.__e_max, self.__Np_T)
             self.__rho_grid, self.__e_grid = np.meshgrid(rho_range, e_range)
 
@@ -125,14 +128,15 @@ class DataGenerator_CoolProp:
         self.__e_fluid = np.zeros([self.__Np_P, self.__Np_T])
 
         self.__success_locations = np.ones([self.__Np_P, self.__Np_T],dtype=bool)
-
+        
         for i in tqdm(range(self.__Np_P)):
             for j in range(self.__Np_T):
                 try:
                     if self.__use_PT:
                         self.__fluid.update(CP.PT_INPUTS, self.__P_grid[i,j], self.__T_grid[i,j])
                     else:
-                        self.__fluid.update(CP.DmassUmass_INPUTS, self.__rho_grid[i,j], self.__e_grid[i,j])
+                        self.__fluid.update(CP.DmassUmass_INPUTS, self.__rho_grid[j,i], self.__e_grid[j,i])
+
                     if (self.__fluid.phase() != 0) and (self.__fluid.phase() != 3) and (self.__fluid.phase() != 6):
                         self.__s_fluid[i,j] = self.__fluid.smass()
                         self.__dsde_rho_fluid[i,j] = self.__fluid.first_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass)
@@ -160,6 +164,17 @@ class DataGenerator_CoolProp:
                         self.__e_fluid[i,j] = None 
                 except:
                     self.__success_locations[i,j] = False 
+                    self.__s_fluid[i, j] = None
+                    self.__dsde_rho_fluid[i,j] = None 
+                    self.__dsdrho_e_fluid[i,j] = None 
+                    self.__d2sde2_fluid[i,j] = None 
+                    self.__d2sdrho2_fluid[i,j] = None 
+                    self.__d2sdedrho_fluid[i,j] = None 
+                    self.__c2_fluid[i,j] = None 
+                    self.__P_fluid[i,j] = None 
+                    self.__T_fluid[i,j] = None 
+                    self.__rho_fluid[i,j] = None 
+                    self.__e_fluid[i,j] = None 
 
     def VisualizeFluidData(self):
 
