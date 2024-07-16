@@ -10,5 +10,10 @@ on:
         description: 'The github runner to use'
         default: 'ubuntu-latest'
         required: false 
-        type: string 
-
+        type: string
+jobs:
+  build:
+      name: Self Docker
+      strategy: 
+        fail-fast: false
+      runs-on: 'ubuntu-latest'
