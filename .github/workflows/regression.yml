@@ -1,0 +1,14 @@
+name: Regression and Unit Testing
+
+on:
+  push:
+    branches:
+      - 'main'
+  workflow_call:
+    inputs:
+      runner:
+        description: 'The github runner to use'
+        default: 'ubuntu-latest'
+        required: false 
+        type: string 
+
