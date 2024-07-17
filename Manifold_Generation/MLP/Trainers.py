@@ -771,6 +771,10 @@ class Train_C2_MLP(MLPTrainer):
         self._Y_max = [np.max(Y_full,axis=0)]
         self.rhoe_train_norm = (self.X_train - self._X_min) / (self._X_max - self._X_min)
 
+        self.S_test = self.Y_test[:, 0]
+        self.S_val = self.Y_val[:, 0]
+        self.S_train = self.Y_train[:, 0]
+
         # Free up memory
         del X_full
         del Y_full
@@ -906,7 +910,7 @@ class Train_C2_MLP(MLPTrainer):
         d2sdedrho_norm = tf.gather(d2s_norm_e, self.idx_rho, axis=1)
         d2sde2_norm = tf.gather(d2s_norm_e, self.idx_e, axis=1)
 
-        return dsdrho_e_norm, dsde_rho_norm, d2sdrho2_norm, d2sdedrho_norm, d2sde2_norm
+        return dsdrho_e_norm, dsde_rho_norm, d2sdrho2_norm, d2sdedrho_norm, d2sde2_norm, s_norm
 
     @tf.function
     def __EntropicEOS(self, rho:tf.Tensor, ds_dim:list[tf.Tensor], d2s_dim:list[tf.Tensor]):
@@ -953,7 +957,8 @@ class Train_C2_MLP(MLPTrainer):
         dsde_rho_norm, \
         d2sdrho2_norm, \
         d2sdedrho_norm, \
-        d2sde2_norm= self.__Gradients_2(x_var)
+        d2sde2_norm, \
+        s_norm = self.__Gradients_2(x_var)
 
         # Compute scales for density, energy and entropy.
         rho_scale = self.__rho_max - self.__rho_min
@@ -973,7 +978,8 @@ class Train_C2_MLP(MLPTrainer):
         d2sdedrho = tf.math.multiply(s_scale / (rho_scale * e_scale), d2sdedrho_norm)
         d2sde2 = tf.math.multiply(s_scale / (e_scale * e_scale), d2sde2_norm)
        
-        return rho_dim, [dsdrho_e, dsde_rho], [d2sdrho2, d2sdedrho, d2sde2]
+        s_dim = s_norm * (s_scale) + self.__s_min
+        return rho_dim, [dsdrho_e, dsde_rho], [d2sdrho2, d2sdedrho, d2sde2], s_dim
     
     
     @tf.function
@@ -987,12 +993,12 @@ class Train_C2_MLP(MLPTrainer):
         """
 
         # Compute entropy derivatives w.r.t. to density and energy.
-        rho_dim, ds_dim, d2s_dim = self.__DeNormalize_Gradients(x_var)
+        rho_dim, ds_dim, d2s_dim, s_dim = self.__DeNormalize_Gradients(x_var)
         
         # Convert entropy derivatives into temperature, pressure, and speed of sound.
         T, P, c2 = self.__EntropicEOS(rho_dim, ds_dim, d2s_dim)
 
-        return T, P, c2
+        return T, P, c2, s_dim
 
     @tf.function
     def __mean_squared_error(self, y_true:tf.Tensor, y_pred:tf.Tensor):
@@ -1020,7 +1026,7 @@ class Train_C2_MLP(MLPTrainer):
         """
 
         # Evaluate thermodynamic state.
-        T, _, _ = self.__TD_Evaluation(x_var)
+        T, _, _, _ = self.__TD_Evaluation(x_var)
 
         # Normalize reference and predicted temperature.
         T_pred_norm = (T - self.Temperature_min) / (self.Temperature_max - self.Temperature_min)
@@ -1044,7 +1050,7 @@ class Train_C2_MLP(MLPTrainer):
         """
 
         # Evaluate thermodynamic state.
-        _, P, _ = self.__TD_Evaluation(x_var)
+        _, P, _, _ = self.__TD_Evaluation(x_var)
 
         # Normalize reference and predicted pressure.
         P_pred_norm = (P - self.Pressure_min) / (self.Pressure_max - self.Pressure_min)
@@ -1068,7 +1074,7 @@ class Train_C2_MLP(MLPTrainer):
         """
 
         # Evaluate thermodynamic state.
-        _, _, C2 = self.__TD_Evaluation(x_var)
+        _, _, C2, _ = self.__TD_Evaluation(x_var)
         
         # Normalize reference and predicted squared SoS.
         C2_pred_norm = (C2 - self.C2_min) / (self.C2_max - self.C2_min)
@@ -1078,6 +1084,20 @@ class Train_C2_MLP(MLPTrainer):
         C2_error = self.__mean_squared_error(y_true=C2_label_norm, y_pred=C2_pred_norm)
 
         return C2_error
+    
+    @tf.function 
+    def __Compute_S_error(self, S_label, x_var:tf.Variable):
+        # Evaluate thermodynamic state.
+        _, _, _, S_pred = self.__TD_Evaluation(x_var)
+        
+        # Normalize reference and predicted squared SoS.
+        S_pred_norm = (S_pred - self.__s_min)/(self.__s_max - self.__s_min)
+        S_label_norm = (S_label -  self.__s_min)/(self.__s_max - self.__s_min)
+        
+        # Apply loss function.
+        S_error = self.__mean_squared_error(y_true=S_label_norm, y_pred=S_pred_norm)
+
+        return S_error 
     
     @tf.function
     def __ComputeGradients_T_error(self, T_label:tf.Tensor, rhoe_norm:tf.Variable):
@@ -1137,7 +1157,23 @@ class Train_C2_MLP(MLPTrainer):
         return C2_loss, grads_C2
     
     @tf.function
-    def __Triple_Variable_Train_Step(self, T_batch:tf.Tensor, P_batch:tf.Tensor, C2_batch:tf.Tensor, rhoe_norm_batch:tf.Variable):
+    def __ComputeGradients_S_error(self, S_label:tf.Tensor, rhoe_norm:tf.Variable):
+        """Compute SoS prediction error and respective MLP weight sensitivities.
+
+        :param C2_label: reference squared SoS data
+        :type C2_label: tf.Tensor
+        :param rhoe_norm: normalized density and energy tensor.
+        :type rhoe_norm: tf.Variable
+        :return: SoS prediction loss value and MLP weight sensitivities.
+        :rtype: tf.Tensor
+        """
+        with tf.GradientTape() as tape:
+            S_loss = self.__Compute_S_error(S_label, rhoe_norm)
+            grads_S = tape.gradient(S_loss, self.__hyper_parameters)
+        return S_loss, grads_S
+    
+    @tf.function
+    def __Triple_Variable_Train_Step(self, T_batch:tf.Tensor, P_batch:tf.Tensor, C2_batch:tf.Tensor, S_batch:tf.Tensor, rhoe_norm_batch:tf.Variable):
         """Apply MLP weight updates based on thermodynamic quantity losses.
 
         :param T_batch: temperature batch data
@@ -1152,6 +1188,7 @@ class Train_C2_MLP(MLPTrainer):
         :rtype: tf.Tensor
         """
 
+
         # Weight update for temperature prediction.
         T_loss, grads_T = self.__ComputeGradients_T_error(T_batch, rhoe_norm_batch)
         self.optimizer.apply_gradients(zip(grads_T, self.__hyper_parameters))
@@ -1163,7 +1200,11 @@ class Train_C2_MLP(MLPTrainer):
         # Weight update for SoS prediction.
         C2_loss, grads_C2 = self.__ComputeGradients_C2_error(C2_batch,rhoe_norm_batch)
         self.optimizer.apply_gradients(zip(grads_C2, self.__hyper_parameters))
-  
+        
+        # # Weight update for temperature prediction.
+        # S_loss, grads_S = self.__ComputeGradients_S_error(S_batch, rhoe_norm_batch)
+        # self.optimizer.apply_gradients(zip(grads_S, self.__hyper_parameters))
+
         return T_loss, P_loss, C2_loss
     
 
@@ -1204,7 +1245,7 @@ class Train_C2_MLP(MLPTrainer):
         # self.C_ORCHID_ref = np.sqrt(ORCHID_data[:, vars_ORCHID.index("c2")])
         
         # Split train data into batches.
-        train_batches_TPC2 = tf.data.Dataset.from_tensor_slices((self.rhoe_train_norm, self.T_train, self.P_train, self.C2_train)).batch(2**self._batch_expo)
+        train_batches_TPC2 = tf.data.Dataset.from_tensor_slices((self.rhoe_train_norm, self.T_train, self.P_train, self.C2_train, self.S_train)).batch(2**self._batch_expo)
         
         # Prepare validation and test set data.
         rhoe_val = tf.Variable(self.rhoe_val_norm,tf.float32)
@@ -1221,12 +1262,12 @@ class Train_C2_MLP(MLPTrainer):
 
             # Loop over train batches.
             j = 0 
-            for rhoe_norm_batch, T_train_batch, P_train_batch, C2_train_batch in train_batches_TPC2:
+            for rhoe_norm_batch, T_train_batch, P_train_batch, C2_train_batch, S_train_batch in train_batches_TPC2:
                 j += 1
 
                 # Update weights.
                 rhoe_batch_var = tf.Variable(rhoe_norm_batch, tf.float32)
-                T_loss, P_loss, C2_loss = self.__Triple_Variable_Train_Step(T_train_batch, P_train_batch, C2_train_batch, rhoe_batch_var)
+                T_loss, P_loss, C2_loss = self.__Triple_Variable_Train_Step(T_train_batch, P_train_batch, C2_train_batch, S_train_batch, rhoe_batch_var)
 
                 # Display trainign loss information.
                 T_loss = T_loss.numpy()
@@ -1249,11 +1290,11 @@ class Train_C2_MLP(MLPTrainer):
             if i % callback_every == 0:
 
                 self.T_test_loss, self.P_test_loss, self.C2_test_loss,\
-                T_test, P_test, C2_test = self.__TestSetLoss(rhoe_test, self.T_test, self.P_test, self.C2_test, True)
+                T_test, P_test, C2_test, S_test = self.__TestSetLoss(rhoe_test, self.T_test, self.P_test, self.C2_test, True)
                 self.T_test_pred = T_test.numpy()
                 self.P_test_pred = P_test.numpy()
                 self.C2_test_pred = C2_test.numpy()
-
+                self.S_test_pred = S_test.numpy()
                 self.CallbackFunction()
 
             i += 1 
@@ -1285,7 +1326,7 @@ class Train_C2_MLP(MLPTrainer):
         return worst_error 
     
     def __TestSetLoss(self, rhoe:tf.Variable, T_test, P_test, C2_test, return_predictions=False):
-        T_val_pred, P_val_pred, C2_val_pred = self.__TD_Evaluation(rhoe)
+        T_val_pred, P_val_pred, C2_val_pred, S_val_pred = self.__TD_Evaluation(rhoe)
         T_val_loss = self.__mean_squared_error(y_true=(T_test/(self.Temperature_max - self.Temperature_min)), \
                                                 y_pred=(T_val_pred/(self.Temperature_max - self.Temperature_min)))
         P_val_loss = self.__mean_squared_error(y_true=(P_test/(self.Pressure_max - self.Pressure_min)), \
@@ -1293,7 +1334,7 @@ class Train_C2_MLP(MLPTrainer):
         C2_val_loss = self.__mean_squared_error(y_true=(C2_test/(self.C2_max - self.C2_min)), \
                                                 y_pred=(C2_val_pred/(self.C2_max - self.C2_min)))
         if return_predictions:
-            return T_val_loss, P_val_loss, C2_val_loss, T_val_pred, P_val_pred, C2_val_pred 
+            return T_val_loss, P_val_loss, C2_val_loss, T_val_pred, P_val_pred, C2_val_pred, S_val_pred
         else:
             return T_val_loss, P_val_loss, C2_val_loss
     
@@ -1464,41 +1505,55 @@ class Train_C2_MLP(MLPTrainer):
 
         fig = plt.figure(figsize=[10,10])
         ax = plt.axes(projection='3d') 
-        ax.plot3D(self.X_test[:, self.idx_rho], self.X_test[:, self.idx_e], self.T_test,'ko')
-        ax.plot3D(self.X_test[:, self.idx_rho], self.X_test[:, self.idx_e], self.T_test_pred,'ro')
+        ax.plot3D(self.X_test[:, self.idx_rho], self.X_test[:, self.idx_e], self.T_test,'ko',label='Reference')
+        ax.plot3D(self.X_test[:, self.idx_rho], self.X_test[:, self.idx_e], self.T_test_pred,'ro',label='Predicted')
         
         ax.set_xlabel("Density",fontsize=plot_fontsize)
         ax.set_ylabel("Energy",fontsize=plot_fontsize)
         ax.set_zlabel("Temperature",fontsize=plot_fontsize)
         ax.set_title("Temperature prediction error",fontsize=plot_fontsize)
         ax.tick_params(which='both',labelsize=label_fontsize)
+        ax.legend(fontsize=18)
         fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/Temperature_3D_plot."+figformat,format=figformat,bbox_inches='tight')
         plt.close(fig)
 
         fig = plt.figure(figsize=[10,10])
         ax = plt.axes(projection='3d') 
-        ax.plot3D(self.X_test[:, self.idx_rho], self.X_test[:, self.idx_e], self.P_test,'ko')
-        ax.plot3D(self.X_test[:, self.idx_rho], self.X_test[:, self.idx_e], self.P_test_pred,'ro')
+        ax.plot3D(self.X_test[:, self.idx_rho], self.X_test[:, self.idx_e], self.P_test,'ko',label='Reference')
+        ax.plot3D(self.X_test[:, self.idx_rho], self.X_test[:, self.idx_e], self.P_test_pred,'ro',label='Predicted')
         ax.set_xlabel("Density",fontsize=plot_fontsize)
         ax.set_ylabel("Energy",fontsize=plot_fontsize)
         ax.set_zlabel("Pressure",fontsize=plot_fontsize)
-        ax.set_title("Pressure prediction error",fontsize=plot_fontsize)
+        ax.set_title("Pressure prediction",fontsize=plot_fontsize)
         ax.tick_params(which='both',labelsize=label_fontsize)
+        ax.legend(fontsize=18)
         fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/Pressure_3D_plot."+figformat,format=figformat,bbox_inches='tight')
         plt.close(fig)
 
         fig = plt.figure(figsize=[10,10])
         ax = plt.axes(projection='3d') 
-        ax.plot3D(self.X_test[:, self.idx_rho], self.X_test[:, self.idx_e], np.sqrt(self.C2_test),'ko')
-        ax.plot3D(self.X_test[:, self.idx_rho], self.X_test[:, self.idx_e], np.sqrt(self.C2_test_pred),'ro')
+        ax.plot3D(self.X_test[:, self.idx_rho], self.X_test[:, self.idx_e], np.sqrt(self.C2_test),'ko',label='Reference')
+        ax.plot3D(self.X_test[:, self.idx_rho], self.X_test[:, self.idx_e], np.sqrt(self.C2_test_pred),'ro',label='Predicted')
         ax.set_xlabel("Density",fontsize=plot_fontsize)
         ax.set_ylabel("Energy",fontsize=plot_fontsize)
         ax.set_zlabel("Speed of sound",fontsize=plot_fontsize)
-        ax.set_title("SoS prediction error",fontsize=plot_fontsize)
+        ax.set_title("SoS prediction",fontsize=plot_fontsize)
         ax.tick_params(which='both',labelsize=label_fontsize)
+        ax.legend(fontsize=18)
         fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/SoS_3D_plot."+figformat,format=figformat,bbox_inches='tight')
         plt.close(fig)
 
+        fig = plt.figure(figsize=[10,10])
+        ax = plt.axes(projection='3d') 
+        ax.plot3D(self.X_test[:, self.idx_rho], self.X_test[:, self.idx_e], self.S_test,'ko',label='Reference')
+        ax.plot3D(self.X_test[:, self.idx_rho], self.X_test[:, self.idx_e], self.S_test_pred[:,0],'ro',label='Predicted')
+        ax.set_xlabel("Density",fontsize=plot_fontsize)
+        ax.set_ylabel("Energy",fontsize=plot_fontsize)
+        ax.set_zlabel("Fluid entropy",fontsize=plot_fontsize)
+        ax.tick_params(which='both',labelsize=label_fontsize)
+        ax.legend(fontsize=18)
+        fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/Entropy_3D_plot."+figformat,format=figformat,bbox_inches='tight')
+        plt.close(fig)
         return
     
     def write_SU2_MLP(self, file_out:str):
