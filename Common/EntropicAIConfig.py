@@ -12,7 +12,7 @@ class EntropicAIConfig:
     :param load_file: path to file of configuration to be loaded.
     :type load_file: str
     """
-    # EntropicAI configuration class containing all relevant info on flamelet manifold settings.
+    # EntropicAI configuration class containing all relevant info on fluid manifold settings.
 
     __config_name:str = "EntropicAIConfig" # Configuration name.
 
@@ -37,7 +37,7 @@ class EntropicAIConfig:
 
     # MLP Settings
 
-    __train_fraction:float = 0.8    # Fraction of flamelet data used for training.
+    __train_fraction:float = 0.8    # Fraction of fluid data used for training.
     __test_fraction:float = 0.1     # Fraction of flamleet data used for test validation.
 
     # MLP output groups and architecture information.
@@ -68,56 +68,6 @@ class EntropicAIConfig:
 
         return 
     
-    # def PrintBanner(self):
-    #     """Print banner visualizing EntropicAI configuration settings."""
-
-    #     print("EntropicAIConfiguration: " + self.__config_name)
-    #     print("")
-    #     print("Flamelet generation settings:")
-    #     print("Flamelet data output directory: " + self.__flamelet_output_dir)
-    #     print("Reaction mechanism: " + self.__reaction_mechanism)
-    #     print("Fuel definition: " + ",".join("%s: %.2e" % (self.__fuel_species[i], self.__fuel_weights[i]) for i in range(len(self.__fuel_species))))
-    #     print("Oxidizer definition: " + ",".join("%s: %.2e" % (self.__oxidizer_species[i], self.__oxidizer_weights[i]) for i in range(len(self.__oxidizer_species))))
-    #     print("")
-    #     print("Reactant temperature range: %.2f K -> %.2f K (%i steps)" % (self.__T_unb_lower, self.__T_unb_upper, self.__Np_T_unb))
-        
-    #     if self.__run_mixture_fraction:
-    #         print("Mixture status defined as mixture fraction")
-    #     else: 
-    #         print("Mixture status defined as equivalence ratio")
-    #     print("Reactant mixture status range: %.2e -> %.2e  (%i steps)" % (self.__mix_status_lower, self.__mix_status_upper, self.__Np_mix_unb))
-    #     print("")
-    #     print("Flamelet types included in manifold:")
-    #     if self.__generate_freeflames:
-    #         print("-Adiabatic free-flamelet data")
-    #     if self.__generate_burnerflames:
-    #         print("-Burner-stabilized flamelet data")
-    #     if self.__generate_equilibrium:
-    #         print("-Chemical equilibrium data")
-    #     if self.__generate_counterflames:
-    #         print("-Counter-flow diffusion flamelet data")
-    #     print("")
-
-    #     print("Flamelet manifold data characteristics: ")
-    #     print("Progress variable definition: " + ", ".join("%+.2e %s" % (self.__pv_weights[i], self.__pv_definition[i]) for i in range(len(self.__pv_weights))))
-    #     if len(self.__passive_species) > 0:
-    #         print("Passive species in manifold: " + ", ".join(s for s in self.__passive_species))
-    #     print("")
-
-    #     if self.__Table_level_count is not None:
-    #         print("Table generation settings:")
-    #         print("Table mixture fraction range: %.2e -> %.2e" % (self.__Table_mixfrac_lower, self.__Table_mixfrac_upper))
-    #         print("Number of table levels: %i" % self.__Table_level_count)
-    #         print("Table level base cell size: %.2e" % self.__Table_base_cell_size)
-    #         print("Table level refined cell size: %.2e" % self.__Table_ref_cell_size)
-    #         print("Table level refinement radius: %.2e" % self.__Table_ref_radius)
-    #         print("Table level refinement threshold: %.2e" % self.__Table_curv_threshold)
-    #     print("")
-
-    #     if self.__MLP_output_groups is not None:
-    #         print("MLP Output Groups:")
-    #         self.DisplayOutputGroups()
-    #     print("")
         
     def GetConfigName(self):
         """
@@ -134,11 +84,13 @@ class EntropicAIConfig:
         """
         Define the fluid name used for entropic data generation. By default, \"MM\" is used.
 
-        :param fluid_name: CoolProp fluid name.
-        :type fluid_name: str
-        :raise: Exception: If the reaction mechanism could not be loaded from path.
+        :param fluid_name: CoolProp fluid name or list of names.
+        :type fluid_name: str or list[str]
+        :raise: Exception: If the fluid could not be defined in CoolProp.
 
         """
+
+        # Check if one or multiple fluids are provided.
         if type(fluid_name) == list:
             if len(fluid_name) > 2:
                 raise Exception("Only two fluids can be used for mixtures")
@@ -163,8 +115,18 @@ class EntropicAIConfig:
             raise Exception("Specified fluid name not found.")
 
     def SetFluidMoleFractions(self, mole_fraction_1:float=0.5, mole_fraction_2:float=0.5):
+        """Set fluid mole fractions for mixture.
+
+        :param mole_fraction_1: _description_, defaults to 0.5
+        :type mole_fraction_1: float, optional
+        :param mole_fraction_2: _description_, defaults to 0.5
+        :type mole_fraction_2: float, optional
+        :raises Exception: if either mole fraction value is negative.
+        """
         if (mole_fraction_1 < 0) or (mole_fraction_2 < 0):
             raise Exception("Mole fractions should be positive")
+        
+        # Normalize molar fractions
         self.__fluid_mole_fractions = []
         mole_fraction_1_norm = mole_fraction_1 / (mole_fraction_1 + mole_fraction_2)
         mole_fraction_2_norm = mole_fraction_2 / (mole_fraction_1 + mole_fraction_2)
@@ -189,17 +151,32 @@ class EntropicAIConfig:
         return self.__fluid_mole_fractions
     
     def UsePTGrid(self, PT_grid:bool=True):
-        self.__use_PT = PT_grid 
+        """Define fluid data grid in the pressure-temperature space. If not, the fluid data grid is defined in the density-energy space.
 
+        :param PT_grid: use pressure-temperature based grid, defaults to True
+        :type PT_grid: bool, optional
+        """
+        self.__use_PT = PT_grid 
+        return 
+    
     def GetPTGrid(self):
         return self.__use_PT 
     
     def SetTemperatureBounds(self, T_lower:float, T_upper:float):
+        """Set the upper and lower temperature limits for the fluid data grid.
+
+        :param T_lower: lower temperature limit in Kelvin.
+        :type T_lower: float
+        :param T_upper: upper temperature limit in Kelvin.
+        :type T_upper: float
+        :raises Exception: if lower temperature limit exceeds upper temperature limit.
+        """
         if (T_lower >= T_upper):
             raise Exception("Lower temperature should be lower than upper temperature.")
         else:
             self.__T_lower = T_lower
             self.__T_upper = T_upper
+        return
     
     def GetTemperatureBounds(self):
         return [self.__T_lower, self.__T_upper]
@@ -207,9 +184,9 @@ class EntropicAIConfig:
     
     def SetNpTemp(self, Np_Temp:int):
         """
-        Set number of divisions for the reactant temperature at each mixture fraction/equivalence ratio.
+        Set number of divisions for the temperature grid.
 
-        :param Np_Temp: Number of divisions for the reactant temperature range.
+        :param Np_Temp: Number of divisions for the temperature range.
         :type Np_Temp: int
         :rase: Exception: If the number of divisions is lower than one.
 
@@ -218,12 +195,13 @@ class EntropicAIConfig:
             raise Exception("Number of unburnt temperature samples should be higher than one.")
         else:
             self.__Np_T = Np_Temp
+        return 
     
     def GetNpTemp(self):
         """
-        Get the number of divisions for the reactant temperature range.
+        Get the number of divisions for the fluid temperature range.
 
-        :return: Number of divisions for the reactant temperature range.
+        :return: Number of divisions for the fluid temperature range.
         :rtype: int
 
         """
@@ -231,11 +209,20 @@ class EntropicAIConfig:
     
 
     def SetPressureBounds(self, P_lower:float, P_upper:float):
+        """Set the upper and lower limits for the fluid pressure.
+
+        :param P_lower: lower pressure limit in Pa.
+        :type P_lower: float
+        :param P_upper: upper pressure limit in Pa.
+        :type P_upper: float
+        :raises Exception: if lower pressure limit exceeds upper pressure limit.
+        """
         if (P_lower >= P_upper):
             raise Exception("Lower temperature should be lower than upper temperature.")
         else:
             self.__P_lower = P_lower
             self.__P_upper = P_upper
+        return 
     
     def GetPressureBounds(self):
         return [self.__P_lower, self.__P_upper]
@@ -243,9 +230,9 @@ class EntropicAIConfig:
     
     def SetNpPressure(self, Np_P:int):
         """
-        Set number of divisions for the reactant temperature at each mixture fraction/equivalence ratio.
+        Set number of divisions for the fluid pressure grid.
 
-        :param Np_Temp: Number of divisions for the reactant temperature range.
+        :param Np_Temp: Number of divisions for the fluid pressure.
         :type Np_Temp: int
         :rase: Exception: If the number of divisions is lower than one.
 
@@ -254,20 +241,14 @@ class EntropicAIConfig:
             raise Exception("Number of unburnt temperature samples should be higher than one.")
         else:
             self.__Np_P = Np_P 
+        return 
     
     def GetNpPressure(self):
-        """
-        Get the number of divisions for the reactant temperature range.
-
-        :return: Number of divisions for the reactant temperature range.
-        :rtype: int
-
-        """
         return self.__Np_P
     
     def SetOutputDir(self, output_dir:str):
         """
-        Define the flamelet data output directory. This directory is set as the default storage directory for all storage processes in the EntropicAI workflow.
+        Define the fluid data output directory. This directory is set as the default storage directory for all storage processes in the EntropicAI workflow.
 
         :param output_dir: storage directory.
         :raise: Exception: If the specified directory does not exist.
@@ -280,9 +261,9 @@ class EntropicAIConfig:
     
     def GetOutputDir(self):
         """
-        Get the current EntropicAI configuration flamelet storage directory.
+        Get the current EntropicAI configuration fluid storage directory.
 
-        :raises: Exception: if the storage directory in the current `FlameeltAIConfig` class is not present on the current hardware.
+        :raises: Exception: if the storage directory in the current `EntropicAIConfig` class is not present on the current hardware.
         :return: Flamelet data storage directory.
         :rtype: str
 
@@ -294,7 +275,7 @@ class EntropicAIConfig:
     
     def SetConcatenationFileHeader(self, header:str):
         """
-        Define the file name header for the collection of flamelet data.
+        Define the file name header for the collection of fluid data.
 
         :param header: file name header.
         :type header: str
@@ -303,18 +284,18 @@ class EntropicAIConfig:
 
     def GetConcatenationFileHeader(self):
         """
-        Get the file name header for the flamelet collection file.
+        Get the file name header for the fluid collection file.
 
-        :return: flamelet collection file header.
+        :return: fluid collection file header.
         :rtype: str
         """
         return self.__concatenated_file_header
     
     def SetTrainFraction(self, input:float):
         """
-        Define the fraction of flamelet data used for training multi-layer perceptrons.
+        Define the fraction of fluid data used for training multi-layer perceptrons.
 
-        :param input: flamelet data train fraction.
+        :param input: fluid data train fraction.
         :type input: float 
         :raise: Exception: if provided fraction is equal or higher than one.
         """
@@ -324,9 +305,9 @@ class EntropicAIConfig:
 
     def SetTestFraction(self, input:float):
         """
-        Define the fraction of flamelet data separate from the training data used for determining accuracy after training.
+        Define the fraction of fluid data separate from the training data used for determining accuracy after training.
 
-        :param input: flamelet data test fraction.
+        :param input: fluid data test fraction.
         :type input: float
         :raise Exception: if provided fraction is equal or higher than one.
         """
@@ -336,18 +317,18 @@ class EntropicAIConfig:
 
     def GetTrainFraction(self):
         """
-        Get flamelet data fraction used for multi-layer perceptron training.
+        Get fluid data fraction used for multi-layer perceptron training.
 
-        :return: flamelet data train fraction.
+        :return: fluid data train fraction.
         :rtype: float 
         """
         return self.__train_fraction
     
     def GetTestFraction(self):
         """
-        Get flamelet data fraction used for determining accuracy after training.
+        Get fluid data fraction used for determining accuracy after training.
 
-        :return: flamelet data test fraction.
+        :return: fluid data test fraction.
         :rtype: float 
         """
         return self.__test_fraction
@@ -487,7 +468,7 @@ class EntropicAIConfig:
         return alpha_expo, lr_decay, batch_expo, activation_index
         
     def AddOutputGroup(self, variable_names_in:list[str]):
-        """Add an MLP output group of flamelet variables.
+        """Add an MLP output group of fluid variables.
 
         :param variable_names_in: list of output variables to include in the outputs of a single MLP.
         :type variable_names_in: list[str]
@@ -563,6 +544,8 @@ class EntropicAIConfig:
         """
 
         self.__config_name = file_name
+        if len(self.__fluid_names) != len(self.__fluid_mole_fractions):
+            raise Exception("Number of fluid components does not correspond to number of molar fractions.")
         file = open(file_name+'.cfg','wb')
         pickle.dump(self, file)
         file.close()
