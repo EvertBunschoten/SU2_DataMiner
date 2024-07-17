@@ -1,7 +1,6 @@
 # Set all seeds to ensure reproducebility for MLP training.
 seed_value = 2
 import os
-from re import L
 os.environ['PYTHONASHSEED'] = str(seed_value)
 seed_value += 1
 import random
