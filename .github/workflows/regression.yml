@@ -21,4 +21,8 @@ jobs:
       - name: Say hi
         run: echo "hi there"
 
-      
+      - name: Pre Cleanup
+          uses: docker://ghcr.io/EvertBunschoten/PINNTraining/build-pinntraining:241806
+          with:
+            entrypoint: /bin/rm
+            args: -rf install install_bin.tgz src ccache ${{ matrix.config_set }}
