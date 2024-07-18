@@ -13,7 +13,12 @@ on:
         type: string
 jobs:
   build:
-      name: Self Docker
-      strategy: 
-        fail-fast: false
-      runs-on: 'ubuntu-latest'
+    name: build package
+    strategy: 
+      fail-fast: false
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    steps:
+      - name: Say hi
+        run: echo "hi there"
+
+      
