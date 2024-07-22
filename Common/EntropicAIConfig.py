@@ -544,8 +544,6 @@ class EntropicAIConfig:
         """
 
         self.__config_name = file_name
-        if len(self.__fluid_names) != len(self.__fluid_mole_fractions):
-            raise Exception("Number of fluid components does not correspond to number of molar fractions.")
         file = open(file_name+'.cfg','wb')
         pickle.dump(self, file)
         file.close()
