@@ -1,37 +1,59 @@
 import pygad
-from Trainers import EvaluateArchitecture
 import os 
 import pickle 
-from joblib import Parallel, delayed
-import sys
 import csv
 import numpy as np
-from scipy.optimize import minimize,Bounds
-    
+from Common.EntropicAIConfig import EntropicAIConfig 
+from Manifold_Generation.MLP.Trainers import EvaluateArchitecture
+
 class MLPOptimizer:
-    group_idx:int = 0
-    batch_size_bounds:list[int] = [3, 6]
-    optimizer:pygad.GA
-    batch_expo:int =6
-    activation_function:str = "exponential"
-    NLayers_max:int = 10
-    NLayers_min:int = 1
-    alpha_expo:float = -2.8
-    alpha_expo_min:float = -3.0
-    lr_decay_min:float = 0.85
-    alpha_expo_max:float = -1.0
-    lr_decay_max:float = 1.0 
+    """Class for hyper-parameter optimization of entropic fluid model multi-layer perceptrons.
+    """
 
-    NN_min:int = 10
-    NN_max:int = 100 
-    n_workers:int = 1 
+    _Config:EntropicAIConfig = None     # EntropicAI configuration.
+    __optimizer:pygad.GA = None         # PyGaD optimization instance.
+    __n_workers:int = 1                 # Number of CPU cores used for distributing the work per generation.
 
-    NN_current:int = 36
+    # Hyper-parameter default settings and bounds.
+
+    # Mini-batch exponent (base 2) for training.
+    __optimize_batch:bool = True 
+    __batch_expo:int =6
+    __batch_expo_min:int=3
+    __batch_expo_max:int=7
+    
+    # Optimize learning rate decay parameters.
+    __optimize_LR:bool = True 
+
+    # Initial learning rate exponent (base 10).
+    __alpha_expo:float = -2.8
+    __alpha_expo_min:float = -3.0
+    __alpha_expo_max:float = -1.0
+
+    # Learning rate decay parameter for exponential learning rate decay schedule.
+    __lr_decay:float=0.996
+    __lr_decay_min:float = 0.85
+    __lr_decay_max:float = 1.0 
+
+    # Optimize hidden layer architecture.
+    __optimize_NN:bool = True
+
+    # Number of perceptrons applied to the hidden layer of the network.
+    __NN_min:int = 10
+    __NN_max:int = 100 
+    __architecture:list[int]=[40]
+
+    # Optimization history.
     __population_history:list = []
     __fitness_history:list = []
-    def __init__(self, load_file:str=None):
+
+    def __init__(self, Config_in:EntropicAIConfig=None, load_file:str=None):
         """Class constructor
         """
+
+        # Store configuration
+        self._Config = Config_in 
+    
         if load_file:
             print("Loading optimizer configuration")
             with open(load_file, "rb") as fid:
@@ -39,311 +61,350 @@ class MLPOptimizer:
             print(loaded_config.__dict__)
             self.__dict__ = loaded_config.__dict__.copy()
             print("Loaded optimizer file")
+        return 
 
+    def SetNWorkers(self, n_workers:int=1):
+        """Set the number of workers used for work distribution of training each generation.
 
-    def SetNWorkers(self, n_workers:int):
-        self.n_workers = n_workers
-    def optimizeBatch_and_Activation_Function(self):
-        self.optimizer = pygad.GA(num_generations=20,\
-                     fitness_func=self.fitness,\
-                     gene_type=[int, int],\
-                     num_genes=2,\
-                     gene_space=[range(7),range(self.batch_size_bounds[0],self.batch_size_bounds[1]+1)],\
-                     sol_per_pop=20,\
-                     num_parents_mating=6,\
-                     parallel_processing=["process",self.n_workers],\
-                     random_seed=1,\
-                     on_generation=self.saveGenerationInfo)
-        self.optimizer.run()
-        solution, solution_fitness, solution_idx = self.optimizer.best_solution()
-        self.batch_expo = solution[0]
-        self.activation_function_index = solution[1]
-        print("Best activation function index: %i" % solution[0])
-        print("Best batch size exponenet: %i" % solution[1])
-        self.optimizer.plot_fitness()
+        :param n_workers: number of processors used, defaults to 1
+        :type n_workers: int, optional
+        :raises Exception: if number of workers is lower than one.
+        """
+        if n_workers < 1:
+            raise Exception("Number of workers should be at least one.")
+        self.__n_workers = n_workers
+        return 
+    
+    def Optimize_LearningRate_HP(self, optimize_LR:bool=True):
+        """Consider learning-rate hyper-parameters in optimization.
 
-    def optimizeLearningRate_simplex(self):
-        x0 = np.array([-1.8654e+00, +9.8629e-01])
-        bounds = Bounds(lb=np.array([self.alpha_expo_min, self.lr_decay_min]), ub=np.array([self.alpha_expo_max,self.lr_decay_max]))
+        :param optimize_LR: consider learning rate parameters(True, default), or not (False)
+        :type optimize_LR: bool, optional
+        """
+        self.__optimize_LR = optimize_LR
+        return 
+    
+    def SetAlpha_Expo(self, val_alpha_expo:float=-2.8):
+        """Set initial learning rate exponent (base 10).
 
-        result = minimize(self.fitness_thingy, x0=x0, bounds=bounds, method="Nelder-Mead")
-        print(result.x)
+        :param val_alpha_expo: _description_, defaults to -2.8
+        :type val_alpha_expo: float, optional
+        :raises Exception: if initial learning rate exponent value is positive.
+        """
 
-    def optimizeArchitectures_and_LearningRate(self):
-        gene_architecture = [int]# + 2*(self.NLayers_max - self.NLayers_min)*[int]
-        gene_trainparams = 2*[float]
+        if val_alpha_expo >= 0:
+            raise Exception("Initial learing rate exponent should be negative.")
+        self.__alpha_expo = val_alpha_expo
 
-        gene_types = gene_trainparams + gene_architecture
-        lowerbound = [self.alpha_expo_min, self.lr_decay_min] + [self.NN_min]# * self.NLayers_min + [0, self.NN_min]*(self.NLayers_max - self.NLayers_min)
-        upperbound = [self.alpha_expo_max, self.lr_decay_max] + [self.NN_max]# * self.NLayers_min + [2, self.NN_max]*(self.NLayers_max - self.NLayers_min)
+        return 
+    
+    def SetLR_Decay(self, val_lr_decay:float=0.996):
+        """Set the learning rate decay parameter value.
+
+        :param val_lr_decay: learning rate decay parameter, defaults to 0.996
+        :type val_lr_decay: float, optional
+        :raises Exception: if learning rate decay parameter is not between 0 and 1.
+        """
+        if val_lr_decay > 1.0 or val_lr_decay < 0.0:
+            raise Exception("Learning rate decay parameter should be between 0 and 1")
+        self.__lr_decay = val_lr_decay 
+
+        return 
+    
+    def SetBounds_Alpha_Expo(self, alpha_expo_min:float=-3.0, alpha_expo_max:float=-1.0):
+        """Set minimum and maximum values for the initial learning rate exponent (base 10) during optimization.
+
+        :param alpha_expo_min: minimum initial learning rate exponent, defaults to -3.0
+        :type alpha_expo_min: float, optional
+        :param alpha_expo_max: maximum initial learning rate exponent, defaults to -1.0
+        :type alpha_expo_max: float, optional
+        :raises Exception: if lower bound exceeds upper bound.
+        :raises Exception: if positive values are provided.
+        """
+        if alpha_expo_max <= alpha_expo_min:
+            raise Exception("Upper bound value should exceed lower bound value.")
+        if alpha_expo_min > 0 or alpha_expo_max > 0:
+            raise Exception("Initial learning rate exponent value should be negative.")
+        self.__alpha_expo_min = alpha_expo_min
+        self.__alpha_expo_max = alpha_expo_max
+        return 
+    
+    def Optimize_Batch_HP(self, optimize_batch:bool=True):
+        """Consider the mini-batch size exponent as a hyper-parameter during optimization.
+
+        :param optimize_batch: consider mini-batch size exponent (True, default), or not (False)
+        :type optimize_batch: bool, optional
+        """
+        self.__optimize_batch = optimize_batch 
+        return 
+    
+    def SetBatch_Expo(self, batch_expo:int=6):
+        """Set training batch exponent value (base 2).
+
+        :param batch_expo: training batch exponent value, defaults to 6
+        :type batch_expo: int, optional
+        :raises Exception: if training batch exponent value is lower than 1.
+        """
+
+        if batch_expo < 1:
+            raise Exception("Batch size exponent should be at least 1.")
+        self.__batch_expo = batch_expo 
         
-        self.opt_history_filepath = "/home/ecbunschoten/NICFD/NICFD_MLP_Optimization/Architecture_Optimization/history_entropy.csv"
-        with open(self.opt_history_filepath, "w+") as fid:
-            fid.write("Generation nr,solution,fitness\n")
+        return 
+    
+    def SetBounds_Batch_Expo(self, batch_expo_min:int=3, batch_expo_max:int=7):
+        """Set minimum and maximum values for the training batch exponent (base 2) during optimization.
 
-        self.optimizer = pygad.GA(num_generations=10*len(gene_types),\
-                     fitness_func=self.fitness_ScoreOnly,\
-                     gene_type=gene_types,\
-                     num_genes=len(gene_types),\
+        :param batch_expo_min: minimum batch exponent, defaults to 3
+        :type batch_expo_min: int, optional
+        :param batch_expo_max: maximum batch exponent, defaults to 7
+        :type batch_expo_max: int, optional
+        :raises Exception: if lower bound exceeds upper bound.
+        :raises Exception: if batch exponent is lower than one.
+        """
+
+        if batch_expo_max <= batch_expo_min:
+            raise Exception("Upper bound value should exceed lower bound value.")
+        if batch_expo_min < 1 or batch_expo_max < 1:
+            raise Exception("Training batch exponent value should exceed 1")
+        self.__batch_expo_min = batch_expo_min
+        self.__batch_expo_max = batch_expo_max
+
+        return
+    
+    def Optimize_Architecture_HP(self, optimize_architecture:bool=True):
+        """Consider the hidden layer perceptron count as a hyper-parameter during optimization.
+
+        :param optimize_architecture: consider hidden layer perceptron count (True, default) or not (False)
+        :type optimize_architecture: bool, optional
+        """
+        self.__optimize_NN = optimize_architecture 
+        return 
+    
+    def SetArchitecture(self, architecture:list[int]=[40]):
+        """Set MLP hidden layer architecture.
+
+        :param architecture: list with perceptron count per hidden layer, defaults to [40]
+        :type architecture: list[int], optional
+        :raises Exception: if any of the layers has fewer than one perceptron.
+        """
+
+        if any(tuple(NN<1 for NN in architecture)):
+            raise Exception("At least one perceptron should be applied per hidden layer.")
+        self.__architecture = []
+        for NN in architecture:
+            self.__architecture.append(NN)
+
+        return 
+    
+    def SetBounds_Architecture(self, NN_min:int=10, NN_max:int=100):
+        """Set the minimum and maximum values for the perceptron count in the hidden layer.
+
+        :param NN_min: minimum number of perceptrons, defaults to 10
+        :type NN_min: int, optional
+        :param NN_max: maximum number of perceptrons, defaults to 100
+        :type NN_max: int, optional
+        :raises Exception: if lower value exceeds upper value.
+        :raises Exception: if perceptron count is lower than one.
+        """
+
+        if NN_min >= NN_max:
+            raise Exception("Upper bound value should exceed lower bound value.")
+        if NN_min <= 1 or NN_max <= 1:
+            raise Exception("At least one hidden layer perceptron should be used.")
+        self.__NN_min = NN_min 
+        self.__NN_max = NN_max 
+
+        return 
+    
+    def __prepareBounds(self):
+        """Prepare hyper-parameter bounds prior to optimization
+        """
+
+        # Store hyper-parameter data type, lower, and upper bound.
+        gene_trainparams = []
+        lowerbound = []
+        upperbound = []
+        if self.__optimize_batch:
+            gene_trainparams += [int]
+            lowerbound.append(self.__batch_expo_min)
+            upperbound.append(self.__batch_expo_max)
+        if self.__optimize_LR:
+            gene_trainparams += [float, float]
+            lowerbound.append(self.__alpha_expo_min)
+            lowerbound.append(self.__lr_decay_min)
+            upperbound.append(self.__alpha_expo_max)
+            upperbound.append(self.__lr_decay_max)
+        if self.__optimize_NN:
+            gene_trainparams += [int]
+            lowerbound.append(self.__NN_min)
+            upperbound.append(self.__NN_max)
+
+        return gene_trainparams, lowerbound, upperbound 
+    
+    def __setOptimizer(self):
+        """Prepare PyGaD optimization routine.
+        """
+
+        # Set gene types and bounds
+        gene_trainparams, lowerbound, upperbound = self.__prepareBounds()
+        N_genes = len(gene_trainparams)
+        gene_space = []
+        for lb, ub in zip(lowerbound, upperbound):
+            gene_space.append({'low':lb,'high':ub})
+
+        # Initiate PyGaD instance with 
+        self.__optimizer = pygad.GA(num_generations=10*N_genes,\
+                     fitness_func=self.__fitnessFunction,\
+                     gene_type=gene_trainparams,\
+                     num_genes=N_genes,\
                      init_range_low=lowerbound,\
                      init_range_high=upperbound,\
-                     gene_space=[{'low':self.alpha_expo_min, 'high':self.alpha_expo_max},\
-                                 {'low':self.lr_decay_min, 'high':self.lr_decay_max},\
-                                 {'low':self.NN_min, 'high':self.NN_max}],\
-                     sol_per_pop=10*len(gene_types),\
+                     gene_space=gene_space,\
+                     sol_per_pop=10*N_genes,\
                      num_parents_mating=6,\
-                     parallel_processing=["process",self.n_workers],\
+                     parallel_processing=["process",self.__n_workers],\
                      random_seed=1,\
-                     on_generation=self.saveGenerationInfo)
-        self.optimizer.run()
-
-    def optimizeLearningRate(self):
-        gene_trainparams = 2*[float]
-
-        gene_types = gene_trainparams 
-        lowerbound = [self.alpha_expo_min, self.lr_decay_min] 
-        upperbound = [self.alpha_expo_max, self.lr_decay_max] 
+                     on_generation=self.__saveGenerationInfo)
         
-        self.opt_history_filepath = "/home/ecbunschoten/NICFD/NICFD_MLP_Optimization/Architecture_Optimization/history_entropy_LR.csv"
+        return 
+
+    def optimizeHP(self):
+        """Initate hyper-parameter optimization routine.
+
+        :raises Exception: if neither of the available sets of hyper-parameters are considered for optimization.
+        """
+        if not any((self.__optimize_batch, self.__optimize_LR, self.__optimize_NN)):
+            raise Exception("At least one of the hyper-parameter options should be considered for optimization.")
+        
+        # Prepare optimization history output file.
+        history_extension = ""
+        if self.__optimize_batch:
+            history_extension += "B"
+        if self.__optimize_LR:
+            history_extension += "LR"
+        if self.__optimize_NN:
+            history_extension += "A"
+        self.opt_history_filepath = self._Config.GetOutputDir() + "/history_entropy_"+history_extension+".csv"
         with open(self.opt_history_filepath, "w+") as fid:
-            fid.write("Generation nr,solution,fitness\n")
+            if self.__optimize_NN:
+                fid.write("Generation nr,solution,fitness,cost\n")
+            else:
+                fid.write("Generation nr,solution,fitness\n")
+        
+        # Prepare optimization output directory.
+        self.save_dir = self._Config.GetOutputDir()+"/Architectures_Optim"+history_extension+"/"
+        if not os.path.isdir(self.save_dir):
+            os.mkdir(self.save_dir)
+        
+        # Prepare bounds and set optimizer.
+        self.__setOptimizer()
+        
+        # Initiate HP optimization.
+        self.__optimizer.run()
 
-        self.optimizer = pygad.GA(num_generations=10*len(gene_types),\
-                     fitness_func=self.fitness_ScoreOnly,\
-                     gene_type=gene_types,\
-                     num_genes=len(gene_types),\
-                     init_range_low=lowerbound,\
-                     init_range_high=upperbound,\
-                     gene_space=[{'low':self.alpha_expo_min, 'high':self.alpha_expo_max},\
-                                 {'low':self.lr_decay_min, 'high':self.lr_decay_max}],\
-                     sol_per_pop=10*len(gene_types),\
-                     num_parents_mating=6,\
-                     parallel_processing=["process",self.n_workers],\
-                     random_seed=1,\
-                     on_generation=self.saveGenerationInfo)
-        self.optimizer.run()
+        return 
+    
+    def __saveGenerationInfo(self, ga_instance:pygad.GA):
+        """Save population information per completed generation.
+        """
 
-    def saveGenerationInfo(self, ga_instance:pygad.GA):
+        # Collect population parameters and fitness
         population = ga_instance.population
         pop_fitness = ga_instance.last_generation_fitness
 
-        # test_score = np.power(10, -pop_fitness[:, -2])
-        # cost_parameter = pop_fitness[:, -1]/1000
-
+        # Scale fitness to test set evaluation score.
         test_score = np.power(10, -pop_fitness)
+
+        # Update history.
         self.__population_history.append(population)
         self.__fitness_history.append(pop_fitness)
         generation = ga_instance.generations_completed
-        #pop_and_fitness = np.hstack((generation*np.ones([len(population),1]), population, test_score[:, np.newaxis], cost_parameter[:, np.newaxis]))
+
+        # Write population data to history file.
         pop_and_fitness = np.hstack((generation*np.ones([len(population),1]), population, test_score[:, np.newaxis]))
-        
         with open(self.opt_history_filepath, "a+") as fid:
             csvWriter =csv.writer(fid, delimiter=',')
             csvWriter.writerows(pop_and_fitness)
 
-    def translateGene(self, x, Evaluator:EvaluateArchitecture):
-        alpha_expo = None 
-        lr_decay = None 
-        batch_expo = None 
-        activation_idx = None 
-        architecture = None 
-        # if self.optimize_batchphi:
-        #     activation_idx = x[0]
-        #     batch_expo = x[1]
-        #     Evaluator.SetActivationFunctionIndex(activation_idx)
-        #     Evaluator.SetBatchExpo(batch_expo)
-        # elif self.optimize_learningrate and self.optimize_architectures:
-        alpha_expo = x[0]
-        lr_decay = x[1]
-        architecture = [self.NN_current]
-        if len(x) > 2:
-            architecture = [x[2]]
-        # for i in range(2, 2+self.NLayers_min):
-        #     architecture.append(x[i])
-        # for i in range(2+self.NLayers_min,len(x)-1,2):
-        #     if x[i] > 0:
-        #         architecture.append(x[i+1])
-
-        Evaluator.SetBatchExpo(self.batch_expo)
-        Evaluator.SetActivationFunction(self.activation_function)
-        Evaluator.SetAlphaExpo(alpha_expo)
-        Evaluator.SetLRDecay(lr_decay)
-        Evaluator.SetArchitecture(architecture)
-        # elif self.optimize_architectures:
-        #     architecture = []
-        #     for i in range(self.NLayers_min):
-        #         architecture.append(x[i])
-        #     for i in range(2+self.NLayers_min,len(x)-1,2):
-        #         if x[i] > 0:
-        #             architecture.append(x[i+1])
-
-        #     Evaluator.SetBatchExpo(self.batch_expo)
-        #     Evaluator.SetActivationFunction(self.activation_function)
-        #     Evaluator.SetArchitecture(architecture)
-        return
-    def SetArchitecture(self, NN:int):
-        self.NN_current = NN 
-
-    # def fitness_trainparams_only(self, ga_instance:pygad.GA, x, x_idx):
-        
-    #     Evaluator = EvaluateArchitecture(Config=self.Config,group_idx=self.group_idx)
-    #     Evaluator.SetTrainHardware("CPU", os.getpid() % self.n_workers)
-        
-    #     self.translateGene(x, Evaluator=Evaluator)
-
-    #     Evaluator.CommenceTraining()
-    #     Evaluator.TrainPostprocessing()
-    #     return -np.log10(Evaluator.GetTestScore())
-
-    def fitness(self, ga_instance:pygad.GA, x, x_idx):
-
-        Evaluator:EvaluateArchitecture = EvaluateArchitecture()
-        Evaluator.SetTrainHardware("CPU", x_idx)
-        self.translateGene(x, Evaluator=Evaluator)
-        Evaluator.SetSaveDir("/home/ecbunschoten/NICFD/NICFD_MLP_Optimization/Architecture_Optimization/Architectures_TPC2/")
-        Evaluator.SetTrainFileHeader("/home/ecbunschoten/NICFD/NICFD_MLP_Optimization/single_dataset")
-        Evaluator.SetNEpochs(1000)
-        Evaluator.CommenceTraining()
-        Evaluator.TrainPostprocessing()
-        test_score = Evaluator.GetTestScore() 
-        cost_parameter = Evaluator.GetCostParameter()
-        fitness_test_score = -np.log10(test_score)
-        fitness_cost = 1000 / cost_parameter
-        del Evaluator 
-        return [fitness_test_score, fitness_cost]
-
-    def fitness_ScoreOnly(self, ga_instance:pygad.GA, x, x_idx):
-        Evaluator:EvaluateArchitecture = EvaluateArchitecture()
-        Evaluator.SetTrainHardware("CPU", x_idx)
-        self.translateGene(x, Evaluator=Evaluator)
-        Evaluator.SetSaveDir("/home/ecbunschoten/NICFD/NICFD_MLP_Optimization/Architecture_Optimization/Architectures_LR/")
-        Evaluator.SetTrainFileHeader("/home/ecbunschoten/NICFD/NICFD_MLP_Optimization/single_dataset")
-        Evaluator.SetNEpochs(1000)
-        Evaluator.CommenceTraining()
-        Evaluator.TrainPostprocessing()
-        test_score = Evaluator.GetTestScore() 
-        fitness_test_score = -np.log10(test_score)
-        del Evaluator 
-        return fitness_test_score
+        return 
     
-    def fitness_thingy(self, x):
-        alpha_expo = x[0]
-        lr_decay = x[1]
-        Evaluator:EvaluateArchitecture = EvaluateArchitecture()
-        Evaluator.SetTrainHardware("CPU", 0)
-        Evaluator.SetAlphaExpo(alpha_expo)
-        Evaluator.SetLRDecay(lr_decay)
-        Evaluator.SetArchitecture([self.NN_current])
-        Evaluator.SetBatchExpo(6)
-        Evaluator.SetSaveDir("/home/ecbunschoten/NICFD/NICFD_MLP_Optimization/Architecture_Optimization/Architectures_LR/")
-        Evaluator.SetTrainFileHeader("/home/ecbunschoten/NICFD/NICFD_MLP_Optimization/single_dataset")
+    def __translateGene(self, x:np.ndarray[float], Evaluator:EvaluateArchitecture):
+        """Translate gene to hyper-parameters
+
+        :param x: gene as passed from genetic algorithm.
+        :type x: np.ndarray[float]
+        :param Evaluator: MLP evaluation class instance.
+        :type Evaluator: EvaluateArchitecture
+        """
+
+        # Set default hyper-parameters.
+        Evaluator.SetBatchExpo(self.__batch_expo)
+        Evaluator.SetAlphaExpo(self.__alpha_expo)
+        Evaluator.SetLRDecay(self.__lr_decay)
+        Evaluator.SetArchitecture(self.__architecture)
+
+        # Set hyper-parameter according to gene.
+        idx_x = 0
+        if self.__optimize_batch:
+            batch_expo = x[idx_x]
+            Evaluator.SetBatchExpo(batch_expo)
+            idx_x += 1 
+        if self.__optimize_LR:
+            alpha_expo = x[idx_x]
+            Evaluator.SetAlphaExpo(alpha_expo)
+            idx_x += 1 
+            lr_decay = x[idx_x]
+            Evaluator.SetLRDecay(lr_decay)
+            idx_x += 1 
+        if self.__optimize_NN:
+            architecture = [x[idx_x]]
+            Evaluator.SetArchitecture(architecture)
+            idx_x += 1 
+
+        return
+
+    def __fitnessFunction(self, ga_instance:pygad.GA, x:np.ndarray, x_idx:int):
+        """ Fitness function evaluated during GA routine.
+        """
+
+        # Initate MLP evaluation class.
+        Evaluator:EvaluateArchitecture = EvaluateArchitecture(self._Config)
+
+        # Set CPU index.
+        Evaluator.SetTrainHardware("CPU", x_idx)
+
+        # Translate gene and update hyper-parameters.
+        self.__translateGene(x, Evaluator=Evaluator)
+
+        # Set output directory for MLP training callbacks.
+        Evaluator.SetSaveDir(self.save_dir)
+
+        # Train for 1000 epochs direct and physics-informed.
         Evaluator.SetNEpochs(1000)
         Evaluator.CommenceTraining()
+
+        # Extract test set evaluation score.
         Evaluator.TrainPostprocessing()
         test_score = Evaluator.GetTestScore() 
-        fitness_test_score = np.log10(test_score)
+
+        # Scale test set loss to fitness.
+        fitness_test_score = -np.log10(test_score)
+
+        # Free up memory
         del Evaluator 
+
         return fitness_test_score
     
     def SaveOptimizer(self, file_name:str):
-        file = open(file_name+'.cfg','wb')
+        """Save optimizer instance.
+
+        :param file_name: file name under which to save the optimizer instance.
+        :type file_name: str
+        """
+
+        file = open(self._Config.GetOutputDir()+"/"+file_name+'.hpo','wb')
         pickle.dump(self, file)
         file.close()
-
-thingy = MLPOptimizer()
-nWorkers = int(sys.argv[-1])
-thingy.SetNWorkers(nWorkers)
-thingy.SetArchitecture(40)
-thingy.optimizeLearningRate_simplex()
-
-
-# batch_range = [7,6,5,4,3]
-# phi_range = ["linear","elu","relu","gelu","sigmoid","tanh","swish"]
-# best_batch = batch_range[0]
-# betst_phi = phi_range[0]
-# L_min = 1e5
-
-# n_workers = 10
-# def EvaluateStuff(b, phi, iWorker):
-#     Evaluator = EvaluateArchitecture(Config=C, group_idx=0)
-#     Evaluator.SetTrainHardware("CPU", iWorker)
-#     Evaluator.SetBatchExpo(b)
-#     Evaluator.SetActivationFunction(phi)
-#     Evaluator.CommenceTraining()
-#     Evaluator.TrainPostprocessing()
-#     return Evaluator.GetTestScore()
-
-# iWorker = int(sys.argv[-1])
-# for phi in phi_range:
-#     b = int(sys.argv[-2])
-#     score = EvaluateStuff(b,phi,iWorker)
-#     print(b, score)
-
-# for b in batch_range:
-#     for p in phi_range:
-#         Evaluator = EvaluateArchitecture(Config=C, group_idx=0)
-#         Evaluator.SetSaveDir(C.GetOutputDir() + "/architectures_Group1/")
-#         Evaluator.SetBatchExpo(b)
-#         Evaluator.SetActivationFunction(p)
-#         Evaluator.CommenceTraining()
-#         Evaluator.TrainPostprocessing()
-#         L = Evaluator.GetTestScore()
-#         if L < L_min:
-#             best_batch = b 
-#             betst_phi = p 
-#             L_min = L 
-#         print("Best batch size: %i" % best_batch)
-#         print("Best activation function: "+ betst_phi)
-# ArchitectureOptimizer = MLPOptimizer(Config_in=C)
-# ArchitectureOptimizer.SetNWorkers(1)
-# ArchitectureOptimizer.batch_expo = 6
-# ArchitectureOptimizer.activation_function_index = 5
-# ArchitectureOptimizer.optimizeArchitectures_and_LearningRate()
-
-# batch_expo_min = 3
-# batch_expo_max = 6 
-
-# # optimizer = pygad.GA(num_generations=1,\
-# #                      fitness_func=fitness_trainparams_only,\
-# #                      gene_type=[int, int],\
-# #                      num_genes=2,\
-# #                      gene_space=[range(len(activation_function_options)),range(batch_expo_min,batch_expo_max+1)],\
-# #                      sol_per_pop=20,\
-# #                      num_parents_mating=6,\
-# #                      parallel_processing=["process",n_workers],\
-# #                      random_seed=1)
-# # optimizer.run()
-
-# N_layers_max = 10
-# N_layers_min = 1 
-
-# gene_architecture = N_layers_min * [int] + 2*(N_layers_max - N_layers_min)*[int]
-# gene_trainparams = 2*[float]
-# gene_types = gene_trainparams + gene_architecture 
-
-# alpha_expo_low = -3.0
-# lr_decay_low = 0.85
-# alpha_expo_high = -1.0
-# lr_decay_high = 1.0 
-
-# NN_min = 3 
-# NN_max = 40 
-
-# lowerbound = [alpha_expo_low, lr_decay_low] + [NN_min] * N_layers_min + [0, NN_min]*(N_layers_max - N_layers_min)
-# upperbound = [alpha_expo_high, lr_decay_high] + [NN_max] * N_layers_min + [2, NN_max]*(N_layers_max - N_layers_min)
-
-# optimizer_architectures = pygad.GA(num_generations=1,\
-#                      fitness_func=fitness_trainparams_only,\
-#                      gene_type=gene_types,\
-#                      num_genes=len(gene_types),\
-#                      init_range_low=lowerbound,\
-#                      init_range_high=upperbound,\
-#                      sol_per_pop=10*len(gene_types),\
-#                      num_parents_mating=6,\
-#                      parallel_processing=["process",n_workers],\
-#                      random_seed=1)
-# optimizer_architectures.run()
-# solution, solution_fitness, solution_idx = optimizer.best_solution()
-# print("Parameters of the best solution : {solution}".format(solution=solution))
-# print("Fitness value of the best solution = {solution_fitness}".format(solution_fitness=solution_fitness))
-
+        return 
+    
