@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y \
 
 # Copies your code file from your action repository to the filesystem path `/` of the container
 #COPY compileSU2.sh /compileSU2.sh
+COPY getPinnTraining.sh /getPinnTraining.sh 
 
 # Code file to execute when the docker container starts up (`entrypoint.sh`)
-#ENTRYPOINT ["/compileSU2.sh"]
+ENTRYPOINT ["/getPINNTraining.sh"]

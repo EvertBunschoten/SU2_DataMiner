@@ -13,7 +13,16 @@ on:
         type: string
 jobs:
   build:
-      name: Self Docker
-      strategy: 
-        fail-fast: false
-      runs-on: 'ubuntu-latest'
+    name: build package
+    strategy: 
+      fail-fast: false
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    steps:
+      - name: Say hi
+        run: echo "hi there"
+
+      - name: Pre Cleanup
+        uses: docker://ghcr.io/ecbunschoten/pinnraining/build-pinntraining:241806
+        with:
+          entrypoint: /bin/rm
+          args: -rf install install_bin.tgz src ccache ${{ matrix.config_set }}
