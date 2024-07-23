@@ -18,7 +18,9 @@ from tensorflow import keras
 import matplotlib.pyplot as plt 
 from sklearn.metrics import r2_score
 import csv 
+
 from Common.EntropicAIConfig import EntropicAIConfig 
+from Common.Properties import DefaultProperties 
 
 def GetReferenceData(dataset_file, x_vars, train_variables):
     # Open data file and get variable names from the first line
@@ -46,10 +48,12 @@ def GetReferenceData(dataset_file, x_vars, train_variables):
 class MLPTrainer:
     # Base class for flamelet MLP trainer
 
-    _n_epochs:int = 250      # Number of epochs to train for.
-    _alpha_expo:float = -3.0   # Alpha training exponent parameter.
-    _lr_decay:float = 1.0      # Learning rate decay parameter.
-    _batch_expo:int = 10     # Mini-batch size exponent.
+    _n_epochs:int = DefaultProperties.N_epochs      # Number of epochs to train for.
+    _alpha_expo:float = DefaultProperties.init_learning_rate_expo   # Alpha training exponent parameter.
+    _lr_decay:float = DefaultProperties.learning_rate_decay     # Learning rate decay parameter.
+    _batch_expo:int = DefaultProperties.batch_size_exponent     # Mini-batch size exponent.
+
+    _verbose:int = 1 
 
     _i_activation_function:int = 0   # Activation function index.
     _activation_function_name:str = "elu"
@@ -122,12 +126,20 @@ class MLPTrainer:
     history_val_loss = []
 
     _stagnation_tolerance:float = 1e-11 
-    _stagnation_patience:int = 1000 
+    _stagnation_patience:int = 100 
+
+    callback_every:int = 20 
 
     def __init__(self):
         """Initiate MLP trainer object.
         """
-        
+    
+    def SetVerbose(self, verbose_level:int=1):
+        if verbose_level < 0 or verbose_level > 2:
+            raise Exception("Verbose level should be 0, 1, or 2.")
+        self._verbose = int(verbose_level)
+        return 
+    
     def SetTrainFileHeader(self, train_filepathname:str):
         """Set the name for a custom set of train and test data.
 
@@ -155,10 +167,10 @@ class MLPTrainer:
         self._model_index = idx_input
         return 
     
-    def SetNEpochs(self, n_input:int):
+    def SetNEpochs(self, n_input:int=DefaultProperties.N_epochs):
         """Set number of training epochs
 
-        :param n_input: epoch count.
+        :param n_input: epoch count
         :type n_input: int
         :raises Exception: if the specified number of epochs is lower than zero.
         """
@@ -177,7 +189,8 @@ class MLPTrainer:
         if kind_device != "CPU" and kind_device != "GPU":
             raise Exception("Device should be \"CPU\" or \"GPU\"")
         self._kind_device = kind_device
-
+        return 
+    
     def SetDeviceIndex(self, device_index:int):
         """Define device index on which to train (CPU core or GPU card).
 
@@ -185,7 +198,8 @@ class MLPTrainer:
         :type device_index: int
         """
         self._device_index = device_index
-
+        return 
+    
     def SetControllingVariables(self, x_vars:list[str]):
         """Specify MLP input or controlling variable names.
 
@@ -195,8 +209,9 @@ class MLPTrainer:
         self._controlling_vars = []
         for var in x_vars:
             self._controlling_vars.append(var)
-
-    def SetLRDecay(self, lr_decay:float):
+        return 
+    
+    def SetLRDecay(self, lr_decay:float=DefaultProperties.learning_rate_decay):
         """Specify learning rate decay parameter for exponential decay scheduler.
 
         :param lr_decay: learning rate decay factor.
@@ -206,8 +221,9 @@ class MLPTrainer:
         if lr_decay < 0 or lr_decay > 1.0:
             raise Exception("Learning rate decay factor should be between zero and one, not "+str(lr_decay))
         self._lr_decay = lr_decay
-
-    def SetAlphaExpo(self, alpha_expo:float):
+        return 
+    
+    def SetAlphaExpo(self, alpha_expo:float=DefaultProperties.init_learning_rate_expo):
         """Specify exponent of initial learning rate for exponential decay scheduler.
 
         :param alpha_expo: initial learning rate exponent.
@@ -217,8 +233,9 @@ class MLPTrainer:
         if alpha_expo > 0:
             raise Exception("Initial learning rate exponent should be below zero.")
         self._alpha_expo = alpha_expo
-
-    def SetBatchSize(self, batch_expo:int):
+        return 
+    
+    def SetBatchSize(self, batch_expo:int=DefaultProperties.batch_size_exponent):
         """Specify exponent of mini-batch size.
 
         :param batch_expo: mini-batch exponent (base 2) to be used during training.
@@ -228,8 +245,9 @@ class MLPTrainer:
         if batch_expo < 0:
             raise Exception("Mini-batch exponent should be higher than zero.")
         self._batch_expo = batch_expo
-
-    def SetHiddenLayers(self, layers_input:list[int]):
+        return 
+    
+    def SetHiddenLayers(self, layers_input:list[int]=[DefaultProperties.NN_hidden]):
         """Define hidden layer architecture.
 
         :param layers_input: list of neuron count per hidden layer.
@@ -241,7 +259,8 @@ class MLPTrainer:
             if NN <=0:
                 raise Exception("Neuron count in hidden layers should be higher than zero.")
             self._hidden_layers.append(NN)
-
+        return 
+    
     def EvaluateMLP(self, input_data_norm:np.ndarray):
         """Evaluate MLP for a given set of normalized input data.
 
@@ -406,7 +425,8 @@ class MLPTrainer:
             self._trimmed_weights.append(np.delete(self._weights[iLayer], possible_eliminations, axis=0))
             
         self._trimmed_biases.append(np.delete(self._biases[-1], []))
-
+        return 
+    
     def write_SU2_MLP(self, file_out:str):
         """Write the network to ASCII format readable by the MLPCpp module in SU2.
 
@@ -417,8 +437,8 @@ class MLPTrainer:
         n_layers = len(self._weights)+1
 
         # Select trimmed weight matrices for output.
-        weights_for_output = self._trimmed_weights
-        biases_for_output = self._trimmed_biases
+        weights_for_output = self._weights#self._trimmed_weights
+        biases_for_output = self._biases#self._trimmed_biases
 
         # Opening output file
         fid = open(file_out+'.mlp', 'w+')
@@ -478,10 +498,12 @@ class MLPTrainer:
         # Input layer biases are set to zero
         fid.write("\t".join("%+.16e" % 0 for _ in self._controlling_vars) + "\n")
 
-        #for B in self.biases:
+        #for B in self._biases:
         for B in biases_for_output:
-            fid.write("\t".join("%+.16e" % float(b) for b in B) + "\n")
-
+            try:
+                fid.write("\t".join("%+.16e" % float(b) for b in B.numpy()) + "\n")
+            except:
+                fid.write("\t".join("%+.16e" % float(B.numpy())) + "\n")
 
         fid.close()
 
@@ -634,7 +656,7 @@ class Train_Entropic_MLP(MLPTrainer):
             self.history = self.__model.fit(self._X_train_norm, self._Y_train_norm, \
                                           epochs=self._n_epochs, \
                                           batch_size=2**self._batch_expo,\
-                                          verbose=2, \
+                                          verbose=self._verbose, \
                                           validation_data=(self._X_val_norm, self._Y_val_norm), \
                                           shuffle=True,\
                                           callbacks=[StagnationStop, self.PlotCallback(self)])
@@ -647,7 +669,7 @@ class Train_Entropic_MLP(MLPTrainer):
             t_end = time.time()
             self._test_time = (t_end - t_start)
             self.SaveWeights()
-            self.TrimWeights()
+            #self.TrimWeights()
 
         self._cost_parameter = 0
         for w in self._trimmed_weights:
@@ -692,7 +714,7 @@ class Train_Entropic_MLP(MLPTrainer):
             self.FitClass.history_epochs.append(epoch)
             self.FitClass.history_loss.append(logs["loss"])
             self.FitClass.history_val_loss.append(logs["val_loss"])
-            if epoch % 10 == 0:
+            if (epoch+1) % self.FitClass.callback_every == 0:
                 fig = plt.figure(figsize=[10,10])
                 ax = plt.axes()
                 ax.plot(self.FitClass.history_epochs, self.FitClass.history_loss, 'b', label=r"Training loss")
@@ -749,6 +771,7 @@ class Train_C2_MLP(MLPTrainer):
 
         # Set activation function to exponential to make derivatives more cheap to evaluate.
         self._activation_function = tf.keras.activations.exponential
+        self._activation_function_name="exponential"
         return 
 
 
@@ -811,9 +834,9 @@ class Train_C2_MLP(MLPTrainer):
         :param weights_input: list with trainable weights values.
         :type weights_input: list[np.ndarray]
         """
-        self.weights = []
+        self._weights = []
         for W in weights_input:
-            self.weights.append(tf.Variable(W, self.dt))
+            self._weights.append(tf.Variable(W, self.dt))
         return 
     
     def SetBiases(self, biases_input:list[np.ndarray]):
@@ -822,18 +845,18 @@ class Train_C2_MLP(MLPTrainer):
         :param biases_input: list with trainable biases values.
         :type biases_input: list[np.ndarray]
         """
-        self.biases = []
+        self._biases = []
         for b in biases_input:
-            self.biases.append(tf.Variable(b, self.dt))
+            self._biases.append(tf.Variable(b, self.dt))
         return 
     
     def __CollectVariables(self):
         """Define weights and biases as trainable hyper-parameters.
         """
         self.__hyper_parameters = []
-        for W in self.weights:
+        for W in self._weights:
             self.__hyper_parameters.append(W)
-        for b in self.biases[:-1]:
+        for b in self._biases:
             self.__hyper_parameters.append(b)
         return 
     
@@ -871,9 +894,9 @@ class Train_C2_MLP(MLPTrainer):
         :rtype: tf.Tensor
         """
         Y = rhoe_norm 
-        for iLayer in range(len(self.weights)-1):
-            Y = self._activation_function(self.__ComputeLayerInput(Y, self.weights[iLayer], self.biases[iLayer]))
-        Y = self.__ComputeLayerInput(Y, self.weights[-1], self.biases[-1])
+        for iLayer in range(len(self._weights)-1):
+            Y = self._activation_function(self.__ComputeLayerInput(Y, self._weights[iLayer], self._biases[iLayer]))
+        Y = self.__ComputeLayerInput(Y, self._weights[-1], self._biases[-1])
         return Y 
     
     @tf.function
@@ -888,7 +911,9 @@ class Train_C2_MLP(MLPTrainer):
 
         # Evaluate density derivatives.
         with tf.GradientTape() as tape_1:
+            tape_1.watch(x_var)
             with tf.GradientTape() as tape_2:
+                tape_2.watch(x_var)
                 s_norm = self.EvaluateMLP(x_var)
                 ds_norm = tape_2.gradient(s_norm, x_var)
                 ds_norm_rho = tf.gather(ds_norm, indices=self.idx_rho, axis=1)
@@ -896,7 +921,9 @@ class Train_C2_MLP(MLPTrainer):
 
         # Evaluate energy derivatives.
         with tf.GradientTape() as tape_1:
+            tape_1.watch(x_var)
             with tf.GradientTape() as tape_2:
+                tape_2.watch(x_var)
                 s_norm = self.EvaluateMLP(x_var)
                 ds_norm = tape_2.gradient(s_norm, x_var)
                 ds_norm_e = tf.gather(ds_norm, indices=self.idx_e, axis=1)
@@ -1084,19 +1111,35 @@ class Train_C2_MLP(MLPTrainer):
 
         return C2_error
     
-    @tf.function 
-    def __Compute_S_error(self, S_label, x_var:tf.Variable):
-        # Evaluate thermodynamic state.
+    @tf.function
+    def __Compute_S_error(self, S_label,x_var:tf.constant):
         _, _, _, S_pred = self.__TD_Evaluation(x_var)
-        
-        # Normalize reference and predicted squared SoS.
         S_pred_norm = (S_pred - self.__s_min)/(self.__s_max - self.__s_min)
-        S_label_norm = (S_label -  self.__s_min)/(self.__s_max - self.__s_min)
-        
-        # Apply loss function.
+        S_label_norm = (S_label - self.__s_min)/(self.__s_max - self.__s_min)
         S_error = self.__mean_squared_error(y_true=S_label_norm, y_pred=S_pred_norm)
+        return S_error
+    
+        # """Compute the prediction error for squared speed of sound (SoS).
 
-        return S_error 
+        # :param C2_label: reference pressure data
+        # :type C2_label: tf.Tensor
+        # :param x_var: normalized density and energy tensor.
+        # :type x_var: tf.Variable
+        # :return: mean squared error between predicted and reference squared speed of sound.
+        # :rtype: tf.Tensor
+        # """
+
+        # # Evaluate thermodynamic state.
+        # _, _, C2, _ = self.__TD_Evaluation(x_var)
+        
+        # # Normalize reference and predicted squared SoS.
+        # C2_pred_norm = (C2 - self.C2_min) / (self.C2_max - self.C2_min)
+        # C2_label_norm = (C2_label - self.C2_min) / (self.C2_max - self.C2_min)
+
+        # # Apply loss function.
+        # C2_error = self.__mean_squared_error(y_true=C2_label_norm, y_pred=C2_pred_norm)
+
+        # return C2_error
     
     @tf.function
     def __ComputeGradients_T_error(self, T_label:tf.Tensor, rhoe_norm:tf.Variable):
@@ -1156,7 +1199,7 @@ class Train_C2_MLP(MLPTrainer):
         return C2_loss, grads_C2
     
     @tf.function
-    def __ComputeGradients_S_error(self, S_label:tf.Tensor, rhoe_norm:tf.Variable):
+    def __ComputeGradients_S_error(self, S_label:tf.Tensor, rhoe_norm:tf.constant):
         """Compute SoS prediction error and respective MLP weight sensitivities.
 
         :param C2_label: reference squared SoS data
@@ -1167,10 +1210,13 @@ class Train_C2_MLP(MLPTrainer):
         :rtype: tf.Tensor
         """
         with tf.GradientTape() as tape:
+            tape.watch(self.__hyper_parameters)
             S_loss = self.__Compute_S_error(S_label, rhoe_norm)
             grads_S = tape.gradient(S_loss, self.__hyper_parameters)
+
         return S_loss, grads_S
     
+
     @tf.function
     def __Triple_Variable_Train_Step(self, T_batch:tf.Tensor, P_batch:tf.Tensor, C2_batch:tf.Tensor, S_batch:tf.Tensor, rhoe_norm_batch:tf.Variable):
         """Apply MLP weight updates based on thermodynamic quantity losses.
@@ -1201,12 +1247,24 @@ class Train_C2_MLP(MLPTrainer):
         self.optimizer.apply_gradients(zip(grads_C2, self.__hyper_parameters))
         
         # # Weight update for temperature prediction.
-        # S_loss, grads_S = self.__ComputeGradients_S_error(S_batch, rhoe_norm_batch)
-        # self.optimizer.apply_gradients(zip(grads_S, self.__hyper_parameters))
+        #S_loss, grads_S = self.__ComputeGradients_S_error(S_batch, rhoe_norm_batch)
+        #self.optimizer.apply_gradients(zip(grads_S, self.__hyper_parameters))
 
         return T_loss, P_loss, C2_loss
     
+    #@tf.function
+    def __Final_Entropy_Tweaking_Step(self, S_batch:tf.constant, rhoe_norm_batch:tf.constant):
+        
+        s_pred_norm = self.EvaluateMLP(rhoe_norm_batch)
+        s_label_norm = (S_batch -self.__s_min)/(self.__s_max - self.__s_min)
+        delta_s = s_label_norm - s_pred_norm 
+        delta_bias = tf.reduce_mean(delta_s)
+        self.__hyper_parameters[-1] = self.__hyper_parameters[-1] + delta_bias
 
+        self._biases[-1] = self.__hyper_parameters[-1]
+
+        return 
+    
     def Train_MLP(self):
         """Commence training process.
         """
@@ -1219,7 +1277,6 @@ class Train_C2_MLP(MLPTrainer):
         # self.rho_ORCHID = ORCHID_data[:, vars_ORCHID.index("Density")]
         # self.e_ORCHID = ORCHID_data[:, vars_ORCHID.index("Energy")]
         
-
         # Prepare output directory
         if not os.path.isdir(self._save_dir + "/Model_"+str(self._model_index)):
             os.mkdir(self._save_dir + "/Model_"+str(self._model_index))
@@ -1250,8 +1307,6 @@ class Train_C2_MLP(MLPTrainer):
         rhoe_val = tf.Variable(self.rhoe_val_norm,tf.float32)
         rhoe_test = tf.Variable(self.rhoe_test_norm,tf.float32)
 
-        # Evaluate test set and generate plots every 5 epochs.
-        callback_every = 5
 
         # Initiate training loop.
         i = 0
@@ -1272,7 +1327,7 @@ class Train_C2_MLP(MLPTrainer):
                 T_loss = T_loss.numpy()
                 P_loss = P_loss.numpy()
                 C2_loss = C2_loss.numpy()
-                if j % (2**self._batch_expo) == 0:
+                if (j % (2**self._batch_expo) == 0) and (self._verbose == 2):
                     print("Epoch ", str(i), "batch", str(j), " P loss", str(P_loss), " T loss", str(T_loss), " C2 loss", str(C2_loss))
                 self.idx_step = 1
             
@@ -1282,11 +1337,14 @@ class Train_C2_MLP(MLPTrainer):
             self.P_val_errors.append(P_val_loss.numpy())
             self.C2_val_errors.append(C2_val_loss.numpy())
 
+            if self._verbose >= 1:
+                print("Epoch %i Validation loss Temperature: %.4e, Pressure: %.4e, Speed of sound: %.4e" % (i, T_val_loss.numpy(), P_val_loss.numpy(), C2_val_loss.numpy()))
+
             worst_error_current = max([T_val_loss.numpy(), P_val_loss.numpy(), C2_val_loss.numpy()])
             worst_error = self.__CheckEarlyStopping(worst_error_current, worst_error)
 
             # Compute loss on test set and plot predictions.
-            if i % callback_every == 0:
+            if (i+1) % self.callback_every == 0:
 
                 self.T_test_loss, self.P_test_loss, self.C2_test_loss,\
                 T_test, P_test, C2_test, S_test = self.__TestSetLoss(rhoe_test, self.T_test, self.P_test, self.C2_test, True)
@@ -1297,6 +1355,16 @@ class Train_C2_MLP(MLPTrainer):
                 self.CallbackFunction()
 
             i += 1 
+        
+        self.__Final_Entropy_Tweaking_Step(S_batch=tf.constant(self.S_test, dtype=tf.float32),rhoe_norm_batch=tf.constant(self.rhoe_test_norm, tf.float32))
+
+        self.T_test_loss, self.P_test_loss, self.C2_test_loss,\
+        T_test, P_test, C2_test, S_test = self.__TestSetLoss(rhoe_test, self.T_test, self.P_test, self.C2_test, True)
+        self.T_test_pred = T_test.numpy()
+        self.P_test_pred = P_test.numpy()
+        self.C2_test_pred = C2_test.numpy()
+        self.S_test_pred = S_test.numpy()
+        self.CallbackFunction()
 
         # Display test set loss information upon completion of training.
         self._test_score = max([self.T_test_loss, self.P_test_loss, self.C2_test_loss])
@@ -1342,19 +1410,18 @@ class Train_C2_MLP(MLPTrainer):
         """
 
         # Update current weights and biases.
-        self._weights = []
-        self._biases = []
-        for W in self.weights:
-            self._weights.append(W.numpy())
-        for b in self.biases:
-            self._biases.append(b.numpy())   
+        # self._weights = []
+        # self._biases = []
+        # for W in self._weights:
+        #     self._weights.append(W.numpy())
+        # for b in self._biases:
+        #     self._biases.append(b.numpy())   
 
         # Save SU2 MLP and performance metrics.
         self.Save_Relevant_Data()
 
         # Plot intermediate history trends.
         self.Plot_Intermediate_History()
-
         # Error scatter plots for thermodynamic properties.
         self.Generate_Error_Plots()
 
@@ -1366,7 +1433,7 @@ class Train_C2_MLP(MLPTrainer):
     def Save_Relevant_Data(self):
         """Write loss values for thermodynamic properties.
         """
-        self.TrimWeights()
+        #self.TrimWeights()
         
         fid = open(self._save_dir + "/Model_"+str(self._model_index)+"/MLP_C2_performance.txt", "w+")
         fid.write("T test loss: %+.16e\n" % self.T_test_loss)
@@ -1532,7 +1599,7 @@ class Train_C2_MLP(MLPTrainer):
         fig = plt.figure(figsize=[10,10])
         ax = plt.axes(projection='3d') 
         ax.plot3D(self.X_test[:, self.idx_rho], self.X_test[:, self.idx_e], np.sqrt(self.C2_test),'ko',label='Reference')
-        ax.plot3D(self.X_test[:, self.idx_rho], self.X_test[:, self.idx_e], np.sqrt(self.C2_test_pred),'ro',label='Predicted')
+        ax.plot3D(self.X_test[:, self.idx_rho], self.X_test[:, self.idx_e], np.real(np.sqrt(self.C2_test_pred)),'ro',label='Predicted')
         ax.set_xlabel("Density",fontsize=plot_fontsize)
         ax.set_ylabel("Energy",fontsize=plot_fontsize)
         ax.set_zlabel("Speed of sound",fontsize=plot_fontsize)
@@ -1565,8 +1632,8 @@ class Train_C2_MLP(MLPTrainer):
         n_layers = len(self._weights)+1
 
         # Select trimmed weight matrices for output.
-        weights_for_output = self.weights#self._trimmed_weights
-        biases_for_output = self.biases#self._trimmed_biases
+        weights_for_output = self._weights#self._trimmed_weights
+        biases_for_output = self._biases#self._trimmed_biases
 
         # Opening output file
         fid = open(file_out+'.mlp', 'w+')
@@ -1624,9 +1691,12 @@ class Train_C2_MLP(MLPTrainer):
         # Input layer biases are set to zero
         fid.write("\t".join("%+.16e" % 0 for _ in self._controlling_vars) + "\n")
 
-        #for B in self.biases:
+        #for B in self._biases:
         for B in biases_for_output:
-            fid.write("\t".join("%+.16e" % float(b) for b in B.numpy()) + "\n")
+            try:
+                fid.write("\t".join("%+.16e" % float(b) for b in B.numpy()) + "\n")
+            except:
+                fid.write("\t".join("%+.16e" % float(B.numpy())) + "\n")
 
         fid.close()
 
@@ -1644,6 +1714,7 @@ class EvaluateArchitecture:
     batch_expo:int = 5      # Mini-batch exponent (base 2)
     activation_function:str = "exponential"    # Activation function name applied to hidden layers.
 
+    _verbose_level:int = 1
     n_epochs:int = 1000 # Number of epochs to train for.
     save_dir:str        # Directory to save trained networks in.
 
@@ -1722,6 +1793,14 @@ class EvaluateArchitecture:
         self.n_epochs = n_epochs
         self.__trainer_entropy.SetNEpochs(self.n_epochs)
         self.__trainer_tpc2.SetNEpochs(self.n_epochs)
+        return 
+    
+    def SetVerbose(self, verbose_level:int=1):
+        if (verbose_level < 0) or (verbose_level > 2):
+            raise Exception("Verbose level should be 0, 1, or 2")
+        self._verbose_level = int(verbose_level)
+        self.__trainer_entropy.SetVerbose(self._verbose_level)
+        self.__trainer_tpc2.SetVerbose(self._verbose_level)
         return 
     
     def SetArchitecture(self, NN_hidden_layers:list[int]):
