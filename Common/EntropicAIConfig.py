@@ -3,6 +3,7 @@ import cantera as ct
 import pickle 
 import os 
 import CoolProp
+from Common.Properties import DefaultProperties 
 
 class EntropicAIConfig:
     """
@@ -25,25 +26,27 @@ class EntropicAIConfig:
     # Output directory for all large data files including fluid data.
     __output_dir:str = "./"
 
-    __T_lower:float = 280   # Lower temperature bound.
-    __T_upper:float = 500   # Upper temperature bound.
-    __Np_T:int = 100      # Number of temperature samples between bounds.
+    __T_lower:float = DefaultProperties.T_min   # Lower temperature bound.
+    __T_upper:float = DefaultProperties.T_max   # Upper temperature bound.
+    __Np_T:int = DefaultProperties.Np_temp      # Number of temperature samples between bounds.
 
-    __P_lower:float = 1e4
-    __P_upper:float = 2e6
-    __Np_P:int = 100
+    __P_lower:float = DefaultProperties.P_min
+    __P_upper:float = DefaultProperties.P_max
+    __Np_P:int = DefaultProperties.Np_p
 
-    __concatenated_file_header:str = "entropic_data" # File header for MLP training data files.
+    __concatenated_file_header:str = DefaultProperties.output_file_header # File header for MLP training data files.
 
     # MLP Settings
 
-    __train_fraction:float = 0.8    # Fraction of fluid data used for training.
-    __test_fraction:float = 0.1     # Fraction of flamleet data used for test validation.
+    __train_fraction:float = DefaultProperties.train_fraction    # Fraction of fluid data used for training.
+    __test_fraction:float = DefaultProperties.test_fraction    # Fraction of flamleet data used for test validation.
 
-    # MLP output groups and architecture information.
-    __MLP_output_groups:list[list[str]] = None  # Output variables for each MLP.
-    __MLP_architectures:list[list[int]] = None  # Hidden layer architecture for each MLP.
-    __MLP_trainparams:list[list[float]] = None  # Training parameters and activation function information for each MLP.
+    # MLP training settings
+    __init_learning_rate_expo:float = DefaultProperties.init_learning_rate_expo
+    __learning_rate_decay:float =  DefaultProperties.learning_rate_decay
+    __batch_size_exponent:int = DefaultProperties.batch_size_exponent
+    __NN_hidden:int = DefaultProperties.NN_hidden
+    __N_epochs:int = DefaultProperties.N_epochs 
 
     # Table Generation Settings
 
@@ -65,10 +68,26 @@ class EntropicAIConfig:
         else:
             print("Generating empty EntropicAI config")
 
-
         return 
     
+    def PrintBanner(self):
+        """Print banner visualizing EntropicAI configuration settings."""
+
+        print("EntropicAIConfiguration: " + self.__config_name)
+        print("")
+        print("Fluid data generation settings:")
+        print("Fluid data output directory: " + self.__output_dir)
+        print("Fluid name(s): " + ",".join(self.__fluid_names))
+        print("")
+        print("Temperature range: %.2f K -> %.2f K (%i steps)" % (self.__T_lower, self.__T_upper, self.__Np_T))
+        print("Pressure range: %.3e Pa -> %.3e Pa (%i steps)" % (self.__P_lower, self.__P_upper, self.__Np_P))
+        if self.__use_PT:
+            print("Data generation grid: pressure-based")
+        else:
+            print("Data generation grid: density-based")
         
+        return 
+    
     def GetConfigName(self):
         """
         Return configuration name.
@@ -162,7 +181,7 @@ class EntropicAIConfig:
     def GetPTGrid(self):
         return self.__use_PT 
     
-    def SetTemperatureBounds(self, T_lower:float, T_upper:float):
+    def SetTemperatureBounds(self, T_lower:float=DefaultProperties.T_min, T_upper:float=DefaultProperties.T_max):
         """Set the upper and lower temperature limits for the fluid data grid.
 
         :param T_lower: lower temperature limit in Kelvin.
@@ -182,7 +201,7 @@ class EntropicAIConfig:
         return [self.__T_lower, self.__T_upper]
     
     
-    def SetNpTemp(self, Np_Temp:int):
+    def SetNpTemp(self, Np_Temp:int=DefaultProperties.Np_temp):
         """
         Set number of divisions for the temperature grid.
 
@@ -208,7 +227,7 @@ class EntropicAIConfig:
         return self.__Np_T
     
 
-    def SetPressureBounds(self, P_lower:float, P_upper:float):
+    def SetPressureBounds(self, P_lower:float=DefaultProperties.P_min, P_upper:float=DefaultProperties.P_max):
         """Set the upper and lower limits for the fluid pressure.
 
         :param P_lower: lower pressure limit in Pa.
@@ -228,7 +247,7 @@ class EntropicAIConfig:
         return [self.__P_lower, self.__P_upper]
     
     
-    def SetNpPressure(self, Np_P:int):
+    def SetNpPressure(self, Np_P:int=DefaultProperties.Np_p):
         """
         Set number of divisions for the fluid pressure grid.
 
@@ -258,6 +277,7 @@ class EntropicAIConfig:
             raise Exception("Invalid output data directory")
         else:
             self.__output_dir = output_dir
+        return 
     
     def GetOutputDir(self):
         """
@@ -273,7 +293,7 @@ class EntropicAIConfig:
         else:
             return self.__output_dir
     
-    def SetConcatenationFileHeader(self, header:str):
+    def SetConcatenationFileHeader(self, header:str=DefaultProperties.output_file_header):
         """
         Define the file name header for the collection of fluid data.
 
@@ -281,7 +301,8 @@ class EntropicAIConfig:
         :type header: str
         """
         self.__concatenated_file_header = header 
-
+        return 
+    
     def GetConcatenationFileHeader(self):
         """
         Get the file name header for the fluid collection file.
@@ -291,7 +312,7 @@ class EntropicAIConfig:
         """
         return self.__concatenated_file_header
     
-    def SetTrainFraction(self, input:float):
+    def SetTrainFraction(self, input:float=DefaultProperties.train_fraction):
         """
         Define the fraction of fluid data used for training multi-layer perceptrons.
 
@@ -302,8 +323,9 @@ class EntropicAIConfig:
         if input >= 1:
             raise Exception("Training data fraction should be lower than one.")
         self.__train_fraction = input 
-
-    def SetTestFraction(self, input:float):
+        return 
+    
+    def SetTestFraction(self, input:float=DefaultProperties.test_fraction):
         """
         Define the fraction of fluid data separate from the training data used for determining accuracy after training.
 
@@ -314,7 +336,8 @@ class EntropicAIConfig:
         if input >= 1:
             raise Exception("Test data fraction should be lower than one.")
         self.__test_fraction = input 
-
+        return 
+    
     def GetTrainFraction(self):
         """
         Get fluid data fraction used for multi-layer perceptron training.
@@ -387,6 +410,51 @@ class EntropicAIConfig:
         :rtype: float, float
         """
         return self.__Table_ref_radius, self.__Table_curv_threshold
+    
+    def SetAlphaExpo(self, alpha_expo:float=DefaultProperties.init_learning_rate_expo):
+        """Set initial learning rate decay parameter.
+
+        :param alpha_expo: initial learning rate exponent (base 10), defaults to -2.6
+        :type alpha_expo: float, optional
+        :raises Exception: if initial learning rate exponent is positive.
+        """
+
+        if alpha_expo >= 0:
+            raise Exception("Initial learning rate exponent should be negative.")
+        self.__init_learning_rate_expo = alpha_expo 
+
+        return 
+    
+    def GetAlphaExpo(self):
+        """Get initial learning rate exponent (base 10).
+
+        :return: log10 of initial learning rate exponent.
+        :rtype: float
+        """
+        return self.__init_learning_rate_expo 
+    
+    def SetLearningRateDecay(self, lr_decay:float=DefaultProperties.learning_rate_decay):
+        """Set the learning rate decay parameter.
+
+        :param lr_decay: learning rate decay parameter for exponential learning rate scheduler, defaults to 0.9985
+        :type lr_decay: float, optional
+        :raises Exception: if decay parameter is not between 0.0 and 1.0.
+        """
+
+        if lr_decay <= 0.0 or lr_decay >= 1.0:
+            raise Exception("Learning rate decay parameter should be between 0 and 1.")
+        self.__learning_rate_decay = lr_decay
+
+        return 
+    
+    def GetLearningRateDecay(self):
+        """Get learning rate decay parameter.
+
+        :return: learning rate decay parameter.
+        :rtype: float
+        """
+        
+        return self.__learning_rate_decay 
     
     def SetMLPArchitecture(self, group_index:int, architecture_in:list[int]):
         """Save an MLP architecture for a given group index.
