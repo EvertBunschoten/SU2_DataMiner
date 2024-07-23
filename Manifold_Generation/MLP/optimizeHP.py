@@ -3,6 +3,8 @@ import os
 import pickle 
 import csv
 import numpy as np
+import matplotlib.pyplot as plt 
+
 from Common.EntropicAIConfig import EntropicAIConfig 
 from Manifold_Generation.MLP.Trainers import EvaluateArchitecture
 
@@ -226,17 +228,19 @@ class MLPOptimizer:
         lowerbound = []
         upperbound = []
         if self.__optimize_batch:
-            gene_trainparams += [int]
+            gene_trainparams.append(int)
             lowerbound.append(self.__batch_expo_min)
             upperbound.append(self.__batch_expo_max)
         if self.__optimize_LR:
-            gene_trainparams += [float, float]
+            gene_trainparams.append(float)
+            gene_trainparams.append(float)
+            
             lowerbound.append(self.__alpha_expo_min)
             lowerbound.append(self.__lr_decay_min)
             upperbound.append(self.__alpha_expo_max)
             upperbound.append(self.__lr_decay_max)
         if self.__optimize_NN:
-            gene_trainparams += [int]
+            gene_trainparams.append(int)
             lowerbound.append(self.__NN_min)
             upperbound.append(self.__NN_max)
 
@@ -249,13 +253,14 @@ class MLPOptimizer:
         # Set gene types and bounds
         gene_trainparams, lowerbound, upperbound = self.__prepareBounds()
         N_genes = len(gene_trainparams)
+        print(N_genes)
         gene_space = []
         for lb, ub in zip(lowerbound, upperbound):
             gene_space.append({'low':lb,'high':ub})
 
         # Initiate PyGaD instance with 
         self.__optimizer = pygad.GA(num_generations=10*N_genes,\
-                     fitness_func=self.__fitnessFunction,\
+                     fitness_func=self.fitnessFunction,\
                      gene_type=gene_trainparams,\
                      num_genes=N_genes,\
                      init_range_low=lowerbound,\
@@ -265,7 +270,7 @@ class MLPOptimizer:
                      num_parents_mating=6,\
                      parallel_processing=["process",self.__n_workers],\
                      random_seed=1,\
-                     on_generation=self.__saveGenerationInfo)
+                     on_generation=self.saveGenerationInfo)
         
         return 
 
@@ -305,7 +310,7 @@ class MLPOptimizer:
 
         return 
     
-    def __saveGenerationInfo(self, ga_instance:pygad.GA):
+    def saveGenerationInfo(self, ga_instance:pygad.GA):
         """Save population information per completed generation.
         """
 
@@ -364,7 +369,7 @@ class MLPOptimizer:
 
         return
 
-    def __fitnessFunction(self, ga_instance:pygad.GA, x:np.ndarray, x_idx:int):
+    def fitnessFunction(self, ga_instance:pygad.GA, x:np.ndarray, x_idx:int):
         """ Fitness function evaluated during GA routine.
         """
 
@@ -373,6 +378,8 @@ class MLPOptimizer:
 
         # Set CPU index.
         Evaluator.SetTrainHardware("CPU", x_idx)
+
+        Evaluator.SetVerbose(0)
 
         # Translate gene and update hyper-parameters.
         self.__translateGene(x, Evaluator=Evaluator)
@@ -408,3 +415,223 @@ class MLPOptimizer:
         file.close()
         return 
     
+
+class PlotHPOResults:
+    __Config:EntropicAIConfig = None 
+    __optimize_learningrate:bool = True 
+    __optimize_batch:bool = True 
+    __optimize_architecture:bool = True 
+    __completed_models:list[str] = []
+    __C2_test_set_scores:list[float] = []
+    __P_test_set_scores:list[float] = []
+    __T_test_set_scores:list[float] = []
+    __hidden_layer_neurons:list[int] = []
+    __lr_decay:list[float] = []
+    __alpha_expo:list[float] = []
+    __batch_expo:list[int] = [] 
+
+    __completed_workers:list[int] = []
+    __completed_models:list[int] = [] 
+
+    def __init__(self, Config_in:EntropicAIConfig):
+        self.__Config = Config_in 
+        return 
+    
+    
+    def Optimize_LearningRate_HP(self, optimize_LR:bool=True):
+        """Consider learning-rate hyper-parameters in optimization.
+
+        :param optimize_LR: consider learning rate parameters(True, default), or not (False)
+        :type optimize_LR: bool, optional
+        """
+        self.__optimize_learningrate = optimize_LR
+        return 
+    
+    def Optimize_Batch_HP(self, optimize_batch:bool=True):
+        """Consider the mini-batch size exponent as a hyper-parameter during optimization.
+
+        :param optimize_batch: consider mini-batch size exponent (True, default), or not (False)
+        :type optimize_batch: bool, optional
+        """
+        self.__optimize_batch = optimize_batch 
+        return 
+    
+    def Optimize_Architecture_HP(self, optimize_architecture:bool=True):
+        """Consider the hidden layer perceptron count as a hyper-parameter during optimization.
+
+        :param optimize_architecture: consider hidden layer perceptron count (True, default) or not (False)
+        :type optimize_architecture: bool, optional
+        """
+        self.__optimize_architecture = optimize_architecture 
+        return 
+    
+    def ReadArchitectures(self):
+        optim_header = "Architectures_Optim"
+        if self.__optimize_batch:
+            optim_header += "B"
+        if self.__optimize_learningrate:
+            optim_header += "LR"
+        if self.__optimize_architecture:
+            optim_header += "A"
+        optim_directory = self.__Config.GetOutputDir()+"/"+optim_header 
+
+        population_indices = os.listdir(optim_directory)
+        self.__completed_models = []
+        for p in population_indices:
+            if "Worker" in p:
+                models = os.listdir(optim_directory + "/" + p)
+                for m in models:
+                    if "Model" in m:
+                        if os.path.isfile(optim_directory + "/" + p + "/" + m + "/MLP_C2_performance.txt"):
+
+                            model_idx = int(m.split("_")[-1])
+                            worker_idx = int(p.split("_")[-1])
+                            with open(optim_directory + "/" + p + "/" + m + "/MLP_C2_performance.txt",'r') as fid:
+                                lines = fid.readlines()
+                                T_loss = float(lines[0].strip().split(':')[-1])
+                                P_loss = float(lines[1].strip().split(':')[-1])
+                                C2_loss = float(lines[2].strip().split(':')[-1])
+                                self.__T_test_set_scores.append(T_loss)
+                                self.__P_test_set_scores.append(P_loss)
+                                self.__C2_test_set_scores.append(C2_loss)
+
+                            with open(optim_directory + "/" + p + "/" + m + "/MLP_performance.txt",'r') as fid:
+                                lines = fid.readlines()
+                                nN = int(lines[2].strip().split(":")[-1])
+                                alpha_expo = float(lines[5].strip().split(":")[-1])
+                                lr_decay = float(lines[6].strip().split(":")[-1])
+                                batch_expo = int(lines[7].strip().split(":")[-1])
+                                self.__alpha_expo.append(alpha_expo)
+                                self.__lr_decay.append(lr_decay)
+                                self.__batch_expo.append(batch_expo)
+                                self.__hidden_layer_neurons.append(nN)
+                        
+                            self.__completed_models.append(model_idx)
+                            self.__completed_workers.append(worker_idx)
+
+        return 
+    
+    def PlotLossAlphaExpo(self):
+        fig = plt.figure(figsize=[27, 9])
+        ax0 = fig.add_subplot(1,3,1)
+        ax0.plot(self.__T_test_set_scores, self.__alpha_expo, 'ro')
+        ax0.grid()
+        ax0.set_xscale('log')
+        ax0.set_xlabel('Temperature test set evaluation loss',fontsize=20)
+        ax0.set_ylabel('Initial learning rate exponent', fontsize=20)
+        ax0.tick_params(which='both',labelsize=18)
+
+        ax1 = fig.add_subplot(1,3,2)
+        ax1.plot(self.__P_test_set_scores, self.__alpha_expo, 'bo')
+        ax1.grid()
+        ax1.set_xscale('log')
+        ax1.set_xlabel('Pressure test set evaluation loss',fontsize=20)
+        ax1.tick_params(which='both',labelsize=18)
+
+        ax2 = fig.add_subplot(1,3,3)
+        ax2.plot(self.__C2_test_set_scores, self.__alpha_expo, 'mo')
+        ax2.grid()
+        ax2.set_xscale('log')
+        ax2.set_xlabel('Speed of sound test set evaluation loss',fontsize=20)
+        ax2.tick_params(which='both',labelsize=18)
+
+        for nn, sT, sP, sC2, w, m in zip(self.__alpha_expo, self.__T_test_set_scores, self.__P_test_set_scores, self.__C2_test_set_scores, self.__completed_workers, self.__completed_models):
+            ax0.text(sT, nn, "W"+str(w)+"M"+str(m),color='r')
+            ax1.text(sP, nn, "W"+str(w)+"M"+str(m),color='b')
+            ax2.text(sC2, nn, "W"+str(w)+"M"+str(m),color='m')
+        plt.show()
+        return 
+    
+    def PlotLossLRDecay(self):
+        fig = plt.figure(figsize=[27, 9])
+        ax0 = fig.add_subplot(1,3,1)
+        ax0.plot(self.__T_test_set_scores, self.__lr_decay, 'ro')
+        ax0.grid()
+        ax0.set_xscale('log')
+        ax0.set_xlabel('Temperature test set evaluation loss',fontsize=20)
+        ax0.set_ylabel('Learning rate decay parameter', fontsize=20)
+        ax0.tick_params(which='both',labelsize=18)
+
+        ax1 = fig.add_subplot(1,3,2)
+        ax1.plot(self.__P_test_set_scores, self.__lr_decay, 'bo')
+        ax1.grid()
+        ax1.set_xscale('log')
+        ax1.set_xlabel('Pressure test set evaluation loss',fontsize=20)
+        ax1.tick_params(which='both',labelsize=18)
+
+        ax2 = fig.add_subplot(1,3,3)
+        ax2.plot(self.__C2_test_set_scores, self.__lr_decay, 'mo')
+        ax2.grid()
+        ax2.set_xscale('log')
+        ax2.set_xlabel('Speed of sound test set evaluation loss',fontsize=20)
+        ax2.tick_params(which='both',labelsize=18)
+
+        for nn, sT, sP, sC2, w, m in zip(self.__lr_decay, self.__T_test_set_scores, self.__P_test_set_scores, self.__C2_test_set_scores, self.__completed_workers, self.__completed_models):
+            ax0.text(sT, nn, "W"+str(w)+"M"+str(m),color='r')
+            ax1.text(sP, nn, "W"+str(w)+"M"+str(m),color='b')
+            ax2.text(sC2, nn, "W"+str(w)+"M"+str(m),color='m')
+        plt.show()
+        return 
+    
+    def PlotLossBatchSize(self):
+        fig = plt.figure(figsize=[27, 9])
+        ax0 = fig.add_subplot(1,3,1)
+        ax0.plot(self.__T_test_set_scores, self.__batch_expo, 'ro')
+        ax0.grid()
+        ax0.set_xscale('log')
+        ax0.set_xlabel('Temperature test set evaluation loss',fontsize=20)
+        ax0.set_ylabel('Training batch size exponent', fontsize=20)
+        ax0.tick_params(which='both',labelsize=18)
+
+        ax1 = fig.add_subplot(1,3,2)
+        ax1.plot(self.__P_test_set_scores, self.__batch_expo, 'bo')
+        ax1.grid()
+        ax1.set_xscale('log')
+        ax1.set_xlabel('Pressure test set evaluation loss',fontsize=20)
+        ax1.tick_params(which='both',labelsize=18)
+
+        ax2 = fig.add_subplot(1,3,3)
+        ax2.plot(self.__C2_test_set_scores, self.__batch_expo, 'mo')
+        ax2.grid()
+        ax2.set_xscale('log')
+        ax2.set_xlabel('Speed of sound test set evaluation loss',fontsize=20)
+        ax2.tick_params(which='both',labelsize=18)
+
+        for nn, sT, sP, sC2, w, m in zip(self.__batch_expo, self.__T_test_set_scores, self.__P_test_set_scores, self.__C2_test_set_scores, self.__completed_workers, self.__completed_models):
+            ax0.text(sT, nn, "W"+str(w)+"M"+str(m),color='r')
+            ax1.text(sP, nn, "W"+str(w)+"M"+str(m),color='b')
+            ax2.text(sC2, nn, "W"+str(w)+"M"+str(m),color='m')
+        plt.show()
+        return 
+    
+    def PlotLossSize(self):
+        fig = plt.figure(figsize=[27, 9])
+        ax0 = fig.add_subplot(1,3,1)
+        ax0.plot(self.__T_test_set_scores, self.__hidden_layer_neurons, 'ro')
+        ax0.grid()
+        ax0.set_xscale('log')
+        ax0.set_xlabel('Temperature test set evaluation loss',fontsize=20)
+        ax0.set_ylabel('Number of hidden layer neurons', fontsize=20)
+        ax0.tick_params(which='both',labelsize=18)
+
+        ax1 = fig.add_subplot(1,3,2)
+        ax1.plot(self.__P_test_set_scores, self.__hidden_layer_neurons, 'bo')
+        ax1.grid()
+        ax1.set_xscale('log')
+        ax1.set_xlabel('Pressure test set evaluation loss',fontsize=20)
+        ax1.tick_params(which='both',labelsize=18)
+
+        ax2 = fig.add_subplot(1,3,3)
+        ax2.plot(self.__C2_test_set_scores, self.__hidden_layer_neurons, 'mo')
+        ax2.grid()
+        ax2.set_xscale('log')
+        ax2.set_xlabel('Speed of sound test set evaluation loss',fontsize=20)
+        ax2.tick_params(which='both',labelsize=18)
+
+        for nn, sT, sP, sC2, w, m in zip(self.__hidden_layer_neurons, self.__T_test_set_scores, self.__P_test_set_scores, self.__C2_test_set_scores, self.__completed_workers, self.__completed_models):
+            ax0.text(sT, nn, "W"+str(w)+"M"+str(m),color='r')
+            ax1.text(sP, nn, "W"+str(w)+"M"+str(m),color='b')
+            ax2.text(sC2, nn, "W"+str(w)+"M"+str(m),color='m')
+            
+        plt.show()
+        return 
