@@ -1,3 +1,4 @@
+#!/bin/sh -l
 
 echo "PINNTraining Docker Container"
 usage="$(basename "$0") [-h] [-b branch_name]
@@ -19,7 +20,6 @@ if [ "$#" -ne 0 ]; then
   while [ "$(echo $1 | cut -c1)" = "-" ]
     do
         case "$1" in
-                ;;
             -b)
                     branch=$2
                     shift 2
