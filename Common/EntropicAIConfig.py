@@ -34,6 +34,11 @@ class EntropicAIConfig:
     __P_upper:float = DefaultProperties.P_max
     __Np_P:int = DefaultProperties.Np_p
 
+    __Rho_lower:float = DefaultProperties.Rho_min
+    __Rho_upper:float = DefaultProperties.Rho_max 
+    __Energy_lower:float = DefaultProperties.Energy_min
+    __Energy_upper:float = DefaultProperties.Energy_max
+    
     __concatenated_file_header:str = DefaultProperties.output_file_header # File header for MLP training data files.
 
     # MLP Settings
@@ -79,8 +84,12 @@ class EntropicAIConfig:
         print("Fluid data output directory: " + self.__output_dir)
         print("Fluid name(s): " + ",".join(self.__fluid_names))
         print("")
-        print("Temperature range: %.2f K -> %.2f K (%i steps)" % (self.__T_lower, self.__T_upper, self.__Np_T))
-        print("Pressure range: %.3e Pa -> %.3e Pa (%i steps)" % (self.__P_lower, self.__P_upper, self.__Np_P))
+        if self.__use_PT:
+            print("Temperature range: %.2f K -> %.2f K (%i steps)" % (self.__T_lower, self.__T_upper, self.__Np_T))
+            print("Pressure range: %.3e Pa -> %.3e Pa (%i steps)" % (self.__P_lower, self.__P_upper, self.__Np_P))
+        else:
+            print("Energy range: %.2e J/kg -> %.2e J/kg (%i steps)" % (self.__Energy_lower, self.__Energy_upper, self.__Np_T))
+            print("Density range: %.2f kg/m3 -> %.2f kg/m3 (%i steps)" % (self.__Rho_lower, self.__Rho_upper, self.__Np_P))
         if self.__use_PT:
             print("Data generation grid: pressure-based")
         else:
@@ -196,6 +205,30 @@ class EntropicAIConfig:
             self.__T_lower = T_lower
             self.__T_upper = T_upper
         return
+    
+    def SetEnergyBounds(self, E_lower:float=DefaultProperties.Energy_min, E_upper:float=DefaultProperties.Energy_max):
+        self.__Energy_lower=E_lower
+        self.__Energy_upper=E_upper
+        return 
+    
+    def GetEnergyBounds(self):
+        return [self.__Energy_lower, self.__Energy_upper]
+    
+    def SetNpEnergy(self, Np_Energy:int=DefaultProperties.Np_temp):
+        self.__Np_T = Np_Energy
+        return 
+    
+    def SetDensityBounds(self, Rho_lower:float=DefaultProperties.Rho_min, Rho_upper:float=DefaultProperties.Rho_max):
+        self.__Rho_lower=Rho_lower
+        self.__Rho_upper=Rho_upper
+        return 
+    
+    def SetNpDensity(self, Np_rho:int=DefaultProperties.Np_p):
+        self.__Np_P = Np_rho
+        return 
+    
+    def GetDensityBounds(self):
+        return [self.__Rho_lower, self.__Rho_upper]
     
     def GetTemperatureBounds(self):
         return [self.__T_lower, self.__T_upper]
