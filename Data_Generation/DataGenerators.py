@@ -19,15 +19,12 @@ class DataGenerator_CoolProp:
     __use_PT:bool = DefaultProperties.use_PT_grid
     __T_min:float = DefaultProperties.T_min
     __T_max:float = DefaultProperties.T_max
-    __Np_T:int = DefaultProperties.Np_temp
+    __Np_Y:int = DefaultProperties.Np_temp
 
     __P_min:float = DefaultProperties.P_min
     __P_max:float = DefaultProperties.P_max
-    __Np_P:int = DefaultProperties.Np_p
+    __Np_X:int = DefaultProperties.Np_p
 
-    __T_grid:np.ndarray[float] = None 
-    __P_grid:np.ndarray[float] = None 
-    
 
     # Output train and test fractions.
     __train_fraction:float = DefaultProperties.train_fraction
@@ -38,12 +35,12 @@ class DataGenerator_CoolProp:
     __output_dir:str 
 
     # Density and static energy limits
-    __rho_min:float = None 
-    __rho_max:float = None 
-    __e_min:float = None 
-    __e_max:float = None 
-    __e_grid:np.ndarray[float] = None
-    __rho_grid:np.ndarray[float] = None 
+    __rho_min:float = DefaultProperties.Rho_min
+    __rho_max:float = DefaultProperties.Rho_max
+    __e_min:float = DefaultProperties.Energy_min 
+    __e_max:float = DefaultProperties.Energy_max 
+    __X_grid:np.ndarray[float] = None
+    __Y_grid:np.ndarray[float] = None 
 
     # Entropy derivatives.
     __s_fluid:np.ndarray[float] = None 
@@ -78,11 +75,16 @@ class DataGenerator_CoolProp:
         self.__use_PT = self.__Config.GetPTGrid()
         P_bounds = self.__Config.GetPressureBounds()
         T_bounds = self.__Config.GetTemperatureBounds()
+        rho_bounds = self.__Config.GetDensityBounds()
+        e_bounds = self.__Config.GetEnergyBounds()
+
         self.__P_min, self.__P_max = P_bounds[0], P_bounds[1]
-        self.__Np_P = self.__Config.GetNpPressure()
+        self.__rho_min, self.__rho_max = rho_bounds[0], rho_bounds[1]
+        self.__Np_X = self.__Config.GetNpPressure()
 
         self.__T_min, self.__T_max = T_bounds[0], T_bounds[1]
-        self.__Np_T = self.__Config.GetNpTemp()
+        self.__e_min, self.__e_max = e_bounds[0], e_bounds[1]
+        self.__Np_Y = self.__Config.GetNpTemp()
 
         self.__output_file_header = self.__Config.GetConcatenationFileHeader()
         self.__output_dir = self.__Config.GetOutputDir() 
@@ -95,52 +97,39 @@ class DataGenerator_CoolProp:
     def PreprocessData(self):
         """Generate density and static energy grid at which to evaluate fluid properties.
         """
-        P_range = np.linspace(self.__P_min, self.__P_max, self.__Np_P)
-        T_range = np.linspace(self.__T_min, self.__T_max, self.__Np_T)
-        self.__P_grid, self.__T_grid = np.meshgrid(P_range, T_range)
 
-        if not self.__use_PT:
-            P_dataset = self.__P_grid.flatten()
-            T_dataset = self.__T_grid.flatten()
-            self.__rho_min = 1e32
-            self.__rho_max = -1e32
-            self.__e_min = 1e32
-            self.__e_max = -1e32 
-            for p,T in zip(P_dataset, T_dataset):
-                try:
-                    self.__fluid.update(CP.PT_INPUTS, p, T)
-                    rho = self.__fluid.rhomass()
-                    e = self.__fluid.umass()
-                    self.__rho_max = max(rho, self.__rho_max)
-                    self.__rho_min = min(rho, self.__rho_min)
-                    self.__e_max = max(e, self.__e_max)
-                    self.__e_min = min(e, self.__e_min)
-                except:
-                    pass 
-            rho_range = (self.__rho_min - self.__rho_max)* (np.cos(np.linspace(0, 0.5*np.pi, self.__Np_P))) + self.__rho_max
-            e_range = np.linspace(self.__e_min, self.__e_max, self.__Np_T)
-            self.__rho_grid, self.__e_grid = np.meshgrid(rho_range, e_range)
+        if self.__use_PT:
+            X_min = self.__P_min
+            X_max = self.__P_max
+            Y_min = self.__T_min
+            Y_max = self.__T_max
+        else:
+            X_min = self.__rho_min
+            X_max = self.__rho_max
+            Y_min = self.__e_min
+            Y_max = self.__e_max 
+        
+        X_range = (X_min - X_max) * np.cos(np.linspace(0, 0.5*np.pi, self.__Np_X)) + X_max
+        Y_range = np.linspace(Y_min, Y_max, self.__Np_Y)
+
+        self.__X_grid, self.__Y_grid = np.meshgrid(X_range, Y_range)
         return 
     
     def VisualizeDataGrid(self):
         """Visualize query points at which fluid data are evaluated.
         """
-        if self.__use_PT:
-            fig = plt.figure(figsize=[10,10])
-            ax = plt.axes()
-            ax.plot(self.__P_grid.flatten(), self.__T_grid.flatten(), 'k.')
+        fig = plt.figure(figsize=[10,10])
+        ax = plt.axes()
+        ax.plot(self.__X_grid.flatten(), self.__Y_grid.flatten(), 'k.')
+        if self. __use_PT:
             ax.set_xlabel(r"Pressure $(p)[Pa]",fontsize=20)
             ax.set_ylabel(r"Temperature $(T)[K]",fontsize=20)
-            ax.tick_params(which='both',labelsize=18)
-            ax.grid()
         else:
-            fig = plt.figure(figsize=[10,10])
-            ax = plt.axes()
-            ax.plot(self.__rho_grid.flatten(), self.__e_grid.flatten(), 'k.')
-            ax.set_xlabel(r"Density $(\rho)[kg m^{-3}]",fontsize=20)
-            ax.set_ylabel(r"Internal energy $(e)[J kg^{-1}]",fontsize=20)
-            ax.tick_params(which='both',labelsize=18)
-            ax.grid()
+            ax.set_xlabel(r"Density $(\rho)[kg m^{-3}]$",fontsize=20)
+            ax.set_ylabel(r"Static energy $(e)[J kg^{-1}]$",fontsize=20)
+        ax.tick_params(which='both',labelsize=18)
+        ax.grid()
+        
         plt.show()
         return 
     
@@ -168,6 +157,30 @@ class DataGenerator_CoolProp:
         """
         return [self.__T_lower, self.__T_upper]
     
+    def SetNpDensity(self, Np_density:int=DefaultProperties.Np_p):
+        self.SetNpPressure(Np_P=Np_density)
+        return 
+
+    def GetNpDensity(self):
+        return self.GetNpPressure()
+    
+    def SetDensityBounds(self, Density_lower:float=DefaultProperties.Rho_min, Density_upper:float=DefaultProperties.Rho_max):
+        self.__rho_min = Density_lower
+        self.__rho_max = Density_upper
+        return 
+    
+    def SetNpEnergy(self, Np_energy:int=DefaultProperties.Np_temp):
+        self.SetNpTemp(Np_Temp=Np_energy)
+        return 
+    
+    def GetNpEnergy(self):
+        return self.GetNpTemp()
+    
+    def SetEnergyBounds(self, Energy_lower:float=DefaultProperties.Energy_min, Energy_upper:float=DefaultProperties.Energy_max):
+        self.__e_min = Energy_lower
+        self.__e_max = Energy_upper
+        return 
+    
     
     def SetNpTemp(self, Np_Temp:int=DefaultProperties.Np_temp):
         """
@@ -181,7 +194,7 @@ class DataGenerator_CoolProp:
         if (Np_Temp <= 0):
             raise Exception("Number of unburnt temperature samples should be higher than one.")
         else:
-            self.__Np_T = Np_Temp
+            self.__Np_Y = Np_Temp
         return 
     
     def GetNpTemp(self):
@@ -192,9 +205,28 @@ class DataGenerator_CoolProp:
         :rtype: int
 
         """
-        return self.__Np_T
+        return self.__Np_Y
     
 
+    
+    def SetNpPressure(self, Np_P:int=DefaultProperties.Np_p):
+        """
+        Set number of divisions for the fluid pressure grid.
+
+        :param Np_Temp: Number of divisions for the fluid pressure.
+        :type Np_Temp: int
+        :rase: Exception: If the number of divisions is lower than one.
+
+        """
+        if (Np_P <= 0):
+            raise Exception("Number of unburnt temperature samples should be higher than one.")
+        else:
+            self.__Np_X = Np_P 
+        return 
+    
+    def GetNpPressure(self):
+        return self.__Np_X
+    
     def SetPressureBounds(self, P_lower:float=DefaultProperties.P_min, P_upper:float=DefaultProperties.P_max):
         """Set the upper and lower limits for the fluid pressure.
 
@@ -316,28 +348,28 @@ class DataGenerator_CoolProp:
         """
 
         # Initiate empty fluid property arrays.
-        self.__s_fluid = np.zeros([self.__Np_P, self.__Np_T])
-        self.__dsde_rho_fluid = np.zeros([self.__Np_P, self.__Np_T])
-        self.__dsdrho_e_fluid = np.zeros([self.__Np_P, self.__Np_T])
-        self.__d2sde2_fluid = np.zeros([self.__Np_P, self.__Np_T])
-        self.__d2sdrho2_fluid = np.zeros([self.__Np_P, self.__Np_T])
-        self.__d2sdedrho_fluid = np.zeros([self.__Np_P, self.__Np_T])
-        self.__P_fluid = np.zeros([self.__Np_P, self.__Np_T])
-        self.__T_fluid = np.zeros([self.__Np_P, self.__Np_T])
-        self.__c2_fluid = np.zeros([self.__Np_P, self.__Np_T])
-        self.__rho_fluid = np.zeros([self.__Np_P, self.__Np_T])
-        self.__e_fluid = np.zeros([self.__Np_P, self.__Np_T])
+        self.__s_fluid = np.zeros([self.__Np_X, self.__Np_Y])
+        self.__dsde_rho_fluid = np.zeros([self.__Np_X, self.__Np_Y])
+        self.__dsdrho_e_fluid = np.zeros([self.__Np_X, self.__Np_Y])
+        self.__d2sde2_fluid = np.zeros([self.__Np_X, self.__Np_Y])
+        self.__d2sdrho2_fluid = np.zeros([self.__Np_X, self.__Np_Y])
+        self.__d2sdedrho_fluid = np.zeros([self.__Np_X, self.__Np_Y])
+        self.__P_fluid = np.zeros([self.__Np_X, self.__Np_Y])
+        self.__T_fluid = np.zeros([self.__Np_X, self.__Np_Y])
+        self.__c2_fluid = np.zeros([self.__Np_X, self.__Np_Y])
+        self.__rho_fluid = np.zeros([self.__Np_X, self.__Np_Y])
+        self.__e_fluid = np.zeros([self.__Np_X, self.__Np_Y])
 
-        self.__success_locations = np.ones([self.__Np_P, self.__Np_T],dtype=bool)
+        self.__success_locations = np.ones([self.__Np_X, self.__Np_Y],dtype=bool)
         
         # Loop over density-based or pressure-based grid.
-        for i in tqdm(range(self.__Np_P)):
-            for j in range(self.__Np_T):
+        for i in tqdm(range(self.__Np_X)):
+            for j in range(self.__Np_Y):
                 try:
                     if self.__use_PT:
-                        self.__fluid.update(CP.PT_INPUTS, self.__P_grid[i,j], self.__T_grid[i,j])
+                        self.__fluid.update(CP.PT_INPUTS, self.__X_grid[i,j], self.__Y_grid[i,j])
                     else:
-                        self.__fluid.update(CP.DmassUmass_INPUTS, self.__rho_grid[j,i], self.__e_grid[j,i])
+                        self.__fluid.update(CP.DmassUmass_INPUTS, self.__X_grid[j,i], self.__Y_grid[j,i])
 
                     # Check if fluid phase is not vapor or liquid
                     if (self.__fluid.phase() != 0) and (self.__fluid.phase() != 3) and (self.__fluid.phase() != 6):
