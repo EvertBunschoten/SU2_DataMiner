@@ -18,913 +18,116 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
 import csv 
 
-from Common.EntropicAIConfig import EntropicAIConfig 
+from Common.EntropicAIConfig import EntropicAIConfig,FlameletAIConfig
 from Common.Properties import DefaultProperties 
+from Common.CommonMethods import GetReferenceData
+from Trainer_Base import MLPTrainer, TensorFlowFit,PhysicsInformedTrainer
 
-def GetReferenceData(dataset_file, x_vars, train_variables):
-    # Open data file and get variable names from the first line
-    fid = open(dataset_file, 'r')
-    line = fid.readline()
-    fid.close()
-    line = line.strip()
-    line_split = line.split(',')
-    if(line_split[0][0] == '"'):
-        varnames = [s[1:-1] for s in line_split]
-    else:
-        varnames = line_split
-    
-    # Get indices of controlling and train variables
-    iVar_x = [varnames.index(v) for v in x_vars]
-    iVar_y = [varnames.index(v) for v in train_variables]
-
-    # Retrieve respective data from data set
-    D = np.loadtxt(dataset_file, delimiter=',', skiprows=1, dtype=np.float32)
-    X_data = D[:, iVar_x]
-    Y_data = D[:, iVar_y]
-
-    return X_data, Y_data
-
-class MLPTrainer:
-    # Base class for flamelet MLP trainer
-
-    _n_epochs:int = DefaultProperties.N_epochs      # Number of epochs to train for.
-    _alpha_expo:float = DefaultProperties.init_learning_rate_expo  # Alpha training exponent parameter.
-    _lr_decay:float = DefaultProperties.learning_rate_decay      # Learning rate decay parameter.
-    _batch_expo:int = DefaultProperties.batch_size_exponent     # Mini-batch size exponent.
-
-    _i_activation_function:int = 0   # Activation function index.
-    _activation_function_name:str = "elu"
-    _activation_function = None
-    _restart_training:bool = False # Restart training process
-    _activation_function_names_options:list[str] = ["linear","elu","relu","tanh","exponential"]
-    _activation_function_options = activation_functions = [tf.keras.activations.linear,
-                            tf.keras.activations.elu,\
-                            tf.keras.activations.relu,\
-                            tf.keras.activations.tanh,\
-                            tf.keras.activations.exponential]
-    # Hardware info:
-    _kind_device:str = "CPU" # Device type used to train (CPU or GPU)
-    _device_index:int = 0    # Device index (core index or GPU card index)
-    
-    # MLP input (controlling) variables.
-    _controlling_vars:list[str] = ["Density", 
-                        "Energy"]
-    
-    # Variable names to train for.
-    _train_vars:list[str] = []
-
-    # Train, test, and validation data.
-    _filedata_train:str 
-    _X_train:np.ndarray = None 
-    _Y_train:np.ndarray = None 
-    _X_train_norm:np.ndarray = None 
-    _Y_train_norm:np.ndarray = None
-    _X_test:np.ndarray = None 
-    _Y_test:np.ndarray = None 
-    _X_test_norm:np.ndarray = None 
-    _Y_test_norm:np.ndarray = None 
-    _X_val:np.ndarray = None 
-    _Y_val:np.ndarray = None 
-    _X_val_norm:np.ndarray = None 
-    _Y_val_norm:np.ndarray = None 
-
-    # Dataset normalization bounds.
-    _X_min:np.ndarray = None
-    _X_max:np.ndarray = None
-    _Y_min:np.ndarray = None 
-    _Y_max:np.ndarray = None
-
-    # Hidden layers neuron count.
-    _hidden_layers:list[int] = None
-
-    # Weights and biases matrices.
-    _weights:list[np.ndarray] = []
-    _biases:list[np.ndarray] = []
-
-    # Weights and biases with redundant neurons removed.
-    _trimmed_weights:list[np.ndarray] = []
-    _trimmed_biases:list[np.ndarray] = []
-
-    _test_score:float = None       # Loss function on test set upon training termination.
-    _cost_parameter:float = None   # Cost parameter of the trimmed network.
-
-    _train_time:float = 0  # Training time in minutes.
-    _test_time:float = 0   # Test set evaluation time in seconds.
-
-    _save_dir:str = "/"  # Directory to save trained network information to.
-
-    optuna_trial = None 
-
-    # Intermediate history update window settings.
-    history_plot_window = None 
-    history_plot_axes = None
-    history_epochs = []
-    history_loss = []
-    history_val_loss = []
-
-    _stagnation_tolerance:float = 1e-11 
-    _stagnation_patience:int = 1000 
-    _verbose:int = 1
+class Train_Entropic_Direct(TensorFlowFit):
 
     def __init__(self):
-        """Initiate MLP trainer object.
-        """
-        return    
-    
-    def SetVerbose(self, verbose_level:int=1):
-        if verbose_level < 0 or verbose_level > 2:
-            raise Exception("Verbose level should be 0, 1, or 2.")
-        self._verbose = int(verbose_level)
-        return 
-    
-        
-    def SetVerbose(self, verbose_level:int=1):
-        if verbose_level < 0 or verbose_level > 2:
-            raise Exception("Verbose level should be 0, 1, or 2.")
-        self._verbose = int(verbose_level)
-        return 
-    
-    def SetTrainFileHeader(self, train_filepathname:str):
-        self._filedata_train = train_filepathname
-        return 
-    
-    def SetSaveDir(self, save_dir_in:str):
-        """Define directory in which trained MLP information is saved.
-
-        :param save_dir_in: main directory in which to save the trained models and outputs.
-        :type save_dir_in: str
-        """
-        self._save_dir = save_dir_in
-        return 
-    
-    def SetModelIndex(self, idx_input:int):
-        """Define model index under which MLP info is saved.
-
-        :param idx_input: MLP model index
-        :type idx_input: int
-        """
-        self._model_index = idx_input
-        return 
-    
-    def SetNEpochs(self, n_input:int=DefaultProperties.N_epochs):
-        """Set number of training epochs
-
-        :param n_input: epoch count.
-        :type n_input: int
-        :raises Exception: if the specified number of epochs is lower than zero.
-        """
-        if n_input <= 0:
-            raise Exception("Epoch count should be higher than zero.")
-        self._n_epochs = n_input
-        return 
-    
-    def SetActivationFunction(self, name_function:str="exponential"):
-        self._activation_function_name = name_function 
-
-        self._i_activation_function = self._activation_function_names_options.index(name_function)
-        self._activation_function = self._activation_function_options[self._i_activation_function]
-        return 
-    
-    def SetDeviceKind(self, kind_device:str):
-        """Define computational hardware on which to train the network.
-
-        :param kind_device: device kind (should be "CPU" or "GPU")
-        :type kind_device: str
-        :raises Exception: if specified device is neither "CPU" or "GPU".
-        """
-        if kind_device != "CPU" and kind_device != "GPU":
-            raise Exception("Device should be \"CPU\" or \"GPU\"")
-        self._kind_device = kind_device
-        return 
-    
-    def SetDeviceIndex(self, device_index:int):
-        """Define device index on which to train (CPU core or GPU card).
-
-        :param device_index: CPU node or GPU card index to use for training.
-        :type device_index: int
-        """
-        self._device_index = device_index
-        return 
-    
-    def SetControllingVariables(self, x_vars:list[str]):
-        """Specify MLP input or controlling variable names.
-
-        :param x_vars: list of controlling variable names on which to train the MLP's.
-        :type x_vars: list[str]
-        """
-        self._controlling_vars = []
-        for var in x_vars:
-            self._controlling_vars.append(var)
-        return 
-    
-    def SetLRDecay(self, lr_decay:float=DefaultProperties.learning_rate_decay):
-        """Specify learning rate decay parameter for exponential decay scheduler.
-
-        :param lr_decay: learning rate decay factor.
-        :type lr_decay: float
-        :raises Exception: if specified learning rate decay factor is not between zero and one.
-        """
-        if lr_decay < 0 or lr_decay > 1.0:
-            raise Exception("Learning rate decay factor should be between zero and one, not "+str(lr_decay))
-        self._lr_decay = lr_decay
-        return 
-    
-    def SetAlphaExpo(self, alpha_expo:float=DefaultProperties.init_learning_rate_expo):
-        """Specify exponent of initial learning rate for exponential decay scheduler.
-
-        :param alpha_expo: initial learning rate exponent.
-        :type alpha_expo: float
-        :raises Exception: if specified exponent is higher than zero.
-        """
-        if alpha_expo > 0:
-            raise Exception("Initial learning rate exponent should be below zero.")
-        self._alpha_expo = alpha_expo
-        return 
-    
-    def SetBatchSize(self, batch_expo:int=DefaultProperties.batch_size_exponent):
-        """Specify exponent of mini-batch size.
-
-        :param batch_expo: mini-batch exponent (base 2) to be used during training.
-        :type batch_expo: int
-        :raises Exception: if the specified exponent is lower than zero.
-        """
-        if batch_expo < 0:
-            raise Exception("Mini-batch exponent should be higher than zero.")
-        self._batch_expo = batch_expo
-        return 
-    
-    def SetHiddenLayers(self, layers_input:list[int]=[DefaultProperties.NN_hidden]):
-        """Define hidden layer architecture.
-
-        :param layers_input: list of neuron count per hidden layer.
-        :type layers_input: list[int]
-        :raises Exception: if any of the supplied neuron counts is lower or equal to zero.
-        """
-        self._hidden_layers = []
-        for NN in layers_input:
-            if NN <=0:
-                raise Exception("Neuron count in hidden layers should be higher than zero.")
-            self._hidden_layers.append(NN)
-        return 
-    
-    def EvaluateMLP(self, input_data_norm:np.ndarray):
-        """Evaluate MLP for a given set of normalized input data.
-
-        :param input_data_norm: array of normalized controlling variable data.
-        :type input_data_norm: np.ndarray
-        :raises Exception: if the number of columns in the input data does not equate the number of controlling variables.
-        :return: MLP output data for the given inputs.
-        :rtype: np.ndarray
-        """
-        if np.shape(input_data_norm)[1] != len(self._controlling_vars):
-            raise Exception("Number of input variables ("+str(np.shape(input_data_norm)[1]) + ") \
-                            does not equal the MLP input dimension ("+str(len(self._controlling_vars))+")")
-        return np.zeros(1)
-    
-    def RestartTraining(self):
-        """Restart the training process.
-        """
-        self._restart_training = True 
-        return 
-    
-    def Train_MLP(self):
-        """Commence network training.
-        """
-        return 
-    
-    def SaveWeights(self):
-        """Save weight arrays as numpy arrays.
-        """
-        return 
-    
-    def GetCostParameter(self):
-        """Retrieve MLP evaluation cost parameter.
-        :return: MLP evaluation cost parameter.
-        :rtype: float
-        """
-        return self._cost_parameter
-    
-    def GetTestScore(self):
-        """Retrieve loss value of test set upon training finalization.
-        :return: loss value of test set.
-        :rtype: float
-        """
-        return self._test_score
-    
-    def GetWeights(self):
-        """Get the trainable weights from the network.
-
-        :return: list of weight arrays.
-        :rtype: list[np.ndarray]
-        """
-        return self._weights
-    
-    def GetBiases(self):
-        """Get the trainable biases from the network.
-
-        :return: list of bias arrays.
-        :rtype: list[np.ndarray]
-        """
-        return self._biases 
-    
-    def PlotR2Data(self):
-        """Plot the MLP prediction in the form of R2-plots w.r.t. the reference data, and along each of the 
-        normalized controlling variables.
-        """
-
-        # Evaluate the MLP on the input test set data.
-        pred_data_norm = self.EvaluateMLP(self._X_test_norm)
-        ref_data_norm = self._Y_test_norm 
-
-        # Generate and save R2-plots for each of the output parameters.
-        fig, axs = plt.subplots(nrows=len(self._train_vars), ncols=1,figsize=[5,5*len(self._train_vars)])
-        for iVar in range(len(self._train_vars)):
-            R2_score = r2_score(ref_data_norm[:, iVar], pred_data_norm[:, iVar])
-            if len(self._train_vars) == 1:
-                axs.plot([0, 1],[0,1],'r')
-                axs.plot(ref_data_norm[:, iVar], pred_data_norm[:, iVar], 'k.')
-                axs.grid()
-                axs.set_title(self._train_vars[iVar] + ": %.3e" % R2_score)
-            else:
-                axs[iVar].plot([0, 1],[0,1],'r')
-                axs[iVar].plot(ref_data_norm[:, iVar], pred_data_norm[:, iVar], 'k.')
-                axs[iVar].grid()
-                axs[iVar].set_title(self._train_vars[iVar] + ": %.3e" % R2_score)
-        fig.savefig(self._save_dir + "/Model_"+str(self._model_index) + "/R2.pdf", format='pdf', bbox_inches='tight')
-        plt.close(fig)
-
-        # Generate and save the MLP predictions along each of the controlling variable ranges.
-        fig, axs = plt.subplots(nrows=len(self._train_vars), ncols=len(self._controlling_vars),figsize=[5*len(self._controlling_vars),5*len(self._train_vars)])
-        for iVar in range(len(self._train_vars)):
-            for iInput in range(len(self._controlling_vars)):
-                if len(self._train_vars) == 1:
-                    axs[iInput].plot(self._X_test_norm[:, iInput],ref_data_norm[:, iVar],'k.')
-                    axs[iInput].plot(self._X_test_norm[:, iInput], pred_data_norm[:, iVar], 'r.')
-                    axs[iInput].grid()
-                    axs[iInput].set_title(self._train_vars[iVar])
-                    axs[iInput].set_xlabel(self._controlling_vars[iInput])
-                else:
-                    axs[iVar, iInput].plot(self._X_test_norm[:, iInput],ref_data_norm[:, iVar],'k.')
-                    axs[iVar, iInput].plot(self._X_test_norm[:, iInput], pred_data_norm[:, iVar], 'r.')
-                    axs[iVar, iInput].grid()
-                    axs[iVar, iInput].set_title(self._train_vars[iVar])
-                    axs[iVar, iInput].set_xlabel(self._controlling_vars[iInput])
-        fig.savefig(self._save_dir + "/Model_"+str(self._model_index) + "/Predict_along_CVs.pdf", format='pdf', bbox_inches='tight')
-        plt.close(fig)
-        return 
-    
-    def GetTrainData(self):
-        """
-        Read train, test, and validation data sets according to flameletAI configuration and normalize data sets
-        with a feature range of 0-1.
-        """
-
-        MLPData_filepath = self._filedata_train
-        
-        print("Reading train, test, and validation data...")
-        X_full, Y_full = GetReferenceData(MLPData_filepath + "_full.csv", self._controlling_vars, self._train_vars)
-        
-        self._X_train, self._Y_train = GetReferenceData(MLPData_filepath + "_train.csv", self._controlling_vars, self._train_vars)
-        self._X_test, self._Y_test = GetReferenceData(MLPData_filepath + "_test.csv", self._controlling_vars, self._train_vars)
-        self._X_val, self._Y_val = GetReferenceData(MLPData_filepath + "_val.csv", self._controlling_vars, self._train_vars)
-        print("Done!")
-
-
-        # Calculate normalization bounds of full data set
-        self._X_min, self._X_max = np.min(X_full, 0), np.max(X_full, 0)
-        self._Y_min, self._Y_max = np.min(Y_full, 0), np.max(Y_full, 0)
-
-        # Free up memory
-        del X_full
-        del Y_full
-
-        # Normalize train, test, and validation controlling variables
-        self._X_train_norm = (self._X_train - self._X_min) / (self._X_max - self._X_min)
-        self._X_test_norm = (self._X_test - self._X_min) / (self._X_max - self._X_min)
-        self._X_val_norm = (self._X_val - self._X_min) / (self._X_max - self._X_min)
-
-        # Normalize train, test, and validation data
-        self._Y_train_norm = (self._Y_train - self._Y_min) / (self._Y_max - self._Y_min)
-        self._Y_test_norm = (self._Y_test - self._Y_min) / (self._Y_max - self._Y_min)
-        self._Y_val_norm = (self._Y_val - self._Y_min) / (self._Y_max - self._Y_min)
-        return 
-    
-    
-    def write_SU2_MLP(self, file_out:str):
-        """Write the network to ASCII format readable by the MLPCpp module in SU2.
-
-        :param file_out: MLP output path and file name.
-        :type file_out: str
-        """
-
-        n_layers = len(self._weights)+1
-
-        # Select trimmed weight matrices for output.
-        weights_for_output = self._weights
-        biases_for_output = self._biases
-
-        # Opening output file
-        fid = open(file_out+'.mlp', 'w+')
-        fid.write("<header>\n\n")
-        
-
-        # Writing number of neurons per layer
-        fid.write('[number of layers]\n%i\n\n' % n_layers)
-        fid.write('[neurons per layer]\n')
-        activation_functions = []
-
-        for iLayer in range(n_layers-1):
-            if iLayer == 0:
-                activation_functions.append('linear')
-            else:
-                activation_functions.append(self._activation_function_name)
-            n_neurons = np.shape(weights_for_output[iLayer])[0]
-            fid.write('%i\n' % n_neurons)
-        fid.write('%i\n' % len(self._train_vars))
-
-        activation_functions.append('linear')
-
-        # Writing the activation function for each layer
-        fid.write('\n[activation function]\n')
-        for iLayer in range(n_layers):
-            fid.write(activation_functions[iLayer] + '\n')
-
-        # Writing the input and output names
-        fid.write('\n[input names]\n')
-        for input in self._controlling_vars:
-                fid.write(input + '\n')
-        
-        fid.write('\n[input normalization]\n')
-        for i in range(len(self._controlling_vars)):
-            fid.write('%+.16e\t%+.16e\n' % (self._X_min[i], self._X_max[i]))
-        
-        fid.write('\n[output names]\n')
-        for output in self._train_vars:
-            fid.write(output+'\n')
-            
-        fid.write('\n[output normalization]\n')
-        for i in range(len(self._train_vars)):
-            fid.write('%+.16e\t%+.16e\n' % (self._Y_min[i], self._Y_max[i]))
-
-        fid.write("\n</header>\n")
-        # Writing the weights of each layer
-        fid.write('\n[weights per layer]\n')
-        for W in weights_for_output:
-            fid.write("<layer>\n")
-            for i in range(np.shape(W)[0]):
-                fid.write("\t".join("%+.16e" % float(w) for w in W[i, :]) + "\n")
-            fid.write("</layer>\n")
-        
-        # Writing the biases of each layer
-        fid.write('\n[biases per layer]\n')
-        
-        # Input layer biases are set to zero
-        fid.write("\t".join("%+.16e" % 0 for _ in self._controlling_vars) + "\n")
-
-        #for B in self.biases:
-        for B in biases_for_output:
-            try:
-                fid.write("\t".join("%+.16e" % float(b) for b in B.numpy()) + "\n")
-            except:
-                fid.write("\t".join("%+.16e" % float(B.numpy())) + "\n")
-
-        fid.close()
-        return 
-    
-    def Save_Relevant_Data(self):
-        """Save network performance characteristics in text file and write SU2 MLP input file.
-        """
-
-        fid = open(self._save_dir + "/Model_"+str(self._model_index)+"/MLP_performance.txt", "w+")
-        fid.write("Training time[minutes]: %+.3e\n" % self._train_time)
-        fid.write("Validation score: %+.16e\n" % self._test_score)
-        fid.write("Total neuron count:  %i\n" % np.sum(np.array(self._hidden_layers)))
-        fid.write("Evaluation time[seconds]: %+.3e\n" % (self._test_time))
-        fid.write("Evaluation cost parameter: %+.3e\n" % (self._cost_parameter))
-        fid.write("Alpha exponent: %+.4e\n" % self._alpha_expo)
-        fid.write("Learning rate decay: %+.4e\n" % self._lr_decay)
-        fid.write("Batch size exponent: %i\n" % self._batch_expo)
-        fid.write("Activation function index: %i\n" % self._i_activation_function)
-        fid.write("Number of hidden layers: %i\n" % len(self._hidden_layers))
-        fid.write("Architecture: " + " ".join(str(n) for n in self._hidden_layers) + "\n")
-        fid.close()
-
-        self.write_SU2_MLP(self._save_dir + "/Model_"+str(self._model_index)+"/MLP_entropy")
-        return 
-    
-    def Plot_Architecture(self):
-        """Visualize the MLP architecture by plotting the neurons in each of the hidden layers.
-        """
-        fig = plt.figure()
-        plt.plot(np.zeros(len(self._controlling_vars)), np.arange(len(self._controlling_vars)) - 0.5*len(self._controlling_vars), 'bo')
-        for i in range(len(self._hidden_layers)):
-            plt.plot((i+1)*np.ones(int(self._hidden_layers[i])), np.arange(int(self._hidden_layers[i])) - 0.5*self._hidden_layers[i], 'ko')
-        plt.plot((i+2)*np.ones(len(self._train_vars)), np.arange(len(self._train_vars)) - 0.5*len(self._train_vars), 'go')
-        plt.axis('equal')
-        fig.savefig(self._save_dir +"/Model_"+str(self._model_index) + "/architecture.png",format='png', bbox_inches='tight')
-        plt.close(fig)
-        return 
-    
-    def Plot_and_Save_History(self):
-        return
-
-class Train_Entropic_MLP(MLPTrainer):
-    # Description:
-    # Construct, train, and save an artificial neural network for FGM simulations in SU2
-    #
-    __model:keras.models.Sequential
-    history_epochs = []
-    history_loss = []
-    history_val_loss = []
-
-    def __init__(self):
-        MLPTrainer.__init__(self)
+        TensorFlowFit.__init__(self)
         # Set train variables based on what kind of network is trained
 
         self._controlling_vars = ["Density", "Energy"]
         self._train_vars = ["s"]
         return
-    
-    # Construct MLP based on architecture information
-    def DefineMLP(self):
 
-        # Construct MLP on specified device
-        with tf.device("/"+self._kind_device+":"+str(self._device_index)):
+class Train_Entropic_PINN(PhysicsInformedTrainer):
 
-            # Initialize sequential model
-            self.__model = keras.models.Sequential()
-            self.history = None 
+    __idx_rho:int
+    __idx_e:int 
+    __idx_T:int
+    __idx_p:int 
+    __idx_c2:int 
 
-            # Add input layer
-            self.__model.add(keras.layers.Input([len(self._controlling_vars, )]))
+    __s_min:float 
+    __s_max:float 
+    __rho_min:float 
+    __rho_max:float 
+    __e_min:float 
+    __e_max:float 
 
-            # Add hidden layersSetTrainFileHeader
-            iLayer = 0
-            while iLayer < len(self._hidden_layers):
-                self.__model.add(keras.layers.Dense(self._hidden_layers[iLayer], activation=self._activation_function_name, kernel_initializer="he_uniform"))
-                iLayer += 1
-            
-            # Add output layer
-            self.__model.add(keras.layers.Dense(len(self._train_vars), activation='linear'))
-
-            # Define learning rate schedule and optimizer
-            lr_schedule = keras.optimizers.schedules.ExponentialDecay(10**self._alpha_expo, decay_steps=10000,
-                                                                    decay_rate=self._lr_decay, staircase=False)
-            opt = keras.optimizers.Adam(learning_rate=lr_schedule, beta_1=0.9, beta_2=0.999, epsilon=1e-8, amsgrad=False) 
-
-            # Compile model on device
-            self.__model.compile(optimizer=opt, loss="mean_squared_error", metrics=["mape"])
-        return 
-        
-    def EvaluateMLP(self, input_data_norm:np.ndarray):
-        pred_data_norm = self.__model.predict(input_data_norm, verbose=0)
-        return pred_data_norm
-    
-    # Load previously trained MLP (did not try this yet!)
-    def LoadWeights(self):
-        """Load the weights from a previous run in order to restart training from a previous training result.
-        """
-        self._weights = []
-        self._biases = []
-        for i in range(len(self.__model.layers)):
-            loaded_W = np.load(self._save_dir + "/Model_"+str(self._model_index) + "/W_"+str(i)+".npy", allow_pickle=True)
-            loaded_b = np.load(self._save_dir + "/Model_"+str(self._model_index) + "/b_"+str(i)+".npy", allow_pickle=True)
-            self._weights.append(loaded_W)
-            self._biases.append(loaded_b)
-        return 
-    
-    def SaveWeights(self):
-        """Save the weights of the current network as numpy arrays.
-        """
-        self._weights = []
-        self._biases = []
-        for layer in self.__model.layers:
-            self._weights.append(layer.weights[0])
-            self._biases.append(layer.weights[1])
-
-        for iW, w in enumerate(self._weights):
-            np.save(self._save_dir + "/Model_"+str(self._model_index) + "/W_"+str(iW)+".npy", w, allow_pickle=True)
-            np.save(self._save_dir + "/Model_"+str(self._model_index) + "/b_"+str(iW)+".npy", self._biases[iW], allow_pickle=True)
-        return
-    
-    # Initialize MLP training 
-    def Train_MLP(self):
-        """Commence network training.
-        """
-
-        self.history_epochs = []
-        self.history_loss=[]
-        self.history_val_loss=[]
-        
-        # Read train,test, and validation data.
-        self.GetTrainData()
-
-        # Pre-processing of model before training.
-        self.DefineMLP()
-
-        if not os.path.isdir(self._save_dir + "/Model_"+str(self._model_index)):
-            os.mkdir(self._save_dir + "/Model_"+str(self._model_index))
-        
-        self.Plot_Architecture()
-
-        with tf.device("/"+self._kind_device+":"+str(self._device_index)):
-            t_start = time.time()
-            StagnationStop = tf.keras.callbacks.EarlyStopping(monitor="loss", \
-                                                      min_delta=self._stagnation_tolerance, \
-                                                      patience=self._stagnation_patience,\
-                                                      start_from_epoch=1,\
-                                                      mode="min",\
-                                                      verbose=self._verbose)
-            self.history = self.__model.fit(self._X_train_norm, self._Y_train_norm, \
-                                          epochs=self._n_epochs, \
-                                          batch_size=2**self._batch_expo,\
-                                          verbose=self._verbose, \
-                                          validation_data=(self._X_val_norm, self._Y_val_norm), \
-                                          shuffle=True,\
-                                          callbacks=[StagnationStop, self.PlotCallback(self)])
-            t_end = time.time()
-            # Store training time in minutes
-            self._train_time = (t_end - t_start) / 60
-
-            t_start = time.time()
-            self._test_score = self.__model.evaluate(self._X_test_norm, self._Y_test_norm, verbose=0)[0]
-            t_end = time.time()
-            self._test_time = (t_end - t_start)
-            self.SaveWeights()
-
-        self._cost_parameter = 0
-        for w in self._trimmed_weights:
-            self._cost_parameter += np.shape(w)[0] * np.shape(w)[1]
-        return 
-    
-    def Plot_and_Save_History(self):
-        """Plot the training convergence trends.
-        """
-        epochs = self.history.epoch
-        val_loss = self.history.history['val_loss']
-        loss = self.history.history['loss']
-
-        with open(self._save_dir + "/Model_"+str(self._model_index)+"/TrainingHistory.csv", "w+") as fid:
-            fid.write("epoch,loss,validation_loss\n")
-            csvWriter = csv.writer(fid, delimiter=',')
-            csvWriter.writerows(np.array([epochs, loss, val_loss]).T)
-
-        fig = plt.figure(figsize=[10,10])
-        ax = plt.axes()
-        ax.plot(np.log10(self.history.history['loss']), 'b', label=r'Training score')
-        ax.plot(np.log10(self.history.history['val_loss']), 'r', label=r"Validation score")
-        ax.plot([0, len(self.history.history['loss'])], [np.log10(self._test_score), np.log10(self._test_score)], 'm--', label=r"Test score")
-        ax.grid()
-        ax.legend(fontsize=20)
-        ax.set_xlabel(r"Iteration[-]", fontsize=20)
-        ax.set_ylabel(r"Training loss function [-]", fontsize=20)
-        ax.set_title(r"Entropy Training History", fontsize=22)
-        ax.tick_params(axis='both', which='major', labelsize=18)
-        fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+ "/History_Plot_Entropy.png", format='png', bbox_inches='tight')
-        plt.close(fig)
-        return 
-    
-    class PlotCallback(tf.keras.callbacks.Callback):
-            FitClass = None
-            def __init__(self, TensorFlowFit:MLPTrainer):
-                self.FitClass = TensorFlowFit
-
-            def on_epoch_end(self, epoch, logs=None):
-                self.FitClass.history_epochs.append(epoch)
-                self.FitClass.history_loss.append(logs["loss"])
-                self.FitClass.history_val_loss.append(logs["val_loss"])
-                if epoch % 10 == 0:
-                    fig = plt.figure(figsize=[10,10])
-                    ax = plt.axes()
-                    ax.plot(self.FitClass.history_epochs, self.FitClass.history_loss, 'b', label=r"Training loss")
-                    ax.plot(self.FitClass.history_epochs, self.FitClass.history_val_loss, 'r', label=r"Validation loss")
-                    ax.grid()
-                    ax.set_yscale('log')
-                    ax.legend(fontsize=20)
-                    ax.set_xlabel(r"Iteration[-]", fontsize=20)
-                    ax.set_ylabel(r"Training loss function [-]", fontsize=20)
-                    ax.set_title(r"Entropy Training History", fontsize=22)
-                    fig.savefig(self.FitClass._save_dir + "/Model_"+str(self.FitClass._model_index)+ \
-                                "/Intermediate_History_Plot_Entropic.png", format="png", bbox_inches='tight')
-                    plt.close(fig)
-
-                return super().on_epoch_end(epoch, logs)
-
-
-class Train_C2_MLP(MLPTrainer):
-    # Description:
-    # Construct, train, and save an artificial neural network for FGM simulations in SU2
-    # Network training for thermodynamic quantities based on entropy derivatives
-
-    __rho_min:float = 0   # Minimum density in data set
-    __rho_max:float = 0   # Maximum density in data set
-    __e_min:float = 0
-    __e_max:float = 0
-    __s_min:float = 0
-    __s_max:float = 0
-
-    idx_rho:int = 0
-    idx_e:int = 1
-    idx_T:int = 0
-    idx_p:int = 1
-    idx_c2:int = 2
-
-    weights:list[tf.Variable] = []
-    biases:list[tf.Variable] = []
-
-    dt = tf.float32 
-    optimizer:tf.keras.optimizers.Adam
-
-    idx_step:int = 1
-    x_var:tf.Variable
-    __keep_training:bool = True 
-    __stagnation_iter:int = 0 
-
-    __trainable_HP = []
+    T_test_loss:float 
+    P_test_loss:float 
+    C2_test_loss:float 
 
     def __init__(self):
-        MLPTrainer.__init__(self)
+        PhysicsInformedTrainer.__init__(self)
         self._controlling_vars = ["Density","Energy"]
         self._train_vars=["T","p","c2"]
-        return 
 
+        self.__idx_rho = self._controlling_vars.index("Density")
+        self.__idx_e = self._controlling_vars.index("Energy")
+        self.__idx_T = self._train_vars.index("T")
+        self.__idx_p = self._train_vars.index("p")
+        self.__idx_c2 = self._train_vars.index("c2")
+        
+        return 
+    
     def GetTrainData(self):
         print("Reading train, test, and validation data...")
         X_full, Y_full = GetReferenceData(self._filedata_train+"_full.csv", self._controlling_vars, ["s"])
-        self.X_train, self.Y_train = GetReferenceData(self._filedata_train+"_train.csv", self._controlling_vars, ["s"])
-        self.X_test, self.Y_test = GetReferenceData(self._filedata_train+"_test.csv", self._controlling_vars, ["s"])
-        self.X_val, self.Y_val = GetReferenceData(self._filedata_train+"_val.csv", self._controlling_vars, ["s"])
         print("Done!")
 
-        # Calculate normalization bounds of full data set
-        self._X_min = np.min(X_full, axis=0)
-        self._X_max = np.max(X_full, axis=0)
-        self.__rho_min, self.__rho_max = self._X_min[self.idx_rho], self._X_max[self.idx_rho]
-        self.__e_min, self.__e_max =self._X_min[self.idx_e], self._X_max[self.idx_e]
         self.__s_min, self.__s_max = min(Y_full[:, 0]), max(Y_full[:, 0])
-        self._Y_min= [np.min(Y_full,axis=0)]
-        self._Y_max = [np.max(Y_full,axis=0)]
-        self.rhoe_train_norm = (self.X_train - self._X_min) / (self._X_max - self._X_min)
 
         # Free up memory
         del X_full
         del Y_full
 
-        print("Extracting EOS data...")
-        X_full, PTC2_full = GetReferenceData(self._filedata_train+"_full.csv", self._controlling_vars, self._train_vars)
-        self.Temperature_min, self.Temperature_max = min(PTC2_full[:, self.idx_T]), max(PTC2_full[:, self.idx_T])
-        self.Pressure_min, self.Pressure_max = min(PTC2_full[:, self.idx_p]), max(PTC2_full[:, self.idx_p])
-        self.C2_min, self.C2_max = min(PTC2_full[:, self.idx_c2]), max(PTC2_full[:, self.idx_c2])
+        super().GetTrainData()
 
-        _, PTC2_train = GetReferenceData(self._filedata_train+"_train.csv", self._controlling_vars, self._train_vars)
-        X_test, PTC2_test = GetReferenceData(self._filedata_train+"_test.csv", self._controlling_vars, self._train_vars)
-        X_val, PTC2_val = GetReferenceData(self._filedata_train+"_val.csv", self._controlling_vars, self._train_vars)
-
-        self.P_train = PTC2_train[:, self.idx_p]
-        self.T_train = PTC2_train[:, self.idx_T]
-        self.C2_train = PTC2_train[:, self.idx_c2]
-
-        self.P_test = PTC2_test[:, self.idx_p]
-        self.T_test = PTC2_test[:, self.idx_T]
-        self.C2_test = PTC2_test[:, self.idx_c2]
-        self.rhoe_test_norm = (X_test - self._X_min) / (self._X_max - self._X_min)
-
-        self.P_val = PTC2_val[:, self.idx_p]
-        self.T_val = PTC2_val[:, self.idx_T]
-        self.C2_val = PTC2_val[:, self.idx_c2]
-        self.rhoe_val_norm = (X_val - self._X_min) / (self._X_max - self._X_min)
-
-        print("Done!")
+        self.__rho_min, self.__rho_max = self._X_min[self.__idx_rho], self._X_max[self.__idx_rho]
+        self.__e_min, self.__e_max = self._X_min[self.__idx_e], self._X_max[self.__idx_e]
         return 
     
-    def SetWeights(self, weights_input:list[np.ndarray]):
-        """Set the initial weights for the network.
-
-        :param weights_input: list with trainable weights values.
-        :type weights_input: list[np.ndarray]
-        """
-        self._weights = []
-        for W in weights_input:
-            self._weights.append(tf.Variable(W, self.dt))
-        return 
-    
-    def SetBiases(self, biases_input:list[np.ndarray]):
-        """Set the initial biases for the network.
-
-        :param biases_input: list with trainable biases values.
-        :type biases_input: list[np.ndarray]
-        """
-        self._biases = []
-        for b in biases_input:
-            self._biases.append(tf.Variable(b, self.dt))
-        return 
-    
-    def __CollectVariables(self):
+    @tf.function
+    def CollectVariables(self):
         """Define weights and biases as trainable hyper-parameters.
         """
-        self.__trainable_HP = []
+        self.__trainable_hyperparams = []
         for W in self._weights:
-            self.__trainable_HP.append(W)
+            self.__trainable_hyperparams.append(W)
         for b in self._biases[:-1]:
-            self.__trainable_HP.append(b)
-        return 
-    
-    def __SetOptimizer(self):
-        """Prepare optimizer and learning rate scheduler.
-        """
-        self.lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(10**self._alpha_expo, decay_steps=30000,
-                                                                            decay_rate=self._lr_decay, staircase=False)
-        self.optimizer = tf.keras.optimizers.Adam(self.lr_schedule) 
+            self.__trainable_hyperparams.append(b)
         return 
     
     @tf.function
-    def __ComputeLayerInput(self, x:tf.Tensor, W:tf.Tensor, b:tf.Tensor):
-        """Compute input for activation function for input x for a given weights and biases tensor.
+    def __ComputeEntropyGradients(self, rhoe_norm:tf.Tensor):
+        with tf.GradientTape() as tape_2:
+            tape_2.watch(rhoe_norm)
+            with tf.GradientTape() as tape_1:
+                tape_1.watch(rhoe_norm)
+                s_norm = self._MLP_Evaluation(rhoe_norm)
+                ds_norm = tape_1.gradient(s_norm, rhoe_norm)
+                dsdrho_e_norm = tf.gather(ds_norm, indices=self.__idx_rho,axis=1)
+            d2s_norm = tape_2.gradient(dsdrho_e_norm, rhoe_norm)
+        d2sdrho2_norm = tf.gather(d2s_norm,indices=self.__idx_rho,axis=1)
+        d2sdrhode_norm = tf.gather(d2s_norm, indices=self.__idx_e, axis=1)
+        with tf.GradientTape() as tape_2:
+            tape_2.watch(rhoe_norm)
+            with tf.GradientTape() as tape_1:
+                tape_1.watch(rhoe_norm)
+                s_norm = self._MLP_Evaluation(rhoe_norm)
+                ds_norm = tape_1.gradient(s_norm, rhoe_norm)
+                dsde_rho_norm = tf.gather(ds_norm, indices=self.__idx_e,axis=1)
+            d2s_norm = tape_2.gradient(dsdrho_e_norm, rhoe_norm)
+        d2sde2_norm = tf.gather(d2s_norm, indices=self.__idx_e,axis=1)
 
-        :param x: output from previous (hidden) layer.
-        :type x: tf.Tensor
-        :param W: network weights for current layer.
-        :type W: tf.Tensor
-        :param b: biases vector for current layer
-        :type b: tf.Tensor
-        :return: inputs for activation function for the current layer.
-        :rtype: tf.Tensor
-        """
-        X = tf.matmul(x, W) + b 
-        return X 
+        s_scale = self.__s_max - self.__s_min
+        rho_scale = self.__rho_max - self.__rho_min
+        e_scale = self.__e_max - self.__e_min
+        s_dim = s_scale * s_norm + self.__s_min 
+        dsdrho_e = (s_scale / rho_scale) * dsdrho_e_norm
+        dsde_rho = (s_scale / e_scale) * dsde_rho_norm 
+        d2sdrho2 = (s_scale / tf.pow(rho_scale, 2)) * d2sdrho2_norm 
+        d2sdedrho = (s_scale / (rho_scale * e_scale)) * d2sdrhode_norm 
+        d2sde2 = (s_scale / tf.pow(e_scale, 2)) * d2sde2_norm 
+        return s_dim, dsdrho_e, dsde_rho, d2sdrho2, d2sdedrho, d2sde2 
     
-    @tf.function
-    def EvaluateMLP(self, rhoe_norm:tf.Tensor):
-        """Compute (normalized) MLP output based on normalized inputs.
-
-        :param rhoe_norm: normalized tensor with density, energy values.
-        :type rhoe_norm: tf.Tensor
-        :return: tensor with normalized entropy output.
-        :rtype: tf.Tensor
-        """
-        Y = rhoe_norm 
-        for iLayer in range(len(self._weights)-1):
-            Y = self._activation_function(self.__ComputeLayerInput(Y, self._weights[iLayer], self._biases[iLayer]))
-        Y = self.__ComputeLayerInput(Y, self._weights[-1], self._biases[-1])
-        return Y 
-    
-    @tf.function
-    def __Gradients_2(self, x_var:tf.Variable):
-        """Compute the normalized first and second derivatives of the MLP output w.r.t. to the normalized inputs.
-
-        :param x_var: normalized input tensor.
-        :type x_var: tf.Variable
-        :return: normalized dsdrho_e, dsde_rho, d2sdrho2, d2sdedrho, d2sde2 
-        :rtype: tf.Tensor
-        """
-
-        # Evaluate density derivatives.
-        with tf.GradientTape() as tape_1:
-            with tf.GradientTape() as tape_2:
-                s_norm = self.EvaluateMLP(x_var)
-                ds_norm = tape_2.gradient(s_norm, x_var)
-                ds_norm_rho = tf.gather(ds_norm, indices=self.idx_rho, axis=1)
-                d2s_norm_rho = tape_1.gradient(ds_norm_rho, x_var)
-
-        # Evaluate energy derivatives.
-        with tf.GradientTape() as tape_1:
-            with tf.GradientTape() as tape_2:
-                s_norm = self.EvaluateMLP(x_var)
-                ds_norm = tape_2.gradient(s_norm, x_var)
-                ds_norm_e = tf.gather(ds_norm, indices=self.idx_e, axis=1)
-                d2s_norm_e = tape_1.gradient(ds_norm_e, x_var)
-
-        # Extract derivative information.
-        dsdrho_e_norm = tf.gather(ds_norm, self.idx_rho, axis=1)
-        dsde_rho_norm = tf.gather(ds_norm, self.idx_e, axis=1)
-        d2sdrho2_norm = tf.gather(d2s_norm_rho, self.idx_rho, axis=1)
-        d2sdedrho_norm = tf.gather(d2s_norm_e, self.idx_rho, axis=1)
-        d2sde2_norm = tf.gather(d2s_norm_e, self.idx_e, axis=1)
-
-        return dsdrho_e_norm, dsde_rho_norm, d2sdrho2_norm, d2sdedrho_norm, d2sde2_norm
-
-    @tf.function
-    def __EntropicEOS(self, rho:tf.Tensor, ds_dim:list[tf.Tensor], d2s_dim:list[tf.Tensor]):
-        """Compute thermodynamic quantities based on entropy derivatives w.r.t. energy and density.
-
-        :param rho: density [kg m^-3]
-        :type rho: tf.Tensor
-        :param ds_dim: dsdrho_e, dsde_rho
-        :type ds_dim: list[tf.Tensor]
-        :param d2s_dim: d2sdrho2, d2sdedrho, d2sde2
-        :type d2s_dim: list[tf.Tensor]
-        :return: temperature, pressure, and squared speed of sound
-        :rtype: tf.Tensor
-        """
-
-        # Retrieve derivative information
-        dsdrho_e = ds_dim[0]
-        dsde_rho = ds_dim[1]
-        d2sdrho2 = d2s_dim[0]
-        d2sdedrho = d2s_dim[1]
-        d2sde2 = d2s_dim[2]
-
-        # Entropic EOS
+    @tf.function 
+    def __EntropicEOS(rho, dsdrho_e, dsde_rho, d2sdrho2, d2sdedrho, d2sde2):
         T = 1.0 / dsde_rho
         P = -tf.pow(rho, 2) * T * dsdrho_e
         blue_term = (dsdrho_e * (2 - rho * tf.pow(dsde_rho, -1) * d2sdedrho) + rho*d2sdrho2)
@@ -933,68 +136,16 @@ class Train_C2_MLP(MLPTrainer):
   
         return T, P, c2
     
-    @tf.function
-    def __DeNormalize_Gradients(self, x_var:tf.Variable):
-        """Dimensionalize entropy derivatives.
-
-        :param x_var: normalized density, energy tensor
-        :type x_var: tf.Variable
-        :return: density, first entropy derivatives, second entropy derivatives
-        :rtype: tf.Tensor
-        """
-
-        # Compute normalized gradients.
-        dsdrho_e_norm, \
-        dsde_rho_norm, \
-        d2sdrho2_norm, \
-        d2sdedrho_norm, \
-        d2sde2_norm= self.__Gradients_2(x_var)
-
-        # Compute scales for density, energy and entropy.
-        rho_scale = self.__rho_max - self.__rho_min
-        e_scale = self.__e_max - self.__e_min 
-        s_scale = self.__s_max - self.__s_min 
-        
-        # Scale normalized density.
-        rho_norm = tf.gather(x_var, self.idx_rho,axis=1)
-        rho_dim = rho_scale * rho_norm + self.__rho_min
-
-        # Scale first derivatives.
-        dsdrho_e = tf.math.multiply(s_scale / rho_scale, dsdrho_e_norm)
-        dsde_rho = tf.math.multiply(s_scale / e_scale, dsde_rho_norm)
-
-        # Scale second derivatives
-        d2sdrho2 = tf.math.multiply(s_scale / (rho_scale * rho_scale), d2sdrho2_norm)
-        d2sdedrho = tf.math.multiply(s_scale / (rho_scale * e_scale), d2sdedrho_norm)
-        d2sde2 = tf.math.multiply(s_scale / (e_scale * e_scale), d2sde2_norm)
-       
-        return rho_dim, [dsdrho_e, dsde_rho], [d2sdrho2, d2sdedrho, d2sde2]
+    @tf.function 
+    def __TD_Evaluation(self, rhoe_norm:tf.Tensor):
+        s, dsdrho_e, dsde_rho, d2sdrho2, d2sdedrho, d2sde2 = self.__ComputeEntropyGradients(rhoe_norm)
+        rho_norm = tf.gather(rhoe_norm, indices=self.__idx_rho, axis=1)
+        rho = (self.__rho_max - self.__rho_min)*rho_norm + self.__rho_min 
+        T, P, c2 = self.__EntropicEOS(rho, dsdrho_e, dsde_rho, d2sdrho2, d2sdedrho, d2sde2)
+        return s, T, P, c2 
     
-    
-    @tf.function
-    def __TD_Evaluation(self, x_var:tf.Variable):
-        """Compute the thermodynamic state based on normalized density and energy.
-
-        :param x_var: normalized density, energy tensor
-        :type x_var: tf.Variable
-        :return: temperature, pressure, squared speed of sound
-        :rtype: tf.Tensor
-        """
-
-        # Compute entropy derivatives w.r.t. to density and energy.
-        rho_dim, ds_dim, d2s_dim = self.__DeNormalize_Gradients(x_var)
-        
-        # Convert entropy derivatives into temperature, pressure, and speed of sound.
-        T, P, c2 = self.__EntropicEOS(rho_dim, ds_dim, d2s_dim)
-
-        return T, P, c2
-
-    @tf.function
-    def __mean_squared_error(self, y_true, y_pred):
-        return tf.reduce_mean(tf.pow(y_pred - y_true, 2))
-    
-    @tf.function
-    def __Compute_T_error(self, T_label:tf.Tensor, x_var:tf.Variable):
+    @tf.function 
+    def __Compute_S_error(self, S_label:tf.Tensor, x_var:tf.Variable):
         """Compute the temperature prediction error.
 
         :param T_label: reference temperature data
@@ -1006,19 +157,40 @@ class Train_C2_MLP(MLPTrainer):
         """
 
         # Evaluate thermodynamic state.
-        T, _, _ = self.__TD_Evaluation(x_var)
+        S_norm = self._MLP_Evaluation(x_var)
 
-        # Normalize reference and predicted temperature.
-        T_pred_norm = (T - self.Temperature_min) / (self.Temperature_max - self.Temperature_min)
-        T_label_norm = (T_label - self.Temperature_min) / (self.Temperature_max - self.Temperature_min)
+        S_label_norm = (S_label - self.__s_min) / (self.__s_max - self.__s_min)
 
         # Apply loss function.
-        T_error = self.__mean_squared_error(y_true=T_label_norm, y_pred=T_pred_norm)
+        S_error = self.mean_square_error(y_true=S_label_norm, y_pred=S_norm)
+
+        return S_error
+    
+    @tf.function
+    def __Compute_T_error(self, T_label_norm:tf.Tensor, x_var:tf.Variable):
+        """Compute the temperature prediction error.
+
+        :param T_label: reference temperature data
+        :type T_label: tf.Tensor
+        :param x_var: normalized density and energy tensor.
+        :type x_var: tf.Variable
+        :return: mean squared error between predicted and reference temperature.
+        :rtype: tf.Tensor
+        """
+
+        # Evaluate thermodynamic state.
+        _, T, _, _ = self.__TD_Evaluation(x_var)
+
+        # Normalize reference and predicted temperature.
+        T_pred_norm = (T - self._Y_min[self.__idx_T]) / (self._Y_max[self.__idx_T] - self._Y_min[self.__idx_T])
+        
+        # Apply loss function.
+        T_error = self.mean_square_error(y_true=T_label_norm, y_pred=T_pred_norm)
 
         return T_error
     
     @tf.function
-    def __Compute_P_error(self, P_label:tf.Tensor,x_var:tf.Variable):
+    def __Compute_P_error(self, P_label_norm:tf.Tensor,x_var:tf.Variable):
         """Compute the pressure prediction error.
 
         :param P_label: reference pressure data
@@ -1030,19 +202,18 @@ class Train_C2_MLP(MLPTrainer):
         """
 
         # Evaluate thermodynamic state.
-        _, P, _ = self.__TD_Evaluation(x_var)
+        _, _, P, _ = self.__TD_Evaluation(x_var)
 
         # Normalize reference and predicted pressure.
-        P_pred_norm = (P - self.Pressure_min) / (self.Pressure_max - self.Pressure_min)
-        P_label_norm = (P_label - self.Pressure_min) / (self.Pressure_max - self.Pressure_min)
-
+        P_pred_norm = (P - self._Y_min[self.__idx_p]) / (self._Y_max[self.__idx_p] - self._Y_min[self.__idx_p])
+        
         # Apply loss function.
-        P_error = self.__mean_squared_error(y_true=P_label_norm, y_pred=P_pred_norm)
+        P_error = self.mean_square_error(y_true=P_label_norm, y_pred=P_pred_norm)
 
         return P_error 
     
     @tf.function
-    def __Compute_C2_error(self, C2_label,x_var:tf.Variable):
+    def __Compute_C2_error(self, C2_label_norm,x_var:tf.Variable):
         """Compute the prediction error for squared speed of sound (SoS).
 
         :param C2_label: reference pressure data
@@ -1054,19 +225,18 @@ class Train_C2_MLP(MLPTrainer):
         """
 
         # Evaluate thermodynamic state.
-        _, _, C2 = self.__TD_Evaluation(x_var)
+        _, _, _, C2 = self.__TD_Evaluation(x_var)
         
         # Normalize reference and predicted squared SoS.
-        C2_pred_norm = (C2 - self.C2_min) / (self.C2_max - self.C2_min)
-        C2_label_norm = (C2_label - self.C2_min) / (self.C2_max - self.C2_min)
+        C2_pred_norm = (C2 - self._Y_min[self.__idx_c2]) / (self._Y_max[self.__idx_c2] - self._Y_min[self.__idx_c2])
 
         # Apply loss function.
-        C2_error = self.__mean_squared_error(y_true=C2_label_norm, y_pred=C2_pred_norm)
+        C2_error = self.mean_square_error(y_true=C2_label_norm, y_pred=C2_pred_norm)
 
         return C2_error
     
     @tf.function
-    def __ComputeGradients_T_error(self, T_label:tf.Tensor, rhoe_norm:tf.Variable):
+    def __ComputeGradients_T_error(self, T_label_norm:tf.Tensor, rhoe_norm:tf.Variable):
         """Compute temperature prediction error and respective MLP weight sensitivities.
 
         :param T_label: reference temperature data
@@ -1078,16 +248,17 @@ class Train_C2_MLP(MLPTrainer):
         """
 
         with tf.GradientTape() as tape:
+            tape.watch(self.__trainable_hyperparams)
             # Evaluate temperature loss value.
-            T_loss = self.__Compute_T_error(T_label, rhoe_norm)
+            T_loss = self.__Compute_T_error(T_label_norm, rhoe_norm)
             
             # Compute MLP weight sensitvities.
-            grads_T = tape.gradient(T_loss, self.__trainable_HP)
+            grads_T = tape.gradient(T_loss, self.__trainable_hyperparams)
         
         return T_loss, grads_T
 
     @tf.function
-    def __ComputeGradients_P_error(self, P_label:tf.Tensor, rhoe_norm:tf.Variable):
+    def __ComputeGradients_P_error(self, P_label_norm:tf.Tensor, rhoe_norm:tf.Variable):
         """Compute pressure prediction error and respective MLP weight sensitivities.
 
         :param P_label: reference pressure data
@@ -1098,16 +269,17 @@ class Train_C2_MLP(MLPTrainer):
         :rtype: tf.Tensor
         """
         with tf.GradientTape() as tape:
+            tape.watch(self.__trainable_hyperparams)
             # Evaluate pressure loss value.
-            P_loss = self.__Compute_P_error(P_label, rhoe_norm)
+            P_loss = self.__Compute_P_error(P_label_norm, rhoe_norm)
 
             # Compute MLP weight sensitvities.
-            grads_P = tape.gradient(P_loss, self.__trainable_HP)
+            grads_P = tape.gradient(P_loss, self.__trainable_hyperparams)
 
         return P_loss, grads_P
     
     @tf.function
-    def __ComputeGradients_C2_error(self, C2_label:tf.Tensor, rhoe_norm:tf.Variable):
+    def __ComputeGradients_C2_error(self, C2_label_norm:tf.Tensor, rhoe_norm:tf.Variable):
         """Compute SoS prediction error and respective MLP weight sensitivities.
 
         :param C2_label: reference squared SoS data
@@ -1118,303 +290,88 @@ class Train_C2_MLP(MLPTrainer):
         :rtype: tf.Tensor
         """
         with tf.GradientTape() as tape:
-            C2_loss = self.__Compute_C2_error(C2_label, rhoe_norm)
-            grads_C2 = tape.gradient(C2_loss, self.__trainable_HP)
+            tape.watch(self.__trainable_hyperparams)
+            C2_loss = self.__Compute_C2_error(C2_label_norm, rhoe_norm)
+            grads_C2 = tape.gradient(C2_loss, self.__trainable_hyperparams)
         return C2_loss, grads_C2
     
     @tf.function
-    def __Triple_Variable_Train_Step(self, T_batch:tf.Tensor, P_batch:tf.Tensor, C2_batch:tf.Tensor, rhoe_norm_batch:tf.Variable):
-        """Apply MLP weight updates based on thermodynamic quantity losses.
+    def Train_Step(self, X_batch_norm:tf.constant, Y_batch_norm:tf.constant):
 
-        :param T_batch: temperature batch data
-        :type T_batch: tf.Tensor
-        :param P_batch: pressure batch data
-        :type P_batch: tf.Tensor
-        :param C2_batch: squared speed of sound batch data
-        :type C2_batch: tf.Tensor
-        :param rhoe_norm_batch: normalized density and energy batch data
-        :type rhoe_norm_batch: tf.Variable
-        :return: loss values for temperature, pressure, and speed of sound
-        :rtype: tf.Tensor
-        """
-
+        T_batch_norm = tf.gather(Y_batch_norm,indices=self.__idx_T, axis=1)
+        P_batch_norm = tf.gather(Y_batch_norm,indices=self.__idx_p, axis=1)
+        C2_batch_norm = tf.gather(Y_batch_norm,indices=self.__idx_c2, axis=1)
+        
         # Weight update for temperature prediction.
-        T_loss, grads_T = self.__ComputeGradients_T_error(T_batch, rhoe_norm_batch)
-        self.optimizer.apply_gradients(zip(grads_T, self.__trainable_HP))
+        T_loss, grads_T = self.__ComputeGradients_T_error(T_batch_norm, X_batch_norm)
+        self.__optimizer.apply_gradients(zip(grads_T, self.__trainable_hyperparams))
 
         # Weight update for pressure prediction.
-        P_loss, grads_P = self.__ComputeGradients_P_error(P_batch,rhoe_norm_batch)
-        self.optimizer.apply_gradients(zip(grads_P, self.__trainable_HP))
+        P_loss, grads_P = self.__ComputeGradients_P_error(P_batch_norm,X_batch_norm)
+        self.__optimizer.apply_gradients(zip(grads_P, self.__trainable_hyperparams))
 
         # Weight update for SoS prediction.
-        C2_loss, grads_C2 = self.__ComputeGradients_C2_error(C2_batch,rhoe_norm_batch)
-        self.optimizer.apply_gradients(zip(grads_C2, self.__trainable_HP))
+        C2_loss, grads_C2 = self.__ComputeGradients_C2_error(C2_batch_norm,X_batch_norm)
+        self.__optimizer.apply_gradients(zip(grads_C2, self.__trainable_hyperparams))
   
         return T_loss, P_loss, C2_loss
+
+    def __ValidationLoss(self):
+        rhoe_val_norm = tf.constant(self._X_val_norm, self.__dt)
+        T_val_error = self.__Compute_T_error(rhoe_val_norm)
+        p_val_error = self.__Compute_P_error(rhoe_val_norm)
+        c2_val_error = self.__Compute_C2_error(rhoe_val_norm)
+
+        self.val_loss_history[self.__idx_T].append(T_val_error)
+        self.val_loss_history[self.__idx_p].append(p_val_error)
+        self.val_loss_history[self.__idx_c2].append(c2_val_error)
+
+        return T_val_error, p_val_error, c2_val_error
     
-
-    def Train_MLP(self):
-        """Commence training process.
-        """
-
-        # ORCHID_data_file = "/home/ecbunschoten/NICFD/NICFD_MLP_Optimization/Data_Generation/ORCHID_dataset.csv"
-        # with open(ORCHID_data_file,'r') as fid:
-        #     vars_ORCHID = fid.readline().strip().split(',')
-        # ORCHID_data = np.loadtxt(ORCHID_data_file,delimiter=',',skiprows=1,dtype=np.float32)[::10,:]
-
-        # self.rho_ORCHID = ORCHID_data[:, vars_ORCHID.index("Density")]
-        # self.e_ORCHID = ORCHID_data[:, vars_ORCHID.index("Energy")]
+    def __TestLoss(self):
         
-
-        # Prepare output directory
-        if not os.path.isdir(self._save_dir + "/Model_"+str(self._model_index)):
-            os.mkdir(self._save_dir + "/Model_"+str(self._model_index))
-
-        self.T_val_errors = []
-        self.P_val_errors = []
-        self.C2_val_errors = []
-
-        # Load training data and pre-process thermo-dynamic quantities.
-        self.GetTrainData()
-
-        # Define network weights for optimization and learning rate schedule.
-        self.__CollectVariables()
-        self.__SetOptimizer()
-
-        # rho_ORCHID_norm = (self.rho_ORCHID - self.__rho_min) / (self.__rho_max - self.__rho_min)
-        # e_ORCHID_norm = (self.e_ORCHID - self.__e_min) / (self.__e_max - self.__e_min)
-        
-        # self.rhoe_ORCHID_norm = tf.Variable(np.hstack((rho_ORCHID_norm[:,np.newaxis],e_ORCHID_norm[:,np.newaxis])),self.dt)
-        # self.T_ORCHID_ref = ORCHID_data[:, vars_ORCHID.index("T")]
-        # self.P_ORCHID_ref = ORCHID_data[:, vars_ORCHID.index("p")]
-        # self.C_ORCHID_ref = np.sqrt(ORCHID_data[:, vars_ORCHID.index("c2")])
-        
-        # Split train data into batches.
-        train_batches_TPC2 = tf.data.Dataset.from_tensor_slices((self.rhoe_train_norm, self.T_train, self.P_train, self.C2_train)).batch(2**self._batch_expo)
-        
-        # Prepare validation and test set data.
-        rhoe_val = tf.Variable(self.rhoe_val_norm,tf.float32)
-        rhoe_test = tf.Variable(self.rhoe_test_norm,tf.float32)
-
-        # Evaluate test set and generate plots every 5 epochs.
-        callback_every = 20
-
-        # Initiate training loop.
-        i = 0
-        worst_error = 1e32 
-
-        while i < self._n_epochs and self.__keep_training:
-
-            # Loop over train batches.
-            j = 0 
-            for rhoe_norm_batch, T_train_batch, P_train_batch, C2_train_batch in train_batches_TPC2:
-                j += 1
-
-                # Update weights.
-                rhoe_batch_var = tf.Variable(rhoe_norm_batch, tf.float32)
-                T_loss, P_loss, C2_loss = self.__Triple_Variable_Train_Step(T_train_batch, P_train_batch, C2_train_batch, rhoe_batch_var)
-
-                # Display trainign loss information.
-                T_loss = T_loss.numpy()
-                P_loss = P_loss.numpy()
-                C2_loss = C2_loss.numpy()
-                if (j % (2**self._batch_expo) == 0) and (self._verbose==2):
-                    print("Epoch ", str(i), "batch", str(j), " P loss", str(P_loss), " T loss", str(T_loss), " C2 loss", str(C2_loss))
-                self.idx_step = 1
-            
-            # Compute loss on validation set.
-            T_val_loss, P_val_loss, C2_val_loss = self.__TestSetLoss(rhoe_val, self.T_val, self.P_val, self.C2_val)
-            self.T_val_errors.append(T_val_loss.numpy())
-            self.P_val_errors.append(P_val_loss.numpy())
-            self.C2_val_errors.append(C2_val_loss.numpy())
-
-            if self._verbose >= 1:
-                print("Epoch %i Validation loss Temperature: %.4e, Pressure: %.4e, Speed of sound: %.4e" % (i, T_val_loss.numpy(), P_val_loss.numpy(), C2_val_loss.numpy()))
-
-            worst_error_current = max([T_val_loss.numpy(), P_val_loss.numpy(), C2_val_loss.numpy()])
-            worst_error = self.__CheckEarlyStopping(worst_error_current, worst_error)
-
-            # Compute loss on test set and plot predictions.
-            if i % callback_every == 0:
-
-                self.T_test_loss, self.P_test_loss, self.C2_test_loss,\
-                T_test, P_test, C2_test = self.__TestSetLoss(rhoe_test, self.T_test, self.P_test, self.C2_test, True)
-                self.T_test_pred = T_test.numpy()
-                self.P_test_pred = P_test.numpy()
-                self.C2_test_pred = C2_test.numpy()
-
-                self.CallbackFunction()
-
-            i += 1 
-        
-        
-        #self.__Final_Entropy_Tweaking_Step(S_batch=tf.constant(self.S_test, dtype=tf.float32),rhoe_norm_batch=tf.constant(self.rhoe_test_norm, tf.float32))
-
-
-        #self.__Final_Entropy_Tweaking_Step(S_batch=tf.constant(self.S_test, dtype=tf.float32),rhoe_norm_batch=tf.constant(self.rhoe_test_norm, tf.float32))
-
-        self.T_test_loss, self.P_test_loss, self.C2_test_loss,\
-        T_test, P_test, C2_test = self.__TestSetLoss(rhoe_test, self.T_test, self.P_test, self.C2_test, True)
-        self.T_test_pred = T_test.numpy()
-        self.P_test_pred = P_test.numpy()
-        self.C2_test_pred = C2_test.numpy()
-        self.CallbackFunction()
-
-        # Display test set loss information upon completion of training.
-        #print("Test set T loss:",str(self.T_test_loss),"P loss:",str(self.P_test_loss), "C2 loss:",str(self.C2_test_loss))
+        rhoe_test_norm = tf.constant(self._X_test_norm, self.__dt)
+        self.T_test_loss = self.__Compute_T_error(rhoe_test_norm).numpy()
+        self.P_test_loss = self.__Compute_P_error(rhoe_test_norm).numpy()
+        self.C2_test_loss = self.__Compute_C2_error(rhoe_test_norm).numpy()
         self._test_score = max([self.T_test_loss, self.P_test_loss, self.C2_test_loss])
+
         return 
     
-    def __CheckEarlyStopping(self, current_error, worst_error):
-        if current_error < worst_error - self._stagnation_tolerance:
-            self.__keep_training = True 
-            self.__stagnation_iter = 0
-            
-            worst_error = current_error
-        else:
-            self.__stagnation_iter += 1
-            if self.__stagnation_iter > self._stagnation_patience:
-                self.__keep_training = False 
-                print("Early stopping due to stagnation")
-        return worst_error 
-    
-    @tf.function
-    def __TestSetLoss(self, rhoe:tf.Variable, T_test, P_test, C2_test, return_predictions=False):
-        T_val_pred, P_val_pred, C2_val_pred = self.__TD_Evaluation(rhoe)
-        T_val_loss = self.__mean_squared_error(y_true=(T_test/(self.Temperature_max - self.Temperature_min)), \
-                                                y_pred=(T_val_pred/(self.Temperature_max - self.Temperature_min)))
-        P_val_loss = self.__mean_squared_error(y_true=(P_test/(self.Pressure_max - self.Pressure_min)), \
-                                                y_pred=(P_val_pred/(self.Pressure_max - self.Pressure_min)))
-        C2_val_loss = self.__mean_squared_error(y_true=(C2_test/(self.C2_max - self.C2_min)), \
-                                                y_pred=(C2_val_pred/(self.C2_max - self.C2_min)))
-        if return_predictions:
-            return T_val_loss, P_val_loss, C2_val_loss, T_val_pred, P_val_pred, C2_val_pred 
-        else:
-            return T_val_loss, P_val_loss, C2_val_loss
-    
-    def CallbackFunction(self):
-        # self._weights = []
-        # self._biases = []
-        # for W in self.weights:
-        #     self._weights.append(W.numpy())
-        # for b in self.biases:
-        #     self._biases.append(b.numpy())   
+    def CustomCallback(self):
 
         # Save SU2 MLP and performance metrics.
         self.Save_Relevant_Data()
 
         # Plot intermediate history trends.
-        self.Plot_Intermediate_History()
+        self.Plot_and_Save_History()
         # Error scatter plots for thermodynamic properties.
-        self.Generate_Error_Plots()
+        self.__Generate_Error_Plots()
 
-        return 
+        return super().CustomCallback()
     
-    # Write an output file containing relevant training outcomes and network information
-    def Save_Relevant_Data(self):
-        """Write loss values for thermodynamic properties.
-        """
-        
-        fid = open(self._save_dir + "/Model_"+str(self._model_index)+"/MLP_C2_performance.txt", "w+")
-        fid.write("T test loss: %+.16e\n" % self.T_test_loss)
-        fid.write("P test loss: %+.16e\n" % self.P_test_loss)
-        fid.write("C2 test loss: %+.16e\n" % self.C2_test_loss)
-        fid.close()
-
-        self.write_SU2_MLP(self._save_dir + "/Model_"+str(self._model_index)+"/MLP_TPC2")
-    
-
-    def Plot_and_Save_History(self):
-        fig = plt.figure(figsize=[10,10])
-        ax = plt.axes()
-        ax.plot(np.log10(np.array(self.T_val_errors)), 'r', label='Temperature')
-        ax.plot(np.log10(np.array(self.P_val_errors)), 'b', label='Pressure')
-        ax.plot(np.log10(np.array(self.C2_val_errors)), 'm', label='Speed of sound')
-        ax.plot([0, self._n_epochs], [np.log10(self.T_test_loss), np.log10(self.T_test_loss)], 'r--')
-        ax.plot([0, self._n_epochs], [np.log10(self.P_test_loss), np.log10(self.P_test_loss)], 'b--')
-        ax.plot([0, self._n_epochs], [np.log10(self.C2_test_loss), np.log10(self.C2_test_loss)], 'm--')
-        ax.tick_params(which='both',labelsize=18)
-        ax.set_xlabel("Epoch",fontsize=20)
-        ax.set_ylabel("Loss value",fontsize=20)
-        ax.grid()
-        ax.legend(fontsize=20)
-        fig.savefig(self.main_save_dir + "/Model_"+str(self.model_index) + "/C2_history.pdf",format='pdf',bbox_inches='tight')
-        plt.close(fig)
-        return 
-
-    def Plot_Intermediate_History(self):
-        fig = plt.figure(figsize=[10,10])
-        ax = plt.axes()
-        ax.plot(np.log10(np.array(self.T_val_errors)), 'r', label='Temperature')
-        ax.plot(np.log10(np.array(self.P_val_errors)), 'b', label='Pressure')
-        ax.plot(np.log10(np.array(self.C2_val_errors)), 'm', label='Speed of sound')
-        ax.set_xlabel("Epoch",fontsize=20)
-        ax.set_ylabel("Loss value",fontsize=20)
-        ax.grid()
-        ax.legend(fontsize=20)
-        ax.tick_params(which='both',labelsize=18)
-
-        fig.savefig(self._save_dir + "/Model_"+str(self._model_index) + "/C2_history.pdf",format='pdf',bbox_inches='tight')
-        plt.close(fig)
-        return 
-    
-    def PlotR2Data(self):
-        figformat = "png"
-        fig = plt.figure(figsize=[10,10])
-        ax = plt.axes() 
-        ax.plot([min(self.T_test),max(self.T_test)],[min(self.T_test),max(self.T_test)],'r')
-        ax.plot(self.T_test_pred, self.T_test, 'k.')
-        ax.grid()
-        ax.set_xlabel("Predicted temperature[K]",fontsize=20)
-        ax.set_ylabel("Reference temperature[K]",fontsize=20)
-        ax.tick_params(which='both',labelsize=18)
-        ax.set_title("Temperature R2 plot",fontsize=20)
-        fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/R2_Temperature."+figformat,format=figformat,bbox_inches='tight')
-        plt.close(fig)
-
-        fig = plt.figure(figsize=[10,10])
-        ax = plt.axes() 
-        ax.plot([min(self.P_test),max(self.P_test)],[min(self.P_test),max(self.P_test)],'r')
-        ax.plot(self.P_test_pred, self.P_test, 'k.')
-        ax.grid()
-        ax.set_xlabel("Predicted pressure [Pa]",fontsize=20)
-        ax.set_ylabel("Reference pressure [Pa]",fontsize=20)
-        ax.tick_params(which='both',labelsize=18)
-        ax.set_title("Pressure R2 plot",fontsize=20)
-        fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/R2_Pressure."+figformat,format=figformat,bbox_inches='tight')
-        plt.close(fig)
-
-        fig = plt.figure(figsize=[10,10])
-        ax = plt.axes() 
-        ax.plot([min(self.C2_test),max(self.C2_test)],[min(self.C2_test),max(self.C2_test)],'r')
-        ax.plot(self.C2_test_pred, self.C2_test, 'k.')
-        ax.grid()
-        ax.set_xlabel("Predicted squared sos [m2s-2]",fontsize=20)
-        ax.set_ylabel("Reference squared sos [m2s-2]",fontsize=20)
-        ax.tick_params(which='both',labelsize=18)
-        ax.set_title("Squared sos R2 plot",fontsize=20)
-        fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/R2_sos."+figformat,format=figformat,bbox_inches='tight')
-        plt.close(fig)
-
-        return 
-    
-    
-    def Generate_Error_Plots(self):
+    def __Generate_Error_Plots(self):
         """Make nice plots of the interpolated test data.
         """
 
         self.PlotR2Data()
+        
+        s_test_pred, T_test_pred, P_test_pred, C2_test_pred = self.__TD_Evaluation(self._X_test_norm)
 
         figformat = "png"
         plot_fontsize = 20
         label_fontsize=18
 
-        rho_test = (self._X_max[self.idx_rho] - self._X_min[self.idx_rho])*self.rhoe_test_norm[:, self.idx_rho] + self._X_min[self.idx_rho]
-        e_test = (self._X_max[self.idx_e] - self._X_min[self.idx_e])*self.rhoe_test_norm[:, self.idx_e] + self._X_min[self.idx_e]
+        rho_test = self._X_test[:, self.__idx_rho]#(self._X_max[self.__idx_rho] - self._X_min[self.__idx_rho])*self._X_test_norm[:, self.__idx_rho] + self._X_min[self.__idx_rho]
+        e_test = self._X_test[:, self.__idx_e]#(self._X_max[self.__idx_e] - self._X_min[self.__idx_e])*self._X_test_norm[:, self.__idx_e] + self._X_min[self.__idx_e]
         
+        T_test = self._Y_test[:, self.__idx_T]
+        P_test = self._Y_test[:, self.__idx_p]
+        C2_test = self._Y_test[:, self.__idx_c2]
+
         fig = plt.figure(figsize=[10,10])
         ax = plt.axes() 
-        cax = ax.scatter(rho_test, e_test, c=100*np.abs((self.T_test_pred - self.T_test)/self.T_test))
+        cax = ax.scatter(rho_test, e_test, c=100*np.abs((T_test_pred.numpy() - T_test)/T_test))
         cbar = plt.colorbar(cax, ax=ax)
         #cbar.set_label(r'Temperature prediction error $(\epsilon_T)[\%]$', rotation=270, fontsize=label_fontsize)
         ax.set_xlabel(r"Density $(\rho)[kg m^{-3}]$",fontsize=plot_fontsize)
@@ -1426,7 +383,7 @@ class Train_C2_MLP(MLPTrainer):
 
         fig = plt.figure(figsize=[10,10])
         ax = plt.axes() 
-        cax = ax.scatter(rho_test, self.rhoe_test_norm[:, self.idx_e], c=100*np.abs((self.P_test_pred - self.P_test)/self.P_test))
+        cax = ax.scatter(rho_test, e_test, c=100*np.abs((P_test_pred.numpy() - P_test)/P_test))
         cbar = plt.colorbar(cax, ax=ax)
         cbar.set_label(r'Pressure prediction error $(\epsilon_p)[\%]$', rotation=270, fontsize=label_fontsize)
         ax.set_xlabel("Normalized Density",fontsize=plot_fontsize)
@@ -1438,7 +395,7 @@ class Train_C2_MLP(MLPTrainer):
 
         fig = plt.figure(figsize=[10,10])
         ax = plt.axes() 
-        cax = ax.scatter(self.rhoe_test_norm[:, self.idx_rho], self.rhoe_test_norm[:, self.idx_e], c=100*np.abs((self.C2_test_pred - self.C2_test)/self.C2_test))
+        cax = ax.scatter(rho_test, e_test, c=100*np.abs((C2_test_pred.numpy() - C2_test)/C2_test))
         cbar = plt.colorbar(cax, ax=ax)
         ax.set_xlabel("Normalized Density",fontsize=plot_fontsize)
         ax.set_ylabel("Normalized Energy",fontsize=plot_fontsize)
@@ -1449,8 +406,8 @@ class Train_C2_MLP(MLPTrainer):
 
         fig = plt.figure(figsize=[10,10])
         ax = plt.axes() 
-        ax.plot(self.P_test, self.T_test, 'b.',markersize=3,markerfacecolor='none',label=r'Labeled')
-        ax.plot(self.P_test_pred, self.T_test_pred, 'r.',label=r'Predicted')
+        ax.plot(P_test, T_test, 'b.',markersize=3,markerfacecolor='none',label=r'Labeled')
+        ax.plot(P_test_pred.numpy(), T_test_pred.numpy(), 'r.',label=r'Predicted')
         ax.set_xscale('log')
         ax.grid()
         ax.legend(fontsize=20)
@@ -1464,83 +421,121 @@ class Train_C2_MLP(MLPTrainer):
         return
     
     
-    def write_SU2_MLP(self, file_out:str):
-        """Write the network to ASCII format readable by the MLPCpp module in SU2.
+    
+class Train_Flamelet_Direct(TensorFlowFit):
+    __Config:FlameletAIConfig
+    _train_name:str 
 
-        :param file_out: MLP output path and file name.
-        :type file_out: str
+    def __init__(self, Config_in:FlameletAIConfig, group_idx:int=0):
+        TensorFlowFit.__init__(self)
+        # Set train variables based on what kind of network is trained
+        self.__Config = Config_in
+        self._controlling_vars = ["ProgressVariable","EnthalpyTot","MixtureFraction"]
+        self._train_vars = self.__Config.GetMLPOutputGroup(group_idx)
+        self._train_name = "Group"+str(group_idx+1)
+
+        return
+    
+    def CustomCallback(self):
+        """Plot MLP prediction alongside flamelet reference data.
+        :file_name_header: file name header for each figure.
+        :N_plot: number of equivalence ratio's to plot for in each figure.
         """
 
-        n_layers = len(self._weights)+1
+        N_plot = 3
 
-        # Select trimmed weight matrices for output.
-        weights_for_output = self._weights
-        biases_for_output = self._biases
+        flamelet_dir = self.__Config.GetOutputDir()
+        include_freeflames = self.__Config.GenerateFreeFlames()
+        include_burnerflames = self.__Config.GenerateBurnerFlames()
+        include_eq = self.__Config.GenerateEquilibrium()
 
-        # Opening output file
-        fid = open(file_out+'.mlp', 'w+')
-        fid.write("<header>\n\n")
+        freeflame_phis = os.listdir(flamelet_dir + "/freeflame_data/")
+        idx_phi_plot = np.random.randint(0, len(freeflame_phis), N_plot)
         
+        freeflamelet_input_files = []
+        for phi in idx_phi_plot:
+            freeflame_files = os.listdir(flamelet_dir + "/freeflame_data/"+freeflame_phis[phi])
+            freeflamelet_input_files.append(flamelet_dir + "/freeflame_data/"+freeflame_phis[phi]+ "/"+freeflame_files[np.random.randint(0, len(freeflame_files))])
 
-        # Writing number of neurons per layer
-        fid.write('[number of layers]\n%i\n\n' % n_layers)
-        fid.write('[neurons per layer]\n')
-        activation_functions = []
+        # Prepare a figure window for each output variable.
+        figs = []
+        axs = []
+        for _ in self._train_vars:
+            fig, ax = plt.subplots(1,1,figsize=[10,10])
+            figs.append(fig)
+            axs.append(ax)
 
-        for iLayer in range(n_layers-1):
-            if iLayer == 0:
-                activation_functions.append('linear')
-            else:
-                activation_functions.append(self._activation_function_name)
-            n_neurons = np.shape(weights_for_output[iLayer])[0]
-            fid.write('%i\n' % n_neurons)
-        fid.write('%i\n' % 1)
+        plot_label_ref = "Flamelet data"
+        plot_label_MLP = "MLP prediction"
 
-        activation_functions.append('linear')
+        # Plot flamelet data in respective figure.
+        for flamelet_input_file in freeflamelet_input_files:
+            with open(flamelet_input_file, "r") as fid:
+                line = fid.readline()
+                variables_flamelet = line.strip().split(',')
+            flameletData = np.loadtxt(flamelet_input_file, delimiter=',',skiprows=1)
 
-        # Writing the activation function for each layer
-        fid.write('\n[activation function]\n')
-        for iLayer in range(n_layers):
-            fid.write(activation_functions[iLayer] + '\n')
-
-        # Writing the input and output names
-        fid.write('\n[input names]\n')
-        for input in self._controlling_vars:
-                fid.write(input + '\n')
-        
-        fid.write('\n[input normalization]\n')
-        for i in range(len(self._controlling_vars)):
-            fid.write('%+.16e\t%+.16e\n' % (self._X_min[i], self._X_max[i]))
-        
-        fid.write('\n[output names]\n')
-        fid.write('s\n')
+            # Collect flamelet controlling variables.
+            CV_flamelet = np.zeros([len(flameletData), len(self._controlling_vars)])
+            for iCv, Cv in enumerate(self._controlling_vars):
+                if Cv == 'ProgressVariable':
+                    CV_flamelet[:, iCv] = self.__Config.ComputeProgressVariable(variables_flamelet, flameletData)
+                else:
+                    CV_flamelet[:, iCv] = flameletData[:, variables_flamelet.index(Cv)]
             
-        fid.write('\n[output normalization]\n')
-        fid.write('%+.16e\t%+.16e\n' % (self._Y_min[0], self._Y_max[0]))
+            CV_flamelet_norm = (CV_flamelet - self._X_min)/(self._X_max - self._X_min)
 
-        fid.write("\n</header>\n")
-        # Writing the weights of each layer
-        fid.write('\n[weights per layer]\n')
-        for W in weights_for_output:
-            fid.write("<layer>\n")
-            for i in range(np.shape(W.numpy())[0]):
-                fid.write("\t".join("%+.16e" % float(w) for w in W.numpy()[i, :]) + "\n")
-            fid.write("</layer>\n")
-        
-        # Writing the biases of each layer
-        fid.write('\n[biases per layer]\n')
-        
-        # Input layer biases are set to zero
-        fid.write("\t".join("%+.16e" % 0 for _ in self._controlling_vars) + "\n")
+            ref_data_flamelet = np.zeros([len(flameletData), len(self._train_vars)])
 
-        for B in biases_for_output:
-            try:
-                fid.write("\t".join("%+.16e" % float(b) for b in B.numpy()) + "\n")
-            except:
-                fid.write("\t".join("%+.16e" % float(B.numpy())) + "\n")
+            # Collect prediction variables from flamelet data. 
+            for iVar, Var in enumerate(self._train_vars):
+                if "Beta_" in Var:
+                    beta_pv, beta_enth_thermal, beta_enth, beta_mixfrac = self.__Config.ComputeBetaTerms(variables_flamelet, flameletData)
+                if Var == "Beta_ProgVar":
+                    ref_data_flamelet[:, iVar] = beta_pv 
+                elif Var == "Beta_Enth_Thermal":
+                    ref_data_flamelet[:, iVar] = beta_enth_thermal
+                elif Var == "Beta_Enth":
+                    ref_data_flamelet[:, iVar] = beta_enth 
+                elif Var == "Beta_MixFrac":
+                    ref_data_flamelet[:, iVar] = beta_mixfrac 
+                elif Var == "ProdRateTot_PV":
+                    ref_data_flamelet[:, iVar] = self.__Config.ComputeProgressVariable_Source(variables_flamelet, flameletData)
+                elif Var == "DiffusionCoefficient":
+                    k = flameletData[:, variables_flamelet.index("Conductivity")]
+                    cp = flameletData[:, variables_flamelet.index("Cp")]
+                    rho = flameletData[:, variables_flamelet.index("Density")]
+                    ref_data_flamelet[:, iVar] = k/(cp*rho)
+                elif "NOx" in Var:
+                    len_nox = len("NOx")
 
-        fid.close()
-        return 
+                    for NOsp in ["NO", "NO2", "N2O"]:
+                        ref_data_flamelet[:, iVar]+= flameletData[:, variables_flamelet.index(Var[:-len_nox]+NOsp)]
+                else:
+                    ref_data_flamelet[:, iVar] = flameletData[:, variables_flamelet.index(Var)]
+
+            # Compute MLP prediction of flamelet data.
+            pred_data_norm = self.EvaluateMLP(CV_flamelet_norm)
+            pred_data = (self._Y_max - self._Y_min) * pred_data_norm + self._Y_min
+
+            # Plot flamelet data in corresponding figure window.
+            for iVar, Var in enumerate(self._train_vars):
+                axs[iVar].plot(CV_flamelet[:, 0], ref_data_flamelet[:, iVar], 'bs-', linewidth=2, markevery=10, markerfacecolor='none', markersize=12, label=plot_label_ref)
+                axs[iVar].plot(CV_flamelet[:, 0], pred_data[:, iVar], 'ro--', linewidth=1, markevery=10, markersize=10, label=plot_label_MLP)
+            plot_label_MLP = ""
+            plot_label_ref = ""
+        for iVar, Var in enumerate(self._train_vars):
+            axs[iVar].set_xlabel(r"Progress Variable $(\mathcal{Y})[-]$", fontsize=20)
+            axs[iVar].set_ylabel(r"" + Var, fontsize=20)
+            axs[iVar].tick_params(which='both', labelsize=18)
+            axs[iVar].legend(fontsize=20)
+            axs[iVar].grid()
+            figs[iVar].savefig(self._save_dir + "/Model_"+str(self._model_index) + "/flameletdata_"+self._train_name+"_" + Var + "."+self._figformat, format=self._figformat, bbox_inches='tight')
+            plt.close(figs[iVar])
+
+        return super().CustomCallback()
+    
+
     
 class EvaluateArchitecture:
     """Class for training MLP architectures
