@@ -4,7 +4,7 @@ from sklearn.preprocessing import MinMaxScaler,RobustScaler,StandardScaler, Quan
 import matplotlib.pyplot as plt 
 from tqdm import tqdm
 import sys,os
-from Common.EntropicAIConfig import EntropicAIConfig
+from Common.DataDrivenConfig import EntropicAIConfig
 import cantera as ct
 import gmsh 
 import pickle
