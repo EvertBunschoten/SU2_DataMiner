@@ -18,10 +18,16 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
 import csv 
 from Common.Config_base import Config
-from Common.EntropicAIConfig import EntropicAIConfig 
 from Common.Properties import DefaultProperties 
 from Common.CommonMethods import GetReferenceData
 
+activation_function_names_options:list[str] = ["linear","elu","relu","tanh","exponential","gelu"]
+activation_function_options = [tf.keras.activations.linear,
+                            tf.keras.activations.elu,\
+                            tf.keras.activations.relu,\
+                            tf.keras.activations.tanh,\
+                            tf.keras.activations.exponential,\
+                            tf.keras.activations.gelu]
 class MLPTrainer:
     # Base class for flamelet MLP trainer
 
@@ -29,17 +35,13 @@ class MLPTrainer:
     _alpha_expo:float = DefaultProperties.init_learning_rate_expo  # Alpha training exponent parameter.
     _lr_decay:float = DefaultProperties.learning_rate_decay      # Learning rate decay parameter.
     _batch_expo:int = DefaultProperties.batch_size_exponent     # Mini-batch size exponent.
+    _decay_steps:int = 3e5
 
     _i_activation_function:int = 0   # Activation function index.
-    _activation_function_name:str = "elu"
+    _activation_function_name:str = "exponential"
     _activation_function = None
     _restart_training:bool = False # Restart training process
-    _activation_function_names_options:list[str] = ["linear","elu","relu","tanh","exponential"]
-    _activation_function_options = activation_functions = [tf.keras.activations.linear,
-                            tf.keras.activations.elu,\
-                            tf.keras.activations.relu,\
-                            tf.keras.activations.tanh,\
-                            tf.keras.activations.exponential]
+
     # Hardware info:
     _kind_device:str = "CPU" # Device type used to train (CPU or GPU)
     _device_index:int = 0    # Device index (core index or GPU card index)
@@ -55,6 +57,7 @@ class MLPTrainer:
     _filedata_train:str 
     _X_train:np.ndarray = None 
     _Y_train:np.ndarray = None 
+    _Np_train:int = 30000
     _X_train_norm:np.ndarray = None 
     _Y_train_norm:np.ndarray = None
     _X_test:np.ndarray = None 
@@ -90,7 +93,7 @@ class MLPTrainer:
     _test_time:float = 0   # Test set evaluation time in seconds.
 
     _save_dir:str = "/"  # Directory to save trained network information to.
-
+    _figformat:str="png"
     optuna_trial = None 
 
     # Intermediate history update window settings.
@@ -161,8 +164,8 @@ class MLPTrainer:
     def SetActivationFunction(self, name_function:str="exponential"):
         self._activation_function_name = name_function 
 
-        self._i_activation_function = self._activation_function_names_options.index(name_function)
-        self._activation_function = self._activation_function_options[self._i_activation_function]
+        self._i_activation_function = activation_function_names_options.index(name_function)
+        self._activation_function = activation_function_options[self._i_activation_function]
         return 
     
     def SetDeviceKind(self, kind_device:str):
@@ -197,6 +200,17 @@ class MLPTrainer:
             self._controlling_vars.append(var)
         return 
     
+    def SetTrainVariables(self, train_vars:list[str]):
+        """Specify MLP input or controlling variable names.
+
+        :param x_vars: list of controlling variable names on which to train the MLP's.
+        :type x_vars: list[str]
+        """
+        self._train_vars = []
+        for var in train_vars:
+            self._train_vars.append(var)
+        return 
+    
     def SetLRDecay(self, lr_decay:float=DefaultProperties.learning_rate_decay):
         """Specify learning rate decay parameter for exponential decay scheduler.
 
@@ -221,7 +235,7 @@ class MLPTrainer:
         self._alpha_expo = alpha_expo
         return 
     
-    def SetBatchSize(self, batch_expo:int=DefaultProperties.batch_size_exponent):
+    def SetBatchExpo(self, batch_expo:int=DefaultProperties.batch_size_exponent):
         """Specify exponent of mini-batch size.
 
         :param batch_expo: mini-batch exponent (base 2) to be used during training.
@@ -287,6 +301,10 @@ class MLPTrainer:
             np.save(self._save_dir + "/Model_"+str(self._model_index) + "/W_"+str(iW)+".npy", w, allow_pickle=True)
             np.save(self._save_dir + "/Model_"+str(self._model_index) + "/b_"+str(iW)+".npy", self._biases[iW], allow_pickle=True)
         return
+    
+    def SetDecaySteps(self):
+        self._decay_steps = int(self._n_epochs * self._Np_train / (2**self._batch_expo))
+        return 
     
     def RestartTraining(self):
         """Restart the training process.
@@ -501,7 +519,6 @@ class MLPTrainer:
     def Save_Relevant_Data(self):
         """Save network performance characteristics in text file and write SU2 MLP input file.
         """
-
         fid = open(self._save_dir + "/Model_"+str(self._model_index)+"/MLP_performance.txt", "w+")
         fid.write("Training time[minutes]: %+.3e\n" % self._train_time)
         fid.write("Validation score: %+.16e\n" % self._test_score)
@@ -511,6 +528,7 @@ class MLPTrainer:
         fid.write("Alpha exponent: %+.4e\n" % self._alpha_expo)
         fid.write("Learning rate decay: %+.4e\n" % self._lr_decay)
         fid.write("Batch size exponent: %i\n" % self._batch_expo)
+        fid.write("Decay steps: %i\n" % self._decay_steps)
         fid.write("Activation function index: %i\n" % self._i_activation_function)
         fid.write("Number of hidden layers: %i\n" % len(self._hidden_layers))
         fid.write("Architecture: " + " ".join(str(n) for n in self._hidden_layers) + "\n")
@@ -571,13 +589,19 @@ class TensorFlowFit(MLPTrainer):
             self.__model.add(keras.layers.Dense(len(self._train_vars), activation='linear'))
 
             # Define learning rate schedule and optimizer
-            __lr_schedule = keras.optimizers.schedules.ExponentialDecay(10**self._alpha_expo, decay_steps=10000,
+            #self.SetDecaySteps()
+            self._decay_steps = 1e4
+            __lr_schedule = keras.optimizers.schedules.ExponentialDecay(10**self._alpha_expo, decay_steps=self._decay_steps,
                                                                     decay_rate=self._lr_decay, staircase=False)
             opt = keras.optimizers.Adam(learning_rate=__lr_schedule, beta_1=0.9, beta_2=0.999, epsilon=1e-8, amsgrad=False) 
 
             # Compile model on device
             self.__model.compile(optimizer=opt, loss="mean_squared_error", metrics=["mape"])
         return 
+    
+    def EvaluateMLP(self,input_data_norm):
+        pred_data_norm = self.__model.predict(input_data_norm, verbose=0)
+        return pred_data_norm
     
     # Initialize MLP training 
     def Train_MLP(self):
@@ -593,6 +617,13 @@ class TensorFlowFit(MLPTrainer):
 
         # Pre-processing of model before training.
         self.DefineMLP()
+
+        self._weights = []
+        self._biases = []
+        for layer in self.__model.layers:
+            self._weights.append(layer.weights[0])
+            self._biases.append(layer.weights[1])
+
 
         if not os.path.isdir(self._save_dir + "/Model_"+str(self._model_index)):
             os.mkdir(self._save_dir + "/Model_"+str(self._model_index))
@@ -637,21 +668,18 @@ class TensorFlowFit(MLPTrainer):
     def Plot_and_Save_History(self):
         """Plot the training convergence trends.
         """
-        epochs = self.history.epoch
-        val_loss = self.history.history['val_loss']
-        loss = self.history.history['loss']
 
         with open(self._save_dir + "/Model_"+str(self._model_index)+"/TrainingHistory.csv", "w+") as fid:
             fid.write("epoch,loss,validation_loss\n")
             csvWriter = csv.writer(fid, delimiter=',')
-            csvWriter.writerows(np.array([epochs, loss, val_loss]).T)
+            csvWriter.writerows(np.array([self.history_epochs, self.history_loss, self.history_val_loss]).T)
 
         fig = plt.figure(figsize=[10,10])
         ax = plt.axes()
-        ax.plot(np.log10(self.history.history['loss']), 'b', label=r'Training score')
-        ax.plot(np.log10(self.history.history['val_loss']), 'r', label=r"Validation score")
-        ax.plot([0, len(self.history.history['loss'])], [np.log10(self._test_score), np.log10(self._test_score)], 'm--', label=r"Test score")
+        ax.plot(self.history_loss, 'b', linewidth=2,label=r'Training score')
+        ax.plot(self.history_val_loss, 'r', linewidth=2,label=r"Validation score")
         ax.grid()
+        ax.set_yscale('log')
         ax.legend(fontsize=20)
         ax.set_xlabel(r"Iteration[-]", fontsize=20)
         ax.set_ylabel(r"Training loss function [-]", fontsize=20)
@@ -660,7 +688,7 @@ class TensorFlowFit(MLPTrainer):
         fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+ "/History_Plot_Direct.png", format='png', bbox_inches='tight')
         plt.close(fig)
         return 
-    
+        
     class PlotCallback(tf.keras.callbacks.Callback):
             FitClass = None
             def __init__(self, TensorFlowFit:MLPTrainer):
@@ -671,27 +699,16 @@ class TensorFlowFit(MLPTrainer):
                 self.FitClass.history_loss.append(logs["loss"])
                 self.FitClass.history_val_loss.append(logs["val_loss"])
                 
-                if epoch % self.FitClass.callback_every == 0:
-                    fig = plt.figure(figsize=[10,10])
-                    ax = plt.axes()
-                    ax.plot(self.FitClass.history_epochs, self.FitClass.history_loss, 'b', label=r"Training loss")
-                    ax.plot(self.FitClass.history_epochs, self.FitClass.history_val_loss, 'r', label=r"Validation loss")
-                    ax.grid()
-                    ax.set_yscale('log')
-                    ax.legend(fontsize=20)
-                    ax.set_xlabel(r"Iteration[-]", fontsize=20)
-                    ax.set_ylabel(r"Training loss function [-]", fontsize=20)
-                    ax.set_title(r"Training History", fontsize=22)
-                    fig.savefig(self.FitClass._save_dir + "/Model_"+str(self.FitClass._model_index)+ \
-                                "/Intermediate_History_Plot_Direct.png", format="png", bbox_inches='tight')
-                    plt.close(fig)
+                if (epoch+1) % self.FitClass.callback_every == 0:
+                    self.FitClass.CustomCallback()
+                    self.FitClass.Plot_and_Save_History()
 
                 return super().on_epoch_end(epoch, logs)
 
 class CustomTrainer(MLPTrainer):
-    __dt = tf.float32 
+    _dt = tf.float32 
     __trainable_hyperparams=[]
-    __optimizer = None 
+    _optimizer = None 
     __lr_schedule = None 
     _train_name:str = ""
     _figformat:str="pdf"
@@ -705,13 +722,13 @@ class CustomTrainer(MLPTrainer):
     def SetWeights(self, weights_input):
         self._weights = []
         for W in weights_input:
-            self._weights.append(tf.Variable(W, self.__dt))
+            self._weights.append(tf.Variable(W, self._dt))
         return 
     
     def SetBiases(self, biases_input):
         self._biases = []
         for b in biases_input:
-            self._biases.append(tf.Variable(b, self.__dt))
+            self._biases.append(tf.Variable(b, self._dt))
         return 
     
     def InitializeWeights_and_Biases(self):
@@ -727,19 +744,19 @@ class CustomTrainer(MLPTrainer):
             self._weights.append(tf.Variable(tf.random.normal([NN[i], NN[i+1]],
                                             mean=0.0,
                                             stddev=0.5,
-                                            name="weights"),self.__dt))
-            self._biases.append(tf.Variable(tf.random.normal([1, NN[i+1]],
+                                            name="weights"),self._dt))
+            self._biases.append(tf.Variable(tf.random.normal([NN[i+1],],
                                     mean=0.0,
                                     stddev=0.5,
-                                    name="bias"),self.__dt))
+                                    name="bias"),self._dt))
             
         return 
     def LoadWeights(self):
         for i in range(len(self._weights)):
             loaded_W = np.load(self._save_dir + "/Model_"+str(self._model_index) + "/W_"+self._train_name+"_"+str(i)+".npy", allow_pickle=True)
             loaded_b = np.load(self._save_dir + "/Model_"+str(self._model_index) + "/b_"+self._train_name+"_"+str(i)+".npy", allow_pickle=True)
-            self._weights[i] = tf.Variable(loaded_W, self.__dt)
-            self._biases[i]= tf.Variable(loaded_b, self.__dt)
+            self._weights[i] = tf.Variable(loaded_W, self._dt)
+            self._biases[i]= tf.Variable(loaded_b, self._dt)
         return 
     
     @tf.function
@@ -751,10 +768,12 @@ class CustomTrainer(MLPTrainer):
             self.__trainable_hyperparams.append(b)
     
     def SetOptimizer(self):
-        self.__lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(10**self._alpha_expo, decay_steps=0.01157 * np.shape(self._X_train)[0],
+        #self.SetDecaySteps()
+        self._decay_steps = 3e4
+        self.__lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(10**self._alpha_expo, decay_steps=self._decay_steps,
                                                                             decay_rate=self._lr_decay, staircase=False)
 
-        self.__optimizer = tf.keras.optimizers.Adam(self.__lr_schedule, beta_1=0.9, beta_2=0.999, epsilon=1e-8, amsgrad=False)
+        self._optimizer = tf.keras.optimizers.Adam(self.__lr_schedule, beta_1=0.9, beta_2=0.999, epsilon=1e-8, amsgrad=False)
         return 
     
     @tf.function
@@ -788,8 +807,8 @@ class CustomTrainer(MLPTrainer):
         return self._MLP_Evaluation(input_data_tf).numpy()
     
     @tf.function
-    def mean_square_error(self, y_label, y_pred):
-        return tf.reduce_mean(tf.pow(y_pred - y_label, 2), axis=0)
+    def mean_square_error(self, y_true, y_pred):
+        return tf.reduce_mean(tf.pow(y_pred - y_true, 2), axis=0)
     
     @tf.function
     def Compute_Direct_Error(self, x_norm:tf.constant, y_label_norm:tf.constant):
@@ -816,7 +835,7 @@ class CustomTrainer(MLPTrainer):
     @tf.function
     def Train_Step(self, x_norm_batch, y_label_norm_batch):
         y_norm_loss, grads_loss = self.ComputeGradients_Direct_Error(x_norm_batch, y_label_norm_batch)
-        self.__optimizer.apply_gradients(zip(grads_loss, self.__trainable_hyperparams))
+        self._optimizer.apply_gradients(zip(grads_loss, self.__trainable_hyperparams))
         
         return y_norm_loss 
     
@@ -824,25 +843,26 @@ class CustomTrainer(MLPTrainer):
         """Commence network training.
         """
         # prepare trainer start
-        self.__Preprocessing()
+        self.Preprocessing()
         # prepare trainer end 
 
-        # set train batches start
-        train_batches = self.__SetTrainBatches()
-        # set train batches end 
-
         # loop epochs start
-        self.__LoopEpochs(train_batches=train_batches)
+        self.LoopEpochs()
         # loop epochs end 
 
-        self.__PostProcessing()
+        self.PostProcessing()
         return 
     
-    def __Preprocessing(self):
+    def Preprocessing(self):
         if not os.path.isdir(self._save_dir + "/Model_"+str(self._model_index)):
             os.mkdir(self._save_dir + "/Model_"+str(self._model_index))
         
         self.Plot_Architecture()
+
+        self._cost_parameter = 0
+        for w in self._weights:
+            self._cost_parameter += np.shape(w)[0] * np.shape(w)[1]
+
         # Read train,test, and validation data.
         self.GetTrainData()
         # Read data from training variables according to network outputs.
@@ -856,49 +876,64 @@ class CustomTrainer(MLPTrainer):
             self.val_loss_history.append([])
         return 
     
-    def __SetTrainBatches(self):
-        train_batches = tf.data.Dataset.from_tensor_slices((self._X_train_norm, self._Y_train_norm)).batch(2**self._batch_expo)
+    def SetTrainBatches(self):
+        indices = tf.range(start=0, limit=self._Np_train, dtype=tf.int32)
+        shuffled_indices = tf.random.shuffle(indices)
+        X_train_shuffled = tf.gather(self._X_train_norm, indices)
+        Y_train_shuffled = tf.gather(self._Y_train_norm, indices)
+        train_batches = tf.data.Dataset.from_tensor_slices((X_train_shuffled, Y_train_shuffled)).batch(2**self._batch_expo)
         return train_batches
     
-    def __LoopEpochs(self, train_batches):
+    def LoopEpochs(self):
         t_start = time.time()
         worst_error = 1e32
         i = 0
         while (i < self._n_epochs) and self.__keep_training:
+            train_batches_shuffled = self.SetTrainBatches()
+            self.LoopBatches(train_batches=train_batches_shuffled)
 
-            self.__LoopBatches(train_batches=train_batches)
-
-            val_loss = self.__ValidationLoss()
+            val_loss = self.ValidationLoss()
             
             if (i + 1) % self.callback_every == 0:
+                self.TestLoss()
                 self.CustomCallback()
             
             worst_error = self.__CheckEarlyStopping(val_loss, worst_error)
 
-            if self._verbose > 0:
-                print("Epoch: ", str(i), " Validation loss: ", str(val_loss.numpy()))
+            self.PrintEpochInfo(i, val_loss)
             
             i += 1
         t_end = time.time()
         self._train_time = (t_end - t_start)/60
         return 
     
-    def __LoopBatches(self, train_batches):
-
+    def PrintEpochInfo(self, i_epoch, val_loss):
+        if self._verbose > 0:
+                print("Epoch: ", str(i_epoch), " Validation loss: ", str(val_loss.numpy()))
+        return 
+    
+    #@tf.function
+    def LoopBatches(self, train_batches):
+        
         for x_norm_batch, y_norm_batch in train_batches:
-            self.Train_Step(x_norm_batch, y_norm_batch)
+            indices = tf.range(start=0,limit=tf.shape(x_norm_batch)[0],dtype=tf.int32)
+            shuffled_indices = tf.random.shuffle(indices)
+            x_batch_shuffled = tf.gather(x_norm_batch, shuffled_indices)
+            y_batch_shuffled = tf.gather(y_norm_batch, shuffled_indices)
+            
+            self.Train_Step(x_batch_shuffled, y_batch_shuffled)
 
         return
     
-    def __ValidationLoss(self):
-        val_loss = self.Compute_Direct_Error(tf.constant(self._X_val_norm, self.__dt), tf.constant(self._Y_val_norm, self.__dt))
+    def ValidationLoss(self):
+        val_loss = self.Compute_Direct_Error(tf.constant(self._X_val_norm, self._dt), tf.constant(self._Y_val_norm, self._dt))
         for iVar in range(len(self._train_vars)):
             self.val_loss_history[iVar].append(val_loss[iVar])
         return val_loss
     
-    def __TestLoss(self):
+    def TestLoss(self):
         t_start = time.time()
-        self._test_score = tf.reduce_mean(self.Compute_Direct_Error(tf.constant(self._X_test_norm, self.__dt), tf.constant(self._Y_test_norm, self.__dt)))
+        self._test_score = tf.reduce_mean(self.Compute_Direct_Error(tf.constant(self._X_test_norm, self._dt), tf.constant(self._Y_test_norm, self._dt)))
         t_end = time.time()
         self._test_time = (t_end - t_start)/60
         return 
@@ -944,8 +979,8 @@ class CustomTrainer(MLPTrainer):
                 print("Early stopping due to stagnation")
         return worst_error 
     
-    def __PostProcessing(self):
-        self.__TestLoss()
+    def PostProcessing(self):
+        self.TestLoss()
         self.CustomCallback()
         return 
     
@@ -972,3 +1007,265 @@ class PhysicsInformedTrainer(CustomTrainer):
             d2Y_norm = tape.gradient(tf.gather(dY_norm, indices=jVar, axis=1), x_norm_input)
         return Y_norm, dY_norm, d2Y_norm
     
+
+class EvaluateArchitecture:
+    """Class for training MLP architectures
+    """
+
+    _Config:Config = None 
+    _trainer_direct:TensorFlowFit = None 
+
+    architecture:list[int] = [DefaultProperties.NN_hidden]   # Hidden layer architecture.
+    alpha_expo:float = DefaultProperties.init_learning_rate_expo # Initial learning rate exponent (base 10)
+    lr_decay:float = DefaultProperties.learning_rate_decay # Learning rate decay parameter.
+    batch_expo:int = DefaultProperties.batch_size_exponent      # Mini-batch exponent (base 2)
+    activation_function:str = "exponential"    # Activation function name applied to hidden layers.
+
+    n_epochs:int = DefaultProperties.N_epochs # Number of epochs to train for.
+    save_dir:str        # Directory to save trained networks in.
+
+    device:str = "CPU"      # Hardware to train on.
+    process_index:int = 0   # Hardware index.
+
+    current_iter:int=0
+    verbose:int=0
+    _test_score:float        # MLP evaluation score on test set.
+    _cost_parameter:float    # MLP evaluation cost parameter.
+
+    _train_file_header:str = None 
+    main_save_dir:str = "./"
+
+    def __init__(self, Config_in:Config):
+        """Define EvaluateArchitecture instance and prepare MLP trainer with
+        default settings.
+
+        :param Config: FlameletAIConfig object describing the flamelet data manifold.
+        :type Config: FlameletAIConfig
+        :param group_idx: MLP output group index, defaults to 0
+        :type group_idx: int, optional
+        :raises Exception: if MLP output group index is undefined by flameletAI configuration.
+        """
+
+        self._Config=Config_in
+        self.main_save_dir = self._Config.GetOutputDir()
+        
+        # Define MLPTrainer object with default settings (currently only supports TensorFlowFit)
+        self._train_file_header = self._Config.GetOutputDir()+"/"+self._Config.GetConcatenationFileHeader()
+        self.SynchronizeTrainer()
+        pass
+
+    def SynchronizeTrainer(self):
+        """Synchronize all MLP trainer settings with locally stored settings.
+        """
+        
+        self._trainer_direct.SetModelIndex(self.current_iter)
+        self._trainer_direct.SetSaveDir(self.main_save_dir)
+
+        self._trainer_direct.SetDeviceKind(self.device)
+        self._trainer_direct.SetDeviceIndex(self.process_index)
+
+        self._trainer_direct.SetNEpochs(self.n_epochs)
+        self._trainer_direct.SetActivationFunction(self.activation_function)
+        self._trainer_direct.SetAlphaExpo(self.alpha_expo)
+        self._trainer_direct.SetLRDecay(self.lr_decay)
+        self._trainer_direct.SetBatchExpo(self.batch_expo)
+        self._trainer_direct.SetHiddenLayers(self.architecture)
+        self._trainer_direct.SetTrainFileHeader(self._train_file_header)
+        self._trainer_direct.SetVerbose(self.verbose)
+
+        return 
+    
+    def SetSaveDir(self, save_dir:str):
+        """Define directory in which to save trained MLP data.
+
+        :param save_dir: file path directory in which to save trained MLP data.
+        :type save_dir: str
+        :raises Exception: if specified directory doesn't exist.
+        """
+        if not os.path.isdir(save_dir):
+            raise Exception("Specified directory is not present on current machine.")
+        self.main_save_dir = save_dir
+        return 
+    
+    def SetNEpochs(self, n_epochs:int=DefaultProperties.N_epochs):
+        """Set the number of epochs to train for.
+
+        :param n_epochs: Number of training epoch, defaults to 250.
+        :type n_epochs: int
+        :raises Exception: provided number of epochs is negative.
+        """
+        if n_epochs <= 0:
+            raise Exception("Number of epochs should be at least one.")
+        self.n_epochs = n_epochs
+        self.SynchronizeTrainer()
+        return 
+    
+    def SetHiddenLayers(self, NN_hidden_layers:list[int]):
+        """Define hidden layer architecture.
+
+        :param NN_hidden_layers: list with neuron count for each hidden layer.
+        :type NN_hidden_layers: list[int]
+        :raises Exception: if any of the entries is lower or equal to zero.
+        """
+        self.architecture = []
+        for NN in NN_hidden_layers:
+            if NN <= 0:
+                raise Exception("Number of neurons in hidden layers should be higher than zero.")
+            self.architecture.append(NN)
+        self.SynchronizeTrainer()
+        return 
+    
+    def SetBatchExpo(self, batch_expo_in:int):
+        """Set the mini-batch size exponent.
+
+        :param batch_expo_in: exponent of mini-batch size (base 2)
+        :type batch_expo_in: int
+        :raises Exception: if entry is lower than or equal to zero.
+        """
+        if batch_expo_in <=0:
+            raise Exception("Mini-batch exponent should be higher than zero.")
+        self.batch_expo = batch_expo_in
+        self.SynchronizeTrainer()
+        return 
+    
+    def SetActivationFunction(self, activation_function_name:str):
+        """Define hidden layer activation function.
+
+        :param activation_function_name: activation function name.
+        :type activation_function_name: str
+        :raises Exception: if activation function is not in the list of supported functions.
+        """
+        if activation_function_name not in activation_function_names_options:
+            raise Exception("Activation function name should be one of the following: "\
+                             + ",".join(p for p in activation_function_names_options))
+        self.activation_function = activation_function_name
+        self.SynchronizeTrainer()
+        return 
+    
+    def SetAlphaExpo(self, alpha_expo_in:float):
+        """Define initial learning rate exponent.
+
+        :param alpha_expo_in: initial learning rate exponent.
+        :type alpha_expo_in: float
+        :raises Exception: if entry is higher than zero.
+        """
+        if alpha_expo_in > 0:
+            raise Exception("Initial learning rate exponent should be negative.")
+        self.alpha_expo = alpha_expo_in
+        self.SynchronizeTrainer()
+        return 
+    
+    def SetLRDecay(self, lr_decay_in:float):
+        """Define learning rate decay parameter.
+
+        :param lr_decay_in: learning rate decay parameter.
+        :type lr_decay_in: float
+        :raises Exception: if entry is not between zero and one.
+        """
+        if lr_decay_in < 0 or lr_decay_in > 1:
+            raise Exception("Learning rate decay parameter should be between zero and one.")
+        
+        self.lr_decay = lr_decay_in
+        self.SynchronizeTrainer()
+        return 
+        
+    def SetTrainHardware(self, device:str, process:int=0):
+        """Define hardware to train on.
+
+        :param device: device, should be "CPU" or "GPU"
+        :type device: str
+        :param process: device index, defaults to 0
+        :type process: int, optional
+        :raises Exception: if device is anything other than "GPU" or "CPU" or device index is negative.
+        """
+        if device != "CPU" and device != "GPU":
+            raise Exception("Device should be GPU or CPU.")
+        if process < 0:
+            raise Exception("Device index should be positive.")
+        
+        self.device=device
+        self.process_index = process
+        self.SynchronizeTrainer()
+        return
+     
+    def PrepareOutputDir(self):
+        """Prepare output directory in which to save trained MLP data.
+        """
+        worker_idx = self.process_index
+        if not os.path.isdir(self.main_save_dir):
+            os.mkdir(self.main_save_dir)
+        if not os.path.isdir(self.main_save_dir + "/Worker_"+str(worker_idx)):
+            os.mkdir(self.main_save_dir + "/Worker_"+str(worker_idx))
+            self.current_iter = 0
+        else:
+            try:
+                fid = open(self.main_save_dir + "/Worker_"+str(worker_idx)+"/current_iter.txt", "r")
+                line = fid.readline()
+                fid.close()
+                self.current_iter = int(line.strip()) + 1
+            except:
+                self.current_iter = 0
+        self.main_save_dir += "/Worker_"+str(worker_idx) + "/"
+        self.SynchronizeTrainer()
+        return 
+    
+    def CommenceTraining(self):
+        """Initiate the training process.
+        """
+        self.PrepareOutputDir()
+        self._trainer_direct.Train_MLP()
+        self.TrainPostprocessing()
+
+        fid = open(self.main_save_dir + "/current_iter.txt", "w+")
+        fid.write(str(self.current_iter) + "\n")
+        fid.close()
+
+        self._test_score = self._trainer_direct.GetTestScore()
+        self.__cost_parameter = self._trainer_direct.GetCostParameter()
+        return 
+    
+    def TrainPostprocessing(self):
+        """Post-process MLP training by saving all relevant data/figures.
+        """
+        self._trainer_direct.Save_Relevant_Data()
+        self._trainer_direct.Plot_and_Save_History()
+        return 
+    
+    def GetCostParameter(self):
+        """Get MLP evaluation cost parameter.
+
+        :return: MLP cost parameter
+        :rtype: float
+        """
+        return self.__cost_parameter
+    
+    def GetTestScore(self):
+        """Get MLP evaluation test score upon completion of training.
+
+        :return: MLP evaluation test score.
+        :rtype: float
+        """
+        return self._test_score
+    
+    def SetTrainFileHeader(self, fileheader:str):
+        """Set a custom training data file header.
+
+        :param fileheader: file path and name
+        :type fileheader: str
+        """
+        self._train_file_header = fileheader
+        self.SynchronizeTrainer()
+
+        return 
+    
+    def SetVerbose(self, val_verbose:int=1):
+        """Set verbose level during training. 0 means no information, 1 means minimal information every epoch, 2 means detailed information.
+
+        :param val_verbose: verbose level (0, 1, or 2), defaults to 1
+        :type val_verbose: int, optional
+        """
+
+        self.verbose = val_verbose
+        self.SynchronizeTrainer()
+
+        return                

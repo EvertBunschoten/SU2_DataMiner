@@ -4,7 +4,9 @@ import pickle
 import csv
 import numpy as np
 import matplotlib.pyplot as plt 
+from scipy.optimize import minimize, Bounds
 
+from Common.Properties import DefaultProperties
 from Common.EntropicAIConfig import EntropicAIConfig 
 from Manifold_Generation.MLP.Trainers import EvaluateArchitecture
 
@@ -20,7 +22,7 @@ class MLPOptimizer:
 
     # Mini-batch exponent (base 2) for training.
     __optimize_batch:bool = True 
-    __batch_expo:int =6
+    __batch_expo:int = DefaultProperties.batch_size_exponent
     __batch_expo_min:int=3
     __batch_expo_max:int=7
     
@@ -28,12 +30,12 @@ class MLPOptimizer:
     __optimize_LR:bool = True 
 
     # Initial learning rate exponent (base 10).
-    __alpha_expo:float = -2.8
+    __alpha_expo:float = DefaultProperties.init_learning_rate_expo
     __alpha_expo_min:float = -3.0
     __alpha_expo_max:float = -1.0
 
     # Learning rate decay parameter for exponential learning rate decay schedule.
-    __lr_decay:float=0.996
+    __lr_decay:float=DefaultProperties.learning_rate_decay
     __lr_decay_min:float = 0.85
     __lr_decay_max:float = 1.0 
 
@@ -43,7 +45,7 @@ class MLPOptimizer:
     # Number of perceptrons applied to the hidden layer of the network.
     __NN_min:int = 10
     __NN_max:int = 100 
-    __architecture:list[int]=[40]
+    __architecture:list[int]=[30]
 
     # Optimization history.
     __population_history:list = []
@@ -274,6 +276,26 @@ class MLPOptimizer:
         
         return 
 
+    def inv_fitnessFunction(self, x):
+        return -self.fitnessFunction(ga_instance=None, x=x, x_idx=0)
+    
+    def __setSimplexOptimizer(self):
+        gene_trainparams, lowerbound, upperbound = self.__prepareBounds()
+        N_genes = len(gene_trainparams)
+        x0 = np.zeros(len(lowerbound))
+        x0[0] = self.__alpha_expo
+        x0[1] = self.__lr_decay
+        print(x0)
+        bounds = Bounds(lb=lowerbound, ub=upperbound)
+        print(bounds)
+        options = {"maxiter":1000,\
+                   "disp":True}
+        res = minimize(self.inv_fitnessFunction, x0=x0, method='Nelder-Mead',bounds=bounds,options=options)
+
+        x_optim = res.x 
+
+        return 
+    
     def optimizeHP(self):
         """Initate hyper-parameter optimization routine.
 
@@ -298,15 +320,18 @@ class MLPOptimizer:
                 fid.write("Generation nr,solution,fitness\n")
         
         # Prepare optimization output directory.
-        self.save_dir = self._Config.GetOutputDir()+"/Architectures_Optim"+history_extension+"/"
+        self.save_dir = self._Config.GetOutputDir()+"/Architectures_Optim"+history_extension+"_n/"
         if not os.path.isdir(self.save_dir):
             os.mkdir(self.save_dir)
         
         # Prepare bounds and set optimizer.
-        self.__setOptimizer()
-        
-        # Initiate HP optimization.
-        self.__optimizer.run()
+        if self.__optimize_NN or self.__optimize_batch:
+            self.__setOptimizer()
+            
+            # Initiate HP optimization.
+            self.__optimizer.run()
+        else:
+            self.__setSimplexOptimizer()
 
         return 
     
@@ -379,7 +404,7 @@ class MLPOptimizer:
         # Set CPU index.
         Evaluator.SetTrainHardware("CPU", x_idx)
 
-        Evaluator.SetVerbose(0)
+        Evaluator.SetVerbose(1)
 
         # Translate gene and update hyper-parameters.
         self.__translateGene(x, Evaluator=Evaluator)
