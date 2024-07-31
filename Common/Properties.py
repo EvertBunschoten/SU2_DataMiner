@@ -1,3 +1,29 @@
+###############################################################################################
+#       #      _____ __  _____      ____        __        __  ____                   #        #  
+#       #     / ___// / / /__ \    / __ \____ _/ /_____ _/  |/  (_)___  ___  _____   #        #  
+#       #     \__ \/ / / /__/ /   / / / / __ `/ __/ __ `/ /|_/ / / __ \/ _ \/ ___/   #        #      
+#       #    ___/ / /_/ // __/   / /_/ / /_/ / /_/ /_/ / /  / / / / / /  __/ /       #        #  
+#       #   /____/\____//____/  /_____/\__,_/\__/\__,_/_/  /_/_/_/ /_/\___/_/        #        #
+#       #                                                                            #        #
+###############################################################################################
+
+################################# FILE NAME: Properties.py ####################################
+#=============================================================================================#
+# author: Evert Bunschoten                                                                    |
+#    :PhD Candidate ,                                                                         |
+#    :Flight Power and Propulsion                                                             |
+#    :TU Delft,                                                                               |
+#    :The Netherlands                                                                         |
+#                                                                                             |
+#                                                                                             |
+# Description:                                                                                |
+#  Default settings/names/properties for the various steps within the DataMiner workflow.     |                                                                          
+#                                                                                             |  
+# Version: 1.0.0                                                                              |
+#                                                                                             |
+#=============================================================================================#
+
+
 class DefaultProperties:
     T_min:float = 300
     T_max:float = 600
@@ -22,10 +48,9 @@ class DefaultProperties:
     train_fraction:float = 0.8
     test_fraction:float = 0.1
 
-    init_learning_rate_expo:float = -1.7838e+00
-    learning_rate_decay:float =  +9.8972e-01
+    init_learning_rate_expo:float = -1.8261e+00
+    learning_rate_decay:float =  +9.8787e-01
     batch_size_exponent:int = 6
-    NN_hidden:int = 40
+    NN_hidden:int = 30
 
     N_epochs:int = 1000
-    
