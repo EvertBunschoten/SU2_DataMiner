@@ -1,11 +1,37 @@
+###############################################################################################
+#       #      _____ __  _____      ____        __        __  ____                   #        #  
+#       #     / ___// / / /__ \    / __ \____ _/ /_____ _/  |/  (_)___  ___  _____   #        #  
+#       #     \__ \/ / / /__/ /   / / / / __ `/ __/ __ `/ /|_/ / / __ \/ _ \/ ___/   #        #      
+#       #    ___/ / /_/ // __/   / /_/ / /_/ / /_/ /_/ / /  / / / / / /  __/ /       #        #  
+#       #   /____/\____//____/  /_____/\__,_/\__/\__,_/_/  /_/_/_/ /_/\___/_/        #        #
+#       #                                                                            #        #
+###############################################################################################
+
+################################ FILE NAME: Config_base.py ####################################
+#=============================================================================================#
+# author: Evert Bunschoten                                                                    |
+#    :PhD Candidate ,                                                                         |
+#    :Flight Power and Propulsion                                                             |
+#    :TU Delft,                                                                               |
+#    :The Netherlands                                                                         |
+#                                                                                             |
+#                                                                                             |
+# Description:                                                                                |
+#  Base class for DataMiner configuration                                                     |                                                               
+#                                                                                             |  
+# Version: 1.0.0                                                                              |
+#                                                                                             |
+#=============================================================================================#
 import os 
 
 from Properties import DefaultProperties 
+
 class Config:
 
-    __output_dir:str 
-    __config_name:str = "config"
+    _output_dir:str = "./"
+    _config_name:str = "config"
 
+    __concatenated_file_header:str="MLP_data"
     __train_fraction:float = DefaultProperties.train_fraction
     __test_fraction:float = DefaultProperties.test_fraction
     
@@ -23,7 +49,7 @@ class Config:
         if not os.path.isdir(output_dir):
             raise Exception("Invalid output data directory")
         else:
-            self.__output_dir = output_dir
+            self._output_dir = output_dir
         return 
     
     def GetOutputDir(self):
@@ -35,10 +61,10 @@ class Config:
         :rtype: str
 
         """
-        if not os.path.isdir(self.__output_dir):
+        if not os.path.isdir(self._output_dir):
             raise Exception("Saved output directory not present on current machine.")
         else:
-            return self.__output_dir
+            return self._output_dir
     
     def SetConcatenationFileHeader(self, header:str=DefaultProperties.output_file_header):
         """
@@ -58,6 +84,9 @@ class Config:
         :rtype: str
         """
         return self.__concatenated_file_header
+    
+    def GetConfigName(self):
+        return self._config_name 
     
     def SetTrainFraction(self, input:float=DefaultProperties.train_fraction):
         """

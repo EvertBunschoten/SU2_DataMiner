@@ -1,13 +1,48 @@
+###############################################################################################
+#       #      _____ __  _____      ____        __        __  ____                   #        #  
+#       #     / ___// / / /__ \    / __ \____ _/ /_____ _/  |/  (_)___  ___  _____   #        #  
+#       #     \__ \/ / / /__/ /   / / / / __ `/ __/ __ `/ /|_/ / / __ \/ _ \/ ___/   #        #      
+#       #    ___/ / /_/ // __/   / /_/ / /_/ / /_/ /_/ / /  / / / / / /  __/ /       #        #  
+#       #   /____/\____//____/  /_____/\__,_/\__/\__,_/_/  /_/_/_/ /_/\___/_/        #        #
+#       #                                                                            #        #
+###############################################################################################
+
+############################## FILE NAME: DataDrivenConfig.py #################################
+#=============================================================================================#
+# author: Evert Bunschoten                                                                    |
+#    :PhD Candidate ,                                                                         |
+#    :Flight Power and Propulsion                                                             |
+#    :TU Delft,                                                                               |
+#    :The Netherlands                                                                         |
+#                                                                                             |
+#                                                                                             |
+# Description:                                                                                |
+#  Derived DataMiner configuration classes for flamelet-generated manifold and NI-CFD         |
+#  applications.                                                                              |
+#                                                                                             |  
+# Version: 1.0.0                                                                              |
+#                                                                                             |
+#=============================================================================================#
+
+#---------------------------------------------------------------------------------------------#
+# Importing general packages
+#---------------------------------------------------------------------------------------------#
 import numpy as np 
 import cantera as ct 
 import pickle 
-import os 
 import CoolProp
 import cantera as ct 
+
+#---------------------------------------------------------------------------------------------#
+# Importing DataMiner classes and functions
+#---------------------------------------------------------------------------------------------#
 from Common.Properties import DefaultProperties 
 from Config_base import Config 
 from CommonMethods import *
 
+#---------------------------------------------------------------------------------------------#
+# NI-CFD DataMiner configuration class
+#---------------------------------------------------------------------------------------------#
 class EntropicAIConfig(Config):
     """
     Define EntropicAIConfig class or load existing configuration. If `load_file` is set, the settings from an existing
@@ -56,13 +91,13 @@ class EntropicAIConfig(Config):
         Config.__init__(self)
         """Class constructor
         """
-        self.__config_name = "EntropicAIConfig" # Configuration name.
+        self._config_name = "EntropicAIConfig" # Configuration name.
         if load_file:
             print("Loading configuration for entropic model generation...")
             with open(load_file, "rb") as fid:
                 loaded_config = pickle.load(fid)
             self.__dict__ = loaded_config.__dict__.copy()
-            print("Loaded configuration file with name " + loaded_config.__config_name)
+            print("Loaded configuration file with name " + loaded_config._config_name)
         else:
             print("Generating empty EntropicAI config")
 
@@ -71,10 +106,10 @@ class EntropicAIConfig(Config):
     def PrintBanner(self):
         """Print banner visualizing EntropicAI configuration settings."""
 
-        print("EntropicAIConfiguration: " + self.__config_name)
+        print("EntropicAIConfiguration: " + self._config_name)
         print("")
         print("Fluid data generation settings:")
-        print("Fluid data output directory: " + self.__output_dir)
+        print("Fluid data output directory: " + self.GetOutputDir())
         print("Fluid name(s): " + ",".join(self.__fluid_names))
         print("")
         if self.__use_PT:
@@ -98,7 +133,7 @@ class EntropicAIConfig(Config):
         :rtype: str
 
         """
-        return self.__config_name
+        return self._config_name
     
 
     def SetFluid(self, fluid_name):
@@ -544,13 +579,15 @@ class EntropicAIConfig(Config):
         :type file_name: str
         """
 
-        self.__config_name = file_name
+        self._config_name = file_name
         file = open(file_name+'.cfg','wb')
         pickle.dump(self, file)
         file.close()
 
 
-
+#---------------------------------------------------------------------------------------------#
+# Flamelet-Generated Manifold DataMiner configuration class
+#---------------------------------------------------------------------------------------------#
 class FlameletAIConfig(Config):
     """
     Define FlameletAIConfig class or load existing configuration. If `load_file` is set, the settings from an existing
@@ -634,7 +671,7 @@ class FlameletAIConfig(Config):
             with open(load_file, "rb") as fid:
                 loaded_config = pickle.load(fid)
             self.__dict__ = loaded_config.__dict__.copy()
-            print("Loaded configuration file with name " + loaded_config.__config_name)
+            print("Loaded configuration file with name " + loaded_config._config_name)
         else:
             print("Generating empty flameletAI config")
         
@@ -644,10 +681,10 @@ class FlameletAIConfig(Config):
     def PrintBanner(self):
         """Print banner visualizing FlameletAI configuration settings."""
 
-        print("flameletAIConfiguration: " + self.__config_name)
+        print("flameletAIConfiguration: " + self._config_name)
         print("")
         print("Flamelet generation settings:")
-        print("Flamelet data output directory: " + self.__flamelet_output_dir)
+        print("Flamelet data output directory: " + self._output_dir)
         print("Reaction mechanism: " + self.__reaction_mechanism)
         print("Fuel definition: " + ",".join("%s: %.2e" % (self.__fuel_species[i], self.__fuel_weights[i]) for i in range(len(self.__fuel_species))))
         print("Oxidizer definition: " + ",".join("%s: %.2e" % (self.__oxidizer_species[i], self.__oxidizer_weights[i]) for i in range(len(self.__oxidizer_species))))
@@ -692,7 +729,112 @@ class FlameletAIConfig(Config):
             self.DisplayOutputGroups()
         print("")
         
+    def ComputeMixFracConstants(self):
+        """
+        
+        Compute the species mass fraction coefficients according to the Bilger mixture fraction definition.
+        
+        """
 
+        # Number of species in fuel and oxidizer definition.
+        n_fuel = len(self.__fuel_species)
+        n_ox = len(self.__oxidizer_species)
+
+        # Joining fuel and oxidizer definitions into a single string
+        fuel_string = ','.join([self.__fuel_species[i] + ':'+str(self.__fuel_weights[i]) for i in range(n_fuel)])
+        oxidizer_string = ','.join([self.__oxidizer_species[i] + ':'+str(self.__oxidizer_weights[i]) for i in range(n_ox)])
+
+        
+        # Getting the carrier specie index
+        idx_c = self.gas.species_index(self.__carrier_specie)
+
+        #--- Computing mixture fraction coefficients ---#
+        # setting up mixture in stochiometric condition
+        self.gas.TP = 300, ct.one_atm
+        self.gas.set_equivalence_ratio(1.0, fuel_string, oxidizer_string)
+        self.gas.equilibrate('TP')
+
+
+        # number of atoms occurrances in fuel
+        atoms_in_fuel = np.zeros(self.gas.n_elements)
+        for i_e in range(self.gas.n_elements):
+            for i_f in range(n_fuel):
+                if self.gas.n_atoms(self.__fuel_species[i_f], self.gas.element_names[i_e]) > 0:
+                    atoms_in_fuel[i_e] += self.__fuel_weights[i_f]
+
+        # Computing the element mass fractions in the equilibrated mixture
+        Z_elements = np.zeros(self.gas.n_elements)
+        for i_e in range(self.gas.n_elements):
+            for i_s in range(self.gas.n_species):
+                Z_elements[i_e] += self.gas.n_atoms(self.gas.species_name(i_s), self.gas.element_name(i_e)) * self.gas.atomic_weights[i_e] * self.gas.Y[i_s]/self.gas.molecular_weights[i_s]
+
+        # Getting element index of oxygen
+        idx_O = self.gas.element_index('O')
+
+        # Computing the elemental mass fractions in the fuel
+        Z_fuel_elements = 0
+        for i_e in range(self.gas.n_elements):
+            if i_e != idx_O:
+                    Z_fuel_elements += atoms_in_fuel[i_e] * Z_elements[i_e]/self.gas.atomic_weights[i_e]
+
+        # Computing the oxygen stochimetric coefficient
+        nu_O = Z_fuel_elements * self.gas.atomic_weights[idx_O]/Z_elements[idx_O]
+
+        # Filling in fuel specie mass fraction array
+        __fuel_weights_s = np.zeros(self.gas.n_species)
+        for i_fuel in range(n_fuel):
+            idx_sp = self.gas.species_index(self.__fuel_species[i_fuel])
+            __fuel_weights_s[idx_sp] = self.__fuel_weights[i_fuel]
+        Y_fuel_s = __fuel_weights_s * self.gas.molecular_weights/np.sum(__fuel_weights_s * self.gas.molecular_weights)
+
+        # Filling in oxidizer specie mass fraction array
+        __oxidizer_weights_s = np.zeros(self.gas.n_species)
+        for i_oxidizer in range(n_ox):
+            idx_sp = self.gas.species_index(self.__oxidizer_species[i_oxidizer])
+            __oxidizer_weights_s[idx_sp] = self.__oxidizer_weights[i_oxidizer]
+        Y_oxidizer_s = __oxidizer_weights_s * self.gas.molecular_weights/np.sum(__oxidizer_weights_s * self.gas.molecular_weights)
+
+        # Computing elemental mass fractions of pure fuel stream
+        Z_elements_1 = np.zeros(self.gas.n_elements)
+        for i_e in range(self.gas.n_elements):
+            for i_s in range(self.gas.n_species):
+                Z_elements_1[i_e] += self.gas.n_atoms(self.gas.species_name(i_s), self.gas.element_name(i_e)) * self.gas.atomic_weights[i_e] * Y_fuel_s[i_s] / self.gas.molecular_weights[i_s]
+
+        # Computing elemental mass fractions of pure oxidizer stream
+        Z_elements_2 = np.zeros(self.gas.n_elements)
+        for i_e in range(self.gas.n_elements):
+            for i_s in range(self.gas.n_species):
+                Z_elements_2[i_e] += self.gas.n_atoms(self.gas.species_name(i_s), self.gas.element_name(i_e)) * self.gas.atomic_weights[i_e] * Y_oxidizer_s[i_s] / self.gas.molecular_weights[i_s]
+
+        # Computing stochimetric coefficient of pure fuel stream
+        beta_1 = 0
+        for i_e in range(self.gas.n_elements):
+            beta_1 += atoms_in_fuel[i_e]*Z_elements_1[i_e]/self.gas.atomic_weights[i_e]
+        beta_1 -= nu_O * Z_elements_1[idx_O]/self.gas.atomic_weights[idx_O]
+
+        # Computing stochimetric coefficient of pure oxidizer stream
+        beta_2 = 0
+        for i_e in range(self.gas.n_elements):
+            beta_2 += atoms_in_fuel[i_e] * Z_elements_2[i_e]/self.gas.atomic_weights[i_e]
+        beta_2 -= nu_O * Z_elements_2[idx_O]/self.gas.atomic_weights[idx_O]
+
+        # Computing mixture fraction coefficient
+        self.__mixfrac_coefficients = np.zeros(self.gas.n_species)
+        for i_s in range(self.gas.n_species):
+            z_fuel = 0
+            for i_e in range(self.gas.n_elements):
+                z_fuel += atoms_in_fuel[i_e] * self.gas.n_atoms(self.gas.species_name(i_s), self.gas.element_name(i_e))/self.gas.molecular_weights[i_s]
+            z_ox = -nu_O * self.gas.n_atoms(self.gas.species_name(i_s), 'O')/self.gas.molecular_weights[i_s]
+
+            self.__mixfrac_coefficients[i_s] = (1/(beta_1 - beta_2)) * (z_fuel + z_ox)
+
+        # Constant term in mixture fraction equation
+        self.__mixfrac_constant = -beta_2 / (beta_1 - beta_2)
+
+        # Mixture fraction weight of the carrier specie
+        self.__mixfrac_coeff_carrier = self.__mixfrac_coefficients[idx_c]
+        return 
+    
     def GetMixtureFractionCoefficients(self):
         """
         Get the species mass fraction coefficients for computation of the mixture fraction according to Bilger's definition.
@@ -1160,8 +1302,21 @@ class FlameletAIConfig(Config):
         :return: Progress variable array.
         :rtype: np.array
         """
-
-        return ComputeProgressVariable(self, variables, flamelet_data, Y_flamelet)
+        if Y_flamelet is not None:
+            if np.shape(Y_flamelet)[0] != self.gas.n_species:
+                raise Exception("Number of species does not match mass fraction array content.")
+            pv = np.zeros(np.shape(Y_flamelet)[1])
+            for pv_w, pv_sp in zip(self.__pv_weights, self.__pv_definition):
+                pv += pv_w * Y_flamelet[self.gas.species_index(pv_sp), :]
+            return pv 
+        else:
+            if len(variables) != np.shape(flamelet_data)[1]:
+                raise Exception("Number of variables does not match data array.")
+            
+            pv = np.zeros(np.shape(flamelet_data)[0])
+            for iPv, pvSp in enumerate(self.__pv_definition):
+                pv += self.__pv_weights[iPv] * flamelet_data[:, variables.index("Y-"+pvSp)]
+            return pv 
 
     
     def ComputeProgressVariable_Source(self, variables:list[str], flamelet_data:np.ndarray,net_production_rate_flamelet:np.ndarray=None):
@@ -1177,7 +1332,24 @@ class FlameletAIConfig(Config):
         :rtype: np.array
         """
 
-        return ComputeProgressVariable_Source(self, variables, flamelet_data, net_production_rate_flamelet)
+        if net_production_rate_flamelet is not None:
+            if np.shape(net_production_rate_flamelet)[0] != self.gas.n_species:
+                raise Exception("Number of species does not match mass fraction array content.")
+            ppv = np.zeros(np.shape(net_production_rate_flamelet)[1])
+            for pv_w, pv_sp in zip(self.__pv_weights, self.__pv_definition):
+                ppv += pv_w * net_production_rate_flamelet[self.gas.species_index(pv_sp), :]\
+                    * self.gas.molecular_weights[self.gas.species_index(pv_sp)]
+            return ppv
+        else:
+            if len(variables) != np.shape(flamelet_data)[1]:
+                raise Exception("Number of variables does not match data array.")
+            ppv = np.zeros(np.shape(flamelet_data)[0])
+            for iPv, pvSp in enumerate(self.__pv_definition):
+                prodrate_pos = flamelet_data[:, variables.index('Y_dot_pos-'+pvSp)]
+                prodrate_neg = flamelet_data[:, variables.index('Y_dot_neg-'+pvSp)]
+                mass_fraction = flamelet_data[:, variables.index('Y-'+pvSp)]
+                ppv += self.__pv_weights[iPv] * (prodrate_pos + prodrate_neg * mass_fraction)
+            return ppv 
     
     def EnablePreferentialDiffusion(self, use_PD:bool=True):
         self.__preferential_diffusion = use_PD 
@@ -1567,13 +1739,12 @@ class FlameletAIConfig(Config):
         :param file_name: configuration file name.
         :type file_name: str
         """
-        self.__mixfrac_coefficients, self.__mixfrac_constant = ComputeMixFracConstants(self)
-        idx_c = self.gas.species_index(self.__carrier_specie)
-        self.__mixfrac_coeff_carrier = self.__mixfrac_coefficients[idx_c]
+        self.ComputeMixFracConstants()
+        
 
         self.__species_in_mixture = self.gas.species_names
 
-        self.__config_name = file_name
+        self._config_name = file_name
         file = open(file_name+'.cfg','wb')
         pickle.dump(self, file)
         file.close()
