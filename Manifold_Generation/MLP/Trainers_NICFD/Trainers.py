@@ -113,6 +113,86 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         self._train_vars = self.__Entropy_var
         return 
     
+    def write_SU2_MLP(self, file_out: str):
+        """Write the network to ASCII format readable by the MLPCpp module in SU2.
+
+        :param file_out: MLP output path and file name.
+        :type file_out: str
+        """
+
+        n_layers = len(self._weights)+1
+
+        # Select trimmed weight matrices for output.
+        weights_for_output = self._weights
+        biases_for_output = self._biases
+
+        # Opening output file
+        fid = open(file_out+'.mlp', 'w+')
+        fid.write("<header>\n\n")
+        
+
+        # Writing number of neurons per layer
+        fid.write('[number of layers]\n%i\n\n' % n_layers)
+        fid.write('[neurons per layer]\n')
+        activation_functions = []
+
+        for iLayer in range(n_layers-1):
+            if iLayer == 0:
+                activation_functions.append('linear')
+            else:
+                activation_functions.append(self._activation_function_name)
+            n_neurons = np.shape(weights_for_output[iLayer])[0]
+            fid.write('%i\n' % n_neurons)
+        fid.write('%i\n' % len(self._train_vars))
+
+        activation_functions.append('linear')
+
+        # Writing the activation function for each layer
+        fid.write('\n[activation function]\n')
+        for iLayer in range(n_layers):
+            fid.write(activation_functions[iLayer] + '\n')
+
+        # Writing the input and output names
+        fid.write('\n[input names]\n')
+        for input in self._controlling_vars:
+                fid.write(input + '\n')
+        
+        fid.write('\n[input normalization]\n')
+        for i in range(len(self._controlling_vars)):
+            fid.write('%+.16e\t%+.16e\n' % (self._X_min[i], self._X_max[i]))
+        
+        fid.write('\n[output names]\n')
+        for output in self.__Entropy_var:
+            fid.write(output+'\n')
+            
+        fid.write('\n[output normalization]\n')
+        fid.write('%+.16e\t%+.16e\n' % (self.__s_min, self.__s_max))
+
+        fid.write("\n</header>\n")
+        # Writing the weights of each layer
+        fid.write('\n[weights per layer]\n')
+        for W in weights_for_output:
+            fid.write("<layer>\n")
+            for i in range(np.shape(W)[0]):
+                fid.write("\t".join("%+.16e" % float(w) for w in W[i, :]) + "\n")
+            fid.write("</layer>\n")
+        
+        # Writing the biases of each layer
+        fid.write('\n[biases per layer]\n')
+        
+        # Input layer biases are set to zero
+        fid.write("\t".join("%+.16e" % 0 for _ in self._controlling_vars) + "\n")
+
+        #for B in self.biases:
+        for B in biases_for_output:
+            try:
+                fid.write("\t".join("%+.16e" % float(b) for b in B.numpy()) + "\n")
+            except:
+                fid.write("\t".join("%+.16e" % float(B.numpy())) + "\n")
+
+        fid.close()
+        return 
+    
     @tf.function
     def CollectVariables(self):
         """Define weights and biases as trainable hyper-parameters.
@@ -181,7 +261,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         return T, P, c2
     
     @tf.function 
-    def __TD_Evaluation(self, rhoe_norm:tf.Tensor):
+    def TD_Evaluation(self, rhoe_norm:tf.Tensor):
         s, dsdrhoe, d2sdrho2e2 = self.__ComputeEntropyGradients(rhoe_norm)
         rho_norm = tf.gather(rhoe_norm, indices=self.__idx_rho, axis=1)
         rho = (self.__rho_max - self.__rho_min)*rho_norm + self.__rho_min 
@@ -223,7 +303,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         """
 
         # Evaluate thermodynamic state.
-        _, T, _, _ = self.__TD_Evaluation(x_var)
+        _, T, _, _ = self.TD_Evaluation(x_var)
 
         # Normalize reference and predicted temperature.
         T_pred_norm = (T - self._Y_min[self.__idx_T]) / (self._Y_max[self.__idx_T] - self._Y_min[self.__idx_T])
@@ -246,7 +326,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         """
 
         # Evaluate thermodynamic state.
-        _, _, P, _ = self.__TD_Evaluation(x_var)
+        _, _, P, _ = self.TD_Evaluation(x_var)
 
         # Normalize reference and predicted pressure.
         P_pred_norm = (P - self._Y_min[self.__idx_p]) / (self._Y_max[self.__idx_p] - self._Y_min[self.__idx_p])
@@ -269,7 +349,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         """
 
         # Evaluate thermodynamic state.
-        _, _, _, C2 = self.__TD_Evaluation(x_var)
+        _, _, _, C2 = self.TD_Evaluation(x_var)
         
         # Normalize reference and predicted squared SoS.
         C2_pred_norm = (C2 - self._Y_min[self.__idx_c2]) / (self._Y_max[self.__idx_c2] - self._Y_min[self.__idx_c2])
@@ -368,7 +448,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
             T_val_loss = val_loss[0]
             P_val_loss = val_loss[1]
             C2_val_loss = val_loss[2]
-            print("Epoch %i Validation loss Temperature: %.4e, Pressure: %.4e, Speed of sound: %.4e" % (i_epoch, T_val_loss.numpy(), P_val_loss.numpy(), C2_val_loss.numpy()))
+            print("Epoch %i Validation loss Temperature: %.4e, Pressure: %.4e, Speed of sound: %.4e" % (i_epoch, T_val_loss, P_val_loss, C2_val_loss))
 
         return 
     
@@ -377,7 +457,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         # T_val_error = self.__Compute_T_error(self._Y_val_norm[:,self.__idx_T], rhoe_val_norm)
         # p_val_error = self.__Compute_P_error(self._Y_val_norm[:,self.__idx_p], rhoe_val_norm)
         # c2_val_error = self.__Compute_C2_error(self._Y_val_norm[:,self.__idx_c2], rhoe_val_norm)
-        _, T_pred_val, P_pred_val, C2_pred_val = self.__TD_Evaluation(rhoe_val_norm)
+        _, T_pred_val, P_pred_val, C2_pred_val = self.TD_Evaluation(rhoe_val_norm)
         T_pred_val_norm = (T_pred_val - self.Temperature_min)/(self.Temperature_max - self.Temperature_min)
         P_pred_val_norm = (P_pred_val - self.Pressure_min)/(self.Pressure_max - self.Pressure_min)
         C2_pred_val_norm = (C2_pred_val - self.C2_min)/(self.C2_max - self.C2_min)
@@ -395,7 +475,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         
         rhoe_test_norm = tf.constant(self._X_test_norm, self._dt)
 
-        _, T_pred_test, P_pred_test, C2_pred_test = self.__TD_Evaluation(rhoe_test_norm)
+        _, T_pred_test, P_pred_test, C2_pred_test = self.TD_Evaluation(rhoe_test_norm)
         T_pred_test_norm = (T_pred_test - self.Temperature_min)/(self.Temperature_max - self.Temperature_min)
         P_pred_test_norm = (P_pred_test - self.Pressure_min)/(self.Pressure_max - self.Pressure_min)
         C2_pred_test_norm = (C2_pred_test - self.C2_min)/(self.C2_max - self.C2_min)
@@ -424,7 +504,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         """Make nice plots of the interpolated test data.
         """
 
-        s_test_pred, T_test_pred, P_test_pred, C2_test_pred = self.__TD_Evaluation(self._X_test_norm)
+        s_test_pred, T_test_pred, P_test_pred, C2_test_pred = self.TD_Evaluation(self._X_test_norm)
 
         figformat = "png"
         plot_fontsize = 20
@@ -583,6 +663,7 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
         self.__trainer_PINN.SetWeights(weights_entropy)
         self.__trainer_PINN.SetBiases(biases_entropy)
         self.__trainer_PINN.Train_MLP()
+        self.__trainer_PINN.PostProcessing()
 
         fid = open(self.main_save_dir + "/current_iter.txt", "w+")
         fid.write(str(self.current_iter) + "\n")
@@ -590,5 +671,6 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
         self._test_score = self.__trainer_PINN.GetTestScore()
         self._cost_parameter = self.__trainer_PINN.GetCostParameter()
         self.__trainer_PINN.Save_Relevant_Data()
+
         return 
     
