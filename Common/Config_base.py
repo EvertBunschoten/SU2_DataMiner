@@ -23,11 +23,11 @@
 #                                                                                             |
 #=============================================================================================#
 import os 
-
+import pyfiglet
 from Properties import DefaultProperties 
 
 class Config:
-
+    __banner_header = "SU2 DataMiner"
     _output_dir:str = "./"
     _config_name:str = "config"
 
@@ -36,6 +36,11 @@ class Config:
     __test_fraction:float = DefaultProperties.test_fraction
     
     def __init__(self):
+        return 
+    
+    def PrintBanner(self):
+        customfig = pyfiglet.Figlet(font="slant")
+        print(customfig.renderText(self.__banner_header))
         return 
     
     def SetOutputDir(self, output_dir:str):

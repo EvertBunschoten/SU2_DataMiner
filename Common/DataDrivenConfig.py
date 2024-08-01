@@ -105,6 +105,7 @@ class EntropicAIConfig(Config):
     
     def PrintBanner(self):
         """Print banner visualizing EntropicAI configuration settings."""
+        super().PrintBanner()
 
         print("EntropicAIConfiguration: " + self._config_name)
         print("")
@@ -680,7 +681,8 @@ class FlameletAIConfig(Config):
     
     def PrintBanner(self):
         """Print banner visualizing FlameletAI configuration settings."""
-
+        super().PrintBanner()
+        
         print("flameletAIConfiguration: " + self._config_name)
         print("")
         print("Flamelet generation settings:")
