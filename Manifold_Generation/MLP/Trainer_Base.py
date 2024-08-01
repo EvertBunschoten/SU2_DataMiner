@@ -898,9 +898,10 @@ class CustomTrainer(MLPTrainer):
         t_start = time.time()
         worst_error = 1e32
         i = 0
+        train_batches = tf.data.Dataset.from_tensor_slices((self._X_train_norm, self._Y_train_norm)).batch(2**self._batch_expo)
         while (i < self._n_epochs) and self.__keep_training:
-            train_batches_shuffled = self.SetTrainBatches()
-            self.LoopBatches(train_batches=train_batches_shuffled)
+            #train_batches_shuffled = self.SetTrainBatches()
+            self.LoopBatches(train_batches=train_batches)
 
             val_loss = self.ValidationLoss()
             
@@ -911,7 +912,6 @@ class CustomTrainer(MLPTrainer):
             worst_error = self.__CheckEarlyStopping(val_loss, worst_error)
 
             self.PrintEpochInfo(i, val_loss)
-            
             i += 1
         t_end = time.time()
         self._train_time = (t_end - t_start)/60
@@ -922,17 +922,9 @@ class CustomTrainer(MLPTrainer):
                 print("Epoch: ", str(i_epoch), " Validation loss: ", str(val_loss.numpy()))
         return 
     
-    #@tf.function
     def LoopBatches(self, train_batches):
-        i_batch=0
         for x_norm_batch, y_norm_batch in train_batches:
-            indices = tf.range(start=0,limit=tf.shape(x_norm_batch)[0],dtype=tf.int32)
-            shuffled_indices = tf.random.shuffle(indices)
-            x_batch_shuffled = tf.gather(x_norm_batch, shuffled_indices)
-            y_batch_shuffled = tf.gather(y_norm_batch, shuffled_indices)
-            
-            self.Train_Step(x_batch_shuffled, y_batch_shuffled)
-            i_batch += 1
+            self.Train_Step(x_norm_batch, y_norm_batch)
         return
     
     def ValidationLoss(self):
