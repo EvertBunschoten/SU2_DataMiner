@@ -1,5 +1,5 @@
 # PINNTraining
-Manifold generation for entropy-based fluid modeling in SU2. This workflow allows the user to train physics-informed neural networks to be used for the data-driven fluid model in SU2. 
+Manifold generation for data-driven fluid modeling in SU2. This workflow allows the user to train physics-informed neural networks to be used for the data-driven fluid model in SU2. 
 
 The workflow is python-based and was generated with python 3.11.
 You require the following modules for this workflow to run:
@@ -14,6 +14,7 @@ You require the following modules for this workflow to run:
 - tensorflow==2.16.2
 - time 
 - sklearn=1.2.2
+- pyfiglet
 
 After cloning this repository, add the following lines to your ```~/.bashrc``` in order to update your pythonpath accordingly:
 
