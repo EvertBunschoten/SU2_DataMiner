@@ -140,9 +140,14 @@ class Train_Source_PINN(PhysicsInformedTrainer):
     __X_b_train:np.ndarray
     __Y_unb_train:np.ndarray 
     __Y_b_train:np.ndarray 
+
+    __Np_unb:int 
+    __Np_b:int 
+
     __pv_unb_constraint_factor:float = None 
     __pv_b_constraint_factor_lean:float = None 
     __pv_b_constraint_factor_rich:float = None 
+    __val_lambda:float=1.0
 
     def __init__(self, Config_in:FlameletAIConfig, group_idx:int=0):
         PhysicsInformedTrainer.__init__(self)
@@ -210,6 +215,9 @@ class Train_Source_PINN(PhysicsInformedTrainer):
         self.__pv_b_constraint_factor_lean = dpv_dz_b_lean / (self._X_max[0] - self._X_min[0])
         self.__pv_b_constraint_factor_rich = dpv_dz_b_rich / (self._X_max[0] - self._X_min[0])
 
+        self.__Np_unb = np.shape(self.__X_unb_train)[0]
+        self.__Np_b = np.shape(self.__X_b_train)[0]
+        
         return 
     
     @tf.function
@@ -221,6 +229,119 @@ class Train_Source_PINN(PhysicsInformedTrainer):
             dY_norm = tape_con.jacobian(Y_norm, x_var)
         return Y_norm, dY_norm
 
+    @tf.function
+    def ComputeUnburntSourceConstraint(self, x_boundary_norm:tf.constant, y_boundary_norm:tf.constant):
+        with tf.GradientTape(watch_accessed_variables=False) as tape_con:
+            tape_con.watch(x_boundary_norm)
+            Y_norm = self._MLP_Evaluation(x_boundary_norm)
+            dY_norm = tape_con.jacobian(Y_norm, x_boundary_norm)
+        penalty=0
+        for iVar in range(len(self._train_vars)):
+            dY_dpv_norm = tf.linalg.diag_part(dY_norm[iVar, :, self._controlling_vars.index("ProgressVariable"),:])
+            dY_dh_norm = tf.linalg.diag_part(dY_norm[iVar, :, self._controlling_vars.index("EnthalpyTot"),:])
+            dY_dz_norm = tf.linalg.diag_part(dY_norm[iVar, :, self._controlling_vars.index("MixtureFraction"),:])
+
+            dY_dpvz = dY_dpv_norm * self.__pv_unb_constraint_factor + dY_dz_norm
+            term_1 = tf.reduce_mean(tf.pow(dY_dpvz, 2))
+            term_2 = tf.reduce_mean(tf.pow(dY_dh_norm, 2))
+            term_3 = tf.reduce_mean(tf.pow(Y_norm - y_boundary_norm, 2))
+            penalty = penalty + term_1 + term_2 + term_3
+        
+        return penalty
+    
+    @tf.function
+    def ComputeBurntSourceConstraint(self, x_boundary_norm:tf.constant, y_boundary_norm:tf.constant):
+        with tf.GradientTape(watch_accessed_variables=False) as tape_con:
+            tape_con.watch(x_boundary_norm)
+            Y_norm = self._MLP_Evaluation(x_boundary_norm)
+            dY_norm = tape_con.jacobian(Y_norm, x_boundary_norm)
+        idx_rich = x_boundary_norm[:,self._controlling_vars.index("MixtureFraction")] >= self.__Z_st_norm
+        idx_lean = x_boundary_norm[:,self._controlling_vars.index("MixtureFraction")] < self.__Z_st_norm
+        penalty = 0
+        for iVar in range(len(self._train_vars)):
+            dY_dpv_rich = tf.linalg.diag_part(dY_norm[iVar,idx_rich,self._controlling_vars.index("ProgressVariable"),idx_rich])
+            dY_dpv_lean = tf.linalg.diag_part(dY_norm[iVar,idx_lean,self._controlling_vars.index("ProgressVariable"),idx_lean])
+            dY_dz_rich = tf.linalg.diag_part(dY_norm[iVar,idx_rich,self._controlling_vars.index("MixtureFraction"),idx_rich])
+            dY_dz_lean = tf.linalg.diag_part(dY_norm[iVar,idx_lean,self._controlling_vars.index("MixtureFraction"),idx_lean])
+            dY_dh = dY_norm[iVar,:,self._controlling_vars.index("EnthalpyTot"),:]
+
+            dY_dpvz_lean = dY_dpv_lean * self.__pv_b_constraint_factor_lean + dY_dz_lean
+            dY_dpvz_rich = dY_dpv_rich * self.__pv_b_constraint_factor_rich + dY_dz_rich 
+
+            term_1 = tf.reduce_mean(tf.pow(dY_dpvz_lean,2)) + tf.reduce_mean(tf.pow(dY_dpvz_rich,2))
+            term_2 = tf.reduce_mean(tf.pow(dY_dh,2))
+            term_3 = tf.reduce_mean(tf.pow(Y_norm - y_boundary_norm,2))
+            penalty = penalty + term_1 + term_2 + term_3 
+        return penalty 
+
+    @tf.function 
+    def GetBoundsGrads(self, x_boundary, y_boundary, x_b_boundary, y_b_boundary):
+        with tf.GradientTape() as tape:
+            tape.watch(self._trainable_hyperparams)
+            y_b_loss = self.ComputeUnburntSourceConstraint(x_boundary, y_boundary)
+            y_burnt_loss = self.ComputeBurntSourceConstraint(x_b_boundary, y_b_boundary)
+            y_loss_total = y_b_loss + y_burnt_loss
+            grads_ub = tape.gradient(y_loss_total, self._trainable_hyperparams)
+        return grads_ub 
+    
+    @tf.function
+    def ComputeTotalGrads(self, x_domain, y_domain, x_boundary, y_boundary, x_b_boundary, y_b_boundary):
+        _, grads_direct = self.ComputeGradients_Direct_Error(x_domain, y_domain)
+        grads_ub = self.GetBoundsGrads(x_boundary, y_boundary, x_b_boundary, y_b_boundary)
+        
+        return grads_direct, grads_ub
+    
+    @tf.function
+    def Train_Step(self, x_domain, y_domain, x_ub_boundary, y_ub_boundary, x_b_boundary, y_b_boundary, val_lambda):
+        grads_direct, grads_ub = self.ComputeTotalGrads(x_domain, y_domain, x_ub_boundary, y_ub_boundary, x_b_boundary, y_b_boundary)
+        Np_domain = tf.cast(tf.shape(x_domain)[0],tf.float32)
+        Np_boundary = tf.cast(tf.shape(x_ub_boundary)[0],tf.float32)
+        Np_tot = Np_domain + Np_boundary
+        total_grads = [(Np_domain*g_d + 0.001*Np_boundary*val_lambda*g_b)/Np_tot for (g_d, g_b) in zip(grads_direct, grads_ub)]
+        #total_grads = [(Np_domain*g_d + Np_boundary*val_lambda*g_b)/Np_tot for (g_d, g_b) in zip(grads_direct, grads_ub)]
+        
+        self.optimizer.apply_gradients(zip(total_grads, self._trainable_variables))
+        return grads_direct, grads_ub
+    
+    def SetTrainBatches(self):
+        train_batches_domain = super().SetTrainBatches()
+        batch_size_train = 2**self._batch_expo
+        batch_size_unb = int(float(self.__Np_unb/self._Np_train)*batch_size_train)
+        batch_size_b = int(float(self.__Np_b/self._Np_train)*batch_size_train)
+        
+        train_batches_unb = tf.data.Dataset.from_tensor_slices((self.__X_unb_train, self.__Y_unb_train)).batch(batch_size_unb)
+        train_batches_b = tf.data.Dataset.from_tensor_slices((self.__X_b_train, self.__Y_b_train)).batch(batch_size_b)
+
+        return (train_batches_domain, train_batches_unb, train_batches_b)
+    
+    def LoopBatches(self, train_batches):
+
+        for XY_domain, XY_unb, XY_b in zip(train_batches[0],train_batches[1],train_batches[2]):
+            X_domain = tf.gather(XY_domain,0)
+            Y_domain = tf.gather(XY_domain,1)
+            X_unb = tf.gather(XY_unb,0)
+            Y_unb = tf.gather(XY_unb,1)
+            X_b = tf.gather(XY_b,0)
+            Y_b = tf.gather(XY_b,1)
+            grads_domain, grads_boundary = self.Train_Step(X_domain, Y_domain, X_unb, Y_unb, X_b, Y_b,self.__val_lambda)
+            self.__val_lambda = self.update_lambda(grads_domain, grads_boundary, self.__val_lambda)
+            
+        return 
+    
+    @tf.function
+    def update_lambda(self, grads_direct, grads_ub, val_lambda_old):
+        max_grad_direct = 0.0
+        for g in grads_direct:
+            max_grad_direct = tf.maximum(max_grad_direct, tf.reduce_max(tf.abs(g)))
+
+        mean_grad_ub = 0.0
+        for g_ub in grads_ub:
+            mean_grad_ub += tf.reduce_mean(tf.abs(g_ub))
+        mean_grad_ub /= len(grads_ub)
+
+        lambda_prime = max_grad_direct / (mean_grad_ub + 1e-6)
+        val_lambda_new = 0.1 * val_lambda_old + 0.9 * lambda_prime
+        return val_lambda_new
 class EvaluateArchitecture_FGM(EvaluateArchitecture):
     """Class for training MLP architectures
     """

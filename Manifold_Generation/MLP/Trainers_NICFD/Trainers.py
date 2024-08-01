@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
 import csv 
 
-from Common.EntropicAIConfig import EntropicAIConfig
+from Common.DataDrivenConfig import EntropicAIConfig
 from Common.Properties import DefaultProperties 
 from Common.CommonMethods import GetReferenceData
 from Manifold_Generation.MLP.Trainer_Base import TensorFlowFit,PhysicsInformedTrainer,EvaluateArchitecture
@@ -117,27 +117,27 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     def CollectVariables(self):
         """Define weights and biases as trainable hyper-parameters.
         """
-        self.__trainable_hyperparams = []
+        self._trainable_hyperparams = []
         for W in self._weights:
-            self.__trainable_hyperparams.append(W)
+            self._trainable_hyperparams.append(W)
         for b in self._biases[:-1]:
-            self.__trainable_hyperparams.append(b)
+            self._trainable_hyperparams.append(b)
         return 
     
     @tf.function
     def __ComputeEntropyGradients(self, rhoe_norm:tf.Tensor):
-        with tf.GradientTape() as tape_2:
+        with tf.GradientTape(watch_accessed_variables=False) as tape_2:
             tape_2.watch(rhoe_norm)
-            with tf.GradientTape() as tape_1:
+            with tf.GradientTape(watch_accessed_variables=False) as tape_1:
                 tape_1.watch(rhoe_norm)
                 s_norm = self._MLP_Evaluation(rhoe_norm)
                 ds_norm = tape_1.gradient(s_norm, rhoe_norm)
                 ds_norm_rho = tf.gather(ds_norm, indices=self.__idx_rho,axis=1)
                 d2s_norm_rho = tape_2.gradient(ds_norm_rho, rhoe_norm)
         
-        with tf.GradientTape() as tape_2:
+        with tf.GradientTape(watch_accessed_variables=False) as tape_2:
             tape_2.watch(rhoe_norm)
-            with tf.GradientTape() as tape_1:
+            with tf.GradientTape(watch_accessed_variables=False) as tape_1:
                 tape_1.watch(rhoe_norm)
                 s_norm = self._MLP_Evaluation(rhoe_norm)
                 ds_norm = tape_1.gradient(s_norm, rhoe_norm)
@@ -292,12 +292,12 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         """
 
         with tf.GradientTape() as tape:
-            tape.watch(self.__trainable_hyperparams)
+            tape.watch(self._trainable_hyperparams)
             # Evaluate temperature loss value.
             T_loss = self.__Compute_T_error(T_label_norm, rhoe_norm)
             
             # Compute MLP weight sensitvities.
-            grads_T = tape.gradient(T_loss, self.__trainable_hyperparams)
+            grads_T = tape.gradient(T_loss, self._trainable_hyperparams)
         
         return T_loss, grads_T
 
@@ -313,12 +313,12 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         :rtype: tf.Tensor
         """
         with tf.GradientTape() as tape:
-            tape.watch(self.__trainable_hyperparams)
+            tape.watch(self._trainable_hyperparams)
             # Evaluate pressure loss value.
             P_loss = self.__Compute_P_error(P_label_norm, rhoe_norm)
 
             # Compute MLP weight sensitvities.
-            grads_P = tape.gradient(P_loss, self.__trainable_hyperparams)
+            grads_P = tape.gradient(P_loss, self._trainable_hyperparams)
 
         return P_loss, grads_P
     
@@ -334,9 +334,9 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         :rtype: tf.Tensor
         """
         with tf.GradientTape() as tape:
-            tape.watch(self.__trainable_hyperparams)
+            tape.watch(self._trainable_hyperparams)
             C2_loss = self.__Compute_C2_error(C2_label_norm, rhoe_norm)
-            grads_C2 = tape.gradient(C2_loss, self.__trainable_hyperparams)
+            grads_C2 = tape.gradient(C2_loss, self._trainable_hyperparams)
         return C2_loss, grads_C2
     
     @tf.function
@@ -348,15 +348,15 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         
         # Weight update for temperature prediction.
         T_loss, grads_T = self.__ComputeGradients_T_error(T_batch_norm, X_batch_norm)
-        self._optimizer.apply_gradients(zip(grads_T, self.__trainable_hyperparams))
+        self._optimizer.apply_gradients(zip(grads_T, self._trainable_hyperparams))
 
         # Weight update for pressure prediction.
         P_loss, grads_P = self.__ComputeGradients_P_error(P_batch_norm,X_batch_norm)
-        self._optimizer.apply_gradients(zip(grads_P, self.__trainable_hyperparams))
+        self._optimizer.apply_gradients(zip(grads_P, self._trainable_hyperparams))
 
         # Weight update for SoS prediction.
         C2_loss, grads_C2 = self.__ComputeGradients_C2_error(C2_batch_norm,X_batch_norm)
-        self._optimizer.apply_gradients(zip(grads_C2, self.__trainable_hyperparams))
+        self._optimizer.apply_gradients(zip(grads_C2, self._trainable_hyperparams))
   
         return T_loss, P_loss, C2_loss
 
@@ -374,10 +374,17 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     
     def __ValidationLoss(self):
         rhoe_val_norm = tf.constant(self._X_val_norm, self._dt)
-        T_val_error = self.__Compute_T_error(self._Y_val_norm[:,self.__idx_T], rhoe_val_norm)
-        p_val_error = self.__Compute_P_error(self._Y_val_norm[:,self.__idx_p], rhoe_val_norm)
-        c2_val_error = self.__Compute_C2_error(self._Y_val_norm[:,self.__idx_c2], rhoe_val_norm)
+        # T_val_error = self.__Compute_T_error(self._Y_val_norm[:,self.__idx_T], rhoe_val_norm)
+        # p_val_error = self.__Compute_P_error(self._Y_val_norm[:,self.__idx_p], rhoe_val_norm)
+        # c2_val_error = self.__Compute_C2_error(self._Y_val_norm[:,self.__idx_c2], rhoe_val_norm)
+        _, T_pred_val, P_pred_val, C2_pred_val = self.__TD_Evaluation(rhoe_val_norm)
+        T_pred_val_norm = (T_pred_val - self.Temperature_min)/(self.Temperature_max - self.Temperature_min)
+        P_pred_val_norm = (P_pred_val - self.Pressure_min)/(self.Pressure_max - self.Pressure_min)
+        C2_pred_val_norm = (C2_pred_val - self.C2_min)/(self.C2_max - self.C2_min)
 
+        T_val_error = self.mean_square_error(y_true=self._Y_val_norm[:, self.__idx_T], y_pred=T_pred_val_norm).numpy()
+        p_val_error = self.mean_square_error(y_true=self._Y_val_norm[:, self.__idx_p], y_pred=P_pred_val_norm).numpy()
+        c2_val_error = self.mean_square_error(y_true=self._Y_val_norm[:, self.__idx_c2], y_pred=C2_pred_val_norm).numpy()
         self.val_loss_history[self.__idx_T].append(T_val_error)
         self.val_loss_history[self.__idx_p].append(p_val_error)
         self.val_loss_history[self.__idx_c2].append(c2_val_error)
@@ -387,9 +394,16 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     def TestLoss(self):
         
         rhoe_test_norm = tf.constant(self._X_test_norm, self._dt)
-        self.T_test_loss = self.__Compute_T_error(self._Y_test_norm[:,self.__idx_T], rhoe_test_norm).numpy()
-        self.P_test_loss = self.__Compute_P_error(self._Y_test_norm[:,self.__idx_p],rhoe_test_norm).numpy()
-        self.C2_test_loss = self.__Compute_C2_error(self._Y_test_norm[:,self.__idx_c2],rhoe_test_norm).numpy()
+
+        _, T_pred_test, P_pred_test, C2_pred_test = self.__TD_Evaluation(rhoe_test_norm)
+        T_pred_test_norm = (T_pred_test - self.Temperature_min)/(self.Temperature_max - self.Temperature_min)
+        P_pred_test_norm = (P_pred_test - self.Pressure_min)/(self.Pressure_max - self.Pressure_min)
+        C2_pred_test_norm = (C2_pred_test - self.C2_min)/(self.C2_max - self.C2_min)
+
+        self.T_test_loss = self.mean_square_error(y_true=self._Y_test_norm[:, self.__idx_T], y_pred=T_pred_test_norm).numpy()
+        self.P_test_loss = self.mean_square_error(y_true=self._Y_test_norm[:, self.__idx_p], y_pred=P_pred_test_norm).numpy()
+        self.C2_test_loss = self.mean_square_error(y_true=self._Y_test_norm[:, self.__idx_c2], y_pred=C2_pred_test_norm).numpy()
+
         self._test_score = max([self.T_test_loss, self.P_test_loss, self.C2_test_loss])
 
         return 
@@ -422,6 +436,40 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         T_test = self._Y_test[:, self.__idx_T]
         P_test = self._Y_test[:, self.__idx_p]
         C2_test = self._Y_test[:, self.__idx_c2]
+
+        markevery=10
+        fig = plt.figure(figsize=[10,10])
+        ax = plt.axes(projection='3d')
+        ax.plot3D(rho_test[::markevery], e_test[::markevery], T_test[::markevery], 'ko')
+        ax.plot3D(rho_test[::markevery], e_test[::markevery], T_test_pred[::markevery], 'ro')
+        ax.set_xlabel(r"Density $(\rho)[kg m^{-3}]$",fontsize=20)
+        ax.set_ylabel(r"Static Energy $(e)[J kg^{-1}]$",fontsize=20)
+        ax.set_zlabel(r"Temperature $(T)[K]$",fontsize=20)
+        ax.tick_params(which='both',labelsize=18)
+        fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/Temperature_prediction."+figformat,format=figformat,bbox_inches='tight')
+        plt.close(fig)
+
+        fig = plt.figure(figsize=[10,10])
+        ax = plt.axes(projection='3d')
+        ax.plot3D(rho_test[::markevery], e_test[::markevery], P_test[::markevery], 'ko')
+        ax.plot3D(rho_test[::markevery], e_test[::markevery], P_test_pred[::markevery], 'ro')
+        ax.set_xlabel(r"Density $(\rho)[kg m^{-3}]$",fontsize=20)
+        ax.set_ylabel(r"Static Energy $(e)[J kg^{-1}]$",fontsize=20)
+        ax.set_zlabel(r"Pressure $(p)[Pa]$",fontsize=20)
+        ax.tick_params(which='both',labelsize=18)
+        fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/Pressure_prediction."+figformat,format=figformat,bbox_inches='tight')
+        plt.close(fig)
+
+        fig = plt.figure(figsize=[10,10])
+        ax = plt.axes(projection='3d')
+        ax.plot3D(rho_test[::markevery], e_test[::markevery], np.sqrt(C2_test[::markevery]), 'ko')
+        ax.plot3D(rho_test[::markevery], e_test[::markevery], np.sqrt(C2_test_pred[::markevery]), 'ro')
+        ax.set_xlabel(r"Density $(\rho)[kg m^{-3}]$",fontsize=20)
+        ax.set_ylabel(r"Static Energy $(e)[J kg^{-1}]$",fontsize=20)
+        ax.set_zlabel(r"Speed of sound $(c)[m s^{-1}]$",fontsize=20)
+        ax.tick_params(which='both',labelsize=18)
+        fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/SoS_prediction."+figformat,format=figformat,bbox_inches='tight')
+        plt.close(fig)
 
         fig = plt.figure(figsize=[10,10])
         ax = plt.axes() 
@@ -522,6 +570,7 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
         """
 
         self.PrepareOutputDir()
+        self._trainer_direct.SetMLPFileHeader("MLP_direct")
         self._trainer_direct.Train_MLP()
         self.TrainPostprocessing()
         
@@ -530,6 +579,7 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
 
         weights_entropy = self._trainer_direct.GetWeights()
         biases_entropy = self._trainer_direct.GetBiases()
+        self.__trainer_PINN.SetMLPFileHeader("MLP_PINN")
         self.__trainer_PINN.SetWeights(weights_entropy)
         self.__trainer_PINN.SetBiases(biases_entropy)
         self.__trainer_PINN.Train_MLP()

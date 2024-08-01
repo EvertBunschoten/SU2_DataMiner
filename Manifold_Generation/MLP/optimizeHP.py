@@ -7,14 +7,14 @@ import matplotlib.pyplot as plt
 from scipy.optimize import minimize, Bounds
 
 from Common.Properties import DefaultProperties
-from Common.EntropicAIConfig import EntropicAIConfig 
-from Manifold_Generation.MLP.Trainers import EvaluateArchitecture
+from Common.Config_base import Config 
+from Manifold_Generation.MLP.Trainer_Base import EvaluateArchitecture
 
 class MLPOptimizer:
     """Class for hyper-parameter optimization of entropic fluid model multi-layer perceptrons.
     """
 
-    _Config:EntropicAIConfig = None     # EntropicAI configuration.
+    _Config:Config = None     # EntropicAI configuration.
     __optimizer:pygad.GA = None         # PyGaD optimization instance.
     __n_workers:int = 1                 # Number of CPU cores used for distributing the work per generation.
 
@@ -51,7 +51,7 @@ class MLPOptimizer:
     __population_history:list = []
     __fitness_history:list = []
 
-    def __init__(self, Config_in:EntropicAIConfig=None, load_file:str=None):
+    def __init__(self, Config_in:Config=None, load_file:str=None):
         """Class constructor
         """
 
@@ -442,7 +442,7 @@ class MLPOptimizer:
     
 
 class PlotHPOResults:
-    __Config:EntropicAIConfig = None 
+    __Config:Config = None 
     __optimize_learningrate:bool = True 
     __optimize_batch:bool = True 
     __optimize_architecture:bool = True 
@@ -458,7 +458,7 @@ class PlotHPOResults:
     __completed_workers:list[int] = []
     __completed_models:list[int] = [] 
 
-    def __init__(self, Config_in:EntropicAIConfig):
+    def __init__(self, Config_in:Config):
         self.__Config = Config_in 
         return 
     

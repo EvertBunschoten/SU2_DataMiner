@@ -94,6 +94,7 @@ class MLPTrainer:
 
     _save_dir:str = "/"  # Directory to save trained network information to.
     _figformat:str="png"
+    _mlp_output_file_name:str = "SU2_MLP"
     optuna_trial = None 
 
     # Intermediate history update window settings.
@@ -129,6 +130,9 @@ class MLPTrainer:
     
     def SetTrainFileHeader(self, train_filepathname:str):
         self._filedata_train = train_filepathname
+        return 
+    def SetMLPFileHeader(self, mlp_fileheader:str="MLP_SU2"):
+        self._mlp_output_file_name = mlp_fileheader
         return 
     
     def SetSaveDir(self, save_dir_in:str):
@@ -276,34 +280,37 @@ class MLPTrainer:
         return np.zeros(1)
     
     # Load previously trained MLP (did not try this yet!)
-    def LoadWeights(self):
+    def LoadWeights(self, weights_in:list[np.ndarray], biases_in:list[np.ndarray]):
         """Load the weights from a previous run in order to restart training from a previous training result.
         """
         self._weights = []
         self._biases = []
-        for i in range(len(self.__model.layers)):
-            loaded_W = np.load(self._save_dir + "/Model_"+str(self._model_index) + "/W_"+str(i)+".npy", allow_pickle=True)
-            loaded_b = np.load(self._save_dir + "/Model_"+str(self._model_index) + "/b_"+str(i)+".npy", allow_pickle=True)
-            self._weights.append(loaded_W)
-            self._biases.append(loaded_b)
+        for w, b in zip(weights_in, biases_in):
+            self._weights.append(tf.Variable(w, dtype=tf.float32))
+            self._biases.append(tf.Variable(b,dtype=tf.float32))
+        # for i in range(len(self._hidden_layers)+1):
+        #     loaded_W = np.load(self._save_dir + "/Model_"+str(self._model_index) + "/W_"+str(i)+".npy", allow_pickle=True)
+        #     loaded_b = np.load(self._save_dir + "/Model_"+str(self._model_index) + "/b_"+str(i)+".npy", allow_pickle=True)
+        #     self._weights.append(loaded_W)
+        #     self._biases.append(loaded_b)
         return 
     
     def SaveWeights(self):
         """Save the weights of the current network as numpy arrays.
         """
-        self._weights = []
-        self._biases = []
-        for layer in self.__model.layers:
-            self._weights.append(layer.weights[0])
-            self._biases.append(layer.weights[1])
+        # self._weights = []
+        # self._biases = []
+        # for layer in self.__model.layers:
+        #     self._weights.append(layer.weights[0])
+        #     self._biases.append(layer.weights[1])
 
         for iW, w in enumerate(self._weights):
-            np.save(self._save_dir + "/Model_"+str(self._model_index) + "/W_"+str(iW)+".npy", w, allow_pickle=True)
-            np.save(self._save_dir + "/Model_"+str(self._model_index) + "/b_"+str(iW)+".npy", self._biases[iW], allow_pickle=True)
+            np.save(self._save_dir + "/Model_"+str(self._model_index) + "/W_"+str(iW)+".npy", w.numpy(), allow_pickle=True)
+            np.save(self._save_dir + "/Model_"+str(self._model_index) + "/b_"+str(iW)+".npy", self._biases[iW].numpy(), allow_pickle=True)
         return
     
     def SetDecaySteps(self):
-        self._decay_steps = int(self._n_epochs * self._Np_train / (2**self._batch_expo))
+        self._decay_steps = 1e4#int(0.1*self._n_epochs * self._Np_train / (2**self._batch_expo))
         return 
     
     def RestartTraining(self):
@@ -317,10 +324,10 @@ class MLPTrainer:
         """
         return 
     
-    def SaveWeights(self):
-        """Save weight arrays as numpy arrays.
-        """
-        return 
+    # def SaveWeights(self):
+    #     """Save weight arrays as numpy arrays.
+    #     """
+    #     return 
     
     def GetCostParameter(self):
         """Retrieve MLP evaluation cost parameter.
@@ -432,6 +439,8 @@ class MLPTrainer:
         self._Y_train_norm = (self._Y_train - self._Y_min) / (self._Y_max - self._Y_min)
         self._Y_test_norm = (self._Y_test - self._Y_min) / (self._Y_max - self._Y_min)
         self._Y_val_norm = (self._Y_val - self._Y_min) / (self._Y_max - self._Y_min)
+
+        self._Np_train = np.shape(self._X_train_norm)[0]
         return 
     
     
@@ -534,7 +543,7 @@ class MLPTrainer:
         fid.write("Architecture: " + " ".join(str(n) for n in self._hidden_layers) + "\n")
         fid.close()
 
-        self.write_SU2_MLP(self._save_dir + "/Model_"+str(self._model_index)+"/MLP_entropy")
+        self.write_SU2_MLP(self._save_dir + "/Model_"+str(self._model_index)+"/"+self._mlp_output_file_name)
         return 
     
     def Plot_Architecture(self):
@@ -589,8 +598,9 @@ class TensorFlowFit(MLPTrainer):
             self.__model.add(keras.layers.Dense(len(self._train_vars), activation='linear'))
 
             # Define learning rate schedule and optimizer
-            #self.SetDecaySteps()
-            self._decay_steps = 1e4
+            self.SetDecaySteps()
+            print(self._decay_steps)
+            #self._decay_steps = 1e4
             __lr_schedule = keras.optimizers.schedules.ExponentialDecay(10**self._alpha_expo, decay_steps=self._decay_steps,
                                                                     decay_rate=self._lr_decay, staircase=False)
             opt = keras.optimizers.Adam(learning_rate=__lr_schedule, beta_1=0.9, beta_2=0.999, epsilon=1e-8, amsgrad=False) 
@@ -707,7 +717,7 @@ class TensorFlowFit(MLPTrainer):
 
 class CustomTrainer(MLPTrainer):
     _dt = tf.float32 
-    __trainable_hyperparams=[]
+    _trainable_hyperparams=[]
     _optimizer = None 
     __lr_schedule = None 
     _train_name:str = ""
@@ -761,15 +771,15 @@ class CustomTrainer(MLPTrainer):
     
     @tf.function
     def CollectVariables(self):
-        self.__trainable_hyperparams = []
+        self._trainable_hyperparams = []
         for W in self._weights:
-            self.__trainable_hyperparams.append(W)
+            self._trainable_hyperparams.append(W)
         for b in self._biases:
-            self.__trainable_hyperparams.append(b)
+            self._trainable_hyperparams.append(b)
     
     def SetOptimizer(self):
-        #self.SetDecaySteps()
-        self._decay_steps = 3e4
+        self.SetDecaySteps()
+        #self._decay_steps = 1e4
         self.__lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(10**self._alpha_expo, decay_steps=self._decay_steps,
                                                                             decay_rate=self._lr_decay, staircase=False)
 
@@ -818,9 +828,9 @@ class CustomTrainer(MLPTrainer):
     @tf.function
     def ComputeGradients_Direct_Error(self, x_norm:tf.constant, y_label_norm:tf.constant):
         with tf.GradientTape() as tape:
-            tape.watch(self.__trainable_hyperparams)
+            tape.watch(self._trainable_hyperparams)
             y_norm_loss = self.Compute_Direct_Error(x_norm, y_label_norm)
-            grads_loss = tape.gradient(y_norm_loss, self.__trainable_hyperparams)
+            grads_loss = tape.gradient(y_norm_loss, self._trainable_hyperparams)
             
         return y_norm_loss, grads_loss
     
@@ -835,7 +845,7 @@ class CustomTrainer(MLPTrainer):
     @tf.function
     def Train_Step(self, x_norm_batch, y_label_norm_batch):
         y_norm_loss, grads_loss = self.ComputeGradients_Direct_Error(x_norm_batch, y_label_norm_batch)
-        self._optimizer.apply_gradients(zip(grads_loss, self.__trainable_hyperparams))
+        self._optimizer.apply_gradients(zip(grads_loss, self._trainable_hyperparams))
         
         return y_norm_loss 
     
@@ -879,9 +889,9 @@ class CustomTrainer(MLPTrainer):
     def SetTrainBatches(self):
         indices = tf.range(start=0, limit=self._Np_train, dtype=tf.int32)
         shuffled_indices = tf.random.shuffle(indices)
-        X_train_shuffled = tf.gather(self._X_train_norm, indices)
-        Y_train_shuffled = tf.gather(self._Y_train_norm, indices)
-        train_batches = tf.data.Dataset.from_tensor_slices((X_train_shuffled, Y_train_shuffled)).batch(2**self._batch_expo)
+        X_train_shuffled = tf.gather(self._X_train_norm, shuffled_indices)
+        Y_train_shuffled = tf.gather(self._Y_train_norm, shuffled_indices)
+        train_batches = tf.data.Dataset.from_tensor_slices((self._X_train_norm, self._Y_train_norm)).batch(2**self._batch_expo)
         return train_batches
     
     def LoopEpochs(self):
@@ -914,7 +924,7 @@ class CustomTrainer(MLPTrainer):
     
     #@tf.function
     def LoopBatches(self, train_batches):
-        
+        i_batch=0
         for x_norm_batch, y_norm_batch in train_batches:
             indices = tf.range(start=0,limit=tf.shape(x_norm_batch)[0],dtype=tf.int32)
             shuffled_indices = tf.random.shuffle(indices)
@@ -922,7 +932,7 @@ class CustomTrainer(MLPTrainer):
             y_batch_shuffled = tf.gather(y_norm_batch, shuffled_indices)
             
             self.Train_Step(x_batch_shuffled, y_batch_shuffled)
-
+            i_batch += 1
         return
     
     def ValidationLoss(self):
@@ -982,6 +992,7 @@ class CustomTrainer(MLPTrainer):
     def PostProcessing(self):
         self.TestLoss()
         self.CustomCallback()
+        self.SaveWeights()
         return 
     
 class PhysicsInformedTrainer(CustomTrainer):
