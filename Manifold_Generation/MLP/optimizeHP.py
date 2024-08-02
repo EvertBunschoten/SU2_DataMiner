@@ -1,3 +1,29 @@
+###############################################################################################
+#       #      _____ __  _____      ____        __        __  ____                   #        #
+#       #     / ___// / / /__ \    / __ \____ _/ /_____ _/  |/  (_)___  ___  _____   #        #
+#       #     \__ \/ / / /__/ /   / / / / __ `/ __/ __ `/ /|_/ / / __ \/ _ \/ ___/   #        #
+#       #    ___/ / /_/ // __/   / /_/ / /_/ / /_/ /_/ / /  / / / / / /  __/ /       #        #
+#       #   /____/\____//____/  /_____/\__,_/\__/\__,_/_/  /_/_/_/ /_/\___/_/        #        #
+#       #                                                                            #        #
+###############################################################################################
+
+############################### FILE NAME: optimizeHP.py ######################################
+#=============================================================================================#
+# author: Evert Bunschoten                                                                    |
+#    :PhD Candidate ,                                                                         |
+#    :Flight Power and Propulsion                                                             |
+#    :TU Delft,                                                                               |
+#    :The Netherlands                                                                         |
+#                                                                                             |
+#                                                                                             |
+# Description:                                                                                |
+#   Optimize the hyper-parameters describing the MLP architecture and learning parameters for |
+#   accuracy and the number of weights in the network.                                        |
+#                                                                                             |
+# Version: 1.0.0                                                                              |
+#                                                                                             |
+#=============================================================================================#
+
 import pygad
 import os 
 import pickle 
@@ -9,6 +35,7 @@ from scipy.optimize import minimize, Bounds
 from Common.Properties import DefaultProperties
 from Common.Config_base import Config 
 from Manifold_Generation.MLP.Trainer_Base import EvaluateArchitecture
+from Manifold_Generation.MLP.Trainers_NICFD.Trainers import EvaluateArchitecture_NICFD
 
 class MLPOptimizer:
     """Class for hyper-parameter optimization of entropic fluid model multi-layer perceptrons.
@@ -36,7 +63,7 @@ class MLPOptimizer:
 
     # Learning rate decay parameter for exponential learning rate decay schedule.
     __lr_decay:float=DefaultProperties.learning_rate_decay
-    __lr_decay_min:float = 0.85
+    __lr_decay_min:float = 0.9
     __lr_decay_max:float = 1.0 
 
     # Optimize hidden layer architecture.
@@ -255,7 +282,6 @@ class MLPOptimizer:
         # Set gene types and bounds
         gene_trainparams, lowerbound, upperbound = self.__prepareBounds()
         N_genes = len(gene_trainparams)
-        print(N_genes)
         gene_space = []
         for lb, ub in zip(lowerbound, upperbound):
             gene_space.append({'low':lb,'high':ub})
@@ -320,7 +346,7 @@ class MLPOptimizer:
                 fid.write("Generation nr,solution,fitness\n")
         
         # Prepare optimization output directory.
-        self.save_dir = self._Config.GetOutputDir()+"/Architectures_Optim"+history_extension+"_n/"
+        self.save_dir = self._Config.GetOutputDir()+"/Architectures_Optim"+history_extension
         if not os.path.isdir(self.save_dir):
             os.mkdir(self.save_dir)
         
@@ -372,7 +398,7 @@ class MLPOptimizer:
         Evaluator.SetBatchExpo(self.__batch_expo)
         Evaluator.SetAlphaExpo(self.__alpha_expo)
         Evaluator.SetLRDecay(self.__lr_decay)
-        Evaluator.SetArchitecture(self.__architecture)
+        Evaluator.SetHiddenLayers(self.__architecture)
 
         # Set hyper-parameter according to gene.
         idx_x = 0
@@ -389,7 +415,7 @@ class MLPOptimizer:
             idx_x += 1 
         if self.__optimize_NN:
             architecture = [x[idx_x]]
-            Evaluator.SetArchitecture(architecture)
+            Evaluator.SetHiddenLayers(architecture)
             idx_x += 1 
 
         return
@@ -399,12 +425,12 @@ class MLPOptimizer:
         """
 
         # Initate MLP evaluation class.
-        Evaluator:EvaluateArchitecture = EvaluateArchitecture(self._Config)
+        Evaluator:EvaluateArchitecture = EvaluateArchitecture_NICFD(self._Config)
 
         # Set CPU index.
         Evaluator.SetTrainHardware("CPU", x_idx)
 
-        Evaluator.SetVerbose(1)
+        Evaluator.SetVerbose(0)
 
         # Translate gene and update hyper-parameters.
         self.__translateGene(x, Evaluator=Evaluator)
@@ -498,7 +524,7 @@ class PlotHPOResults:
             optim_header += "LR"
         if self.__optimize_architecture:
             optim_header += "A"
-        optim_directory = self.__Config.GetOutputDir()+"/"+optim_header 
+        optim_directory = self.__Config.GetOutputDir()+"/"+optim_header
 
         population_indices = os.listdir(optim_directory)
         self.__completed_models = []
@@ -507,15 +533,15 @@ class PlotHPOResults:
                 models = os.listdir(optim_directory + "/" + p)
                 for m in models:
                     if "Model" in m:
-                        if os.path.isfile(optim_directory + "/" + p + "/" + m + "/MLP_C2_performance.txt"):
+                        if os.path.isfile(optim_directory + "/" + p + "/" + m + "/MLP_NICFD_PINN_performance.txt"):
 
                             model_idx = int(m.split("_")[-1])
                             worker_idx = int(p.split("_")[-1])
-                            with open(optim_directory + "/" + p + "/" + m + "/MLP_C2_performance.txt",'r') as fid:
+                            with open(optim_directory + "/" + p + "/" + m + "/MLP_NICFD_PINN_performance.txt",'r') as fid:
                                 lines = fid.readlines()
-                                T_loss = float(lines[0].strip().split(':')[-1])
-                                P_loss = float(lines[1].strip().split(':')[-1])
-                                C2_loss = float(lines[2].strip().split(':')[-1])
+                                T_loss = float(lines[1].strip().split(':')[-1])
+                                P_loss = float(lines[2].strip().split(':')[-1])
+                                C2_loss = float(lines[3].strip().split(':')[-1])
                                 self.__T_test_set_scores.append(T_loss)
                                 self.__P_test_set_scores.append(P_loss)
                                 self.__C2_test_set_scores.append(C2_loss)
