@@ -1,11 +1,39 @@
+###############################################################################################
+#       #      _____ __  _____      ____        __        __  ____                   #        #
+#       #     / ___// / / /__ \    / __ \____ _/ /_____ _/  |/  (_)___  ___  _____   #        #
+#       #     \__ \/ / / /__/ /   / / / / __ `/ __/ __ `/ /|_/ / / __ \/ _ \/ ___/   #        #
+#       #    ___/ / /_/ // __/   / /_/ / /_/ / /_/ /_/ / /  / / / / / /  __/ /       #        #
+#       #   /____/\____//____/  /_____/\__,_/\__/\__,_/_/  /_/_/_/ /_/\___/_/        #        #
+#       #                                                                            #        #
+###############################################################################################
+
+############################ FILE NAME: collectFlameletData.py ################################
+#=============================================================================================#
+# author: Evert Bunschoten                                                                    |
+#    :PhD Candidate ,                                                                         |
+#    :Flight Power and Propulsion                                                             |
+#    :TU Delft,                                                                               |
+#    :The Netherlands                                                                         |
+#                                                                                             |
+#                                                                                             |
+# Description:                                                                                |
+#  Class for reading flamelet data files, extracting relevant data, and generating a          |
+#  homogeneous distribution of flamelet data along the progress variable, enthalpy, and       |
+#  mixture fraction direction.                                                                |
+#                                                                                             |
+# Version: 1.0.0                                                                              |
+#                                                                                             |
+#=============================================================================================#
+
 import numpy as np 
 from os import path, listdir
 import sys
 import csv 
 from tqdm import tqdm
-from Common.DataDrivenConfig import FlameletAIConfig
 np.random.seed(0)
 from random import sample 
+
+from Common.DataDrivenConfig import FlameletAIConfig
 
 class FlameletConcatenator:
     """Read, regularize, and concatenate flamelet data for MLP training or LUT generation.
@@ -265,10 +293,10 @@ class FlameletConcatenator:
             print("Reading equilibrium data...")
             mixture_folders = np.sort(np.array(self.mfracs_equilibrium))
             for z in tqdm(mixture_folders[::self.__mfrac_skip]):
-                # if z[:len(folder_header)] == folder_header:
-                #     mixture_status = float(z[len(folder_header):])
-                #     if (mixture_status <= self.__mix_status_max) and (mixture_status >= self.__mix_status_min):
-                i_equilibrium_total = self.__InterpolateFlameletData(self.__flameletdata_dir + "/equilibrium_data/", z, i_start, i_equilibrium_total)
+                if z[:len(folder_header)] == folder_header:
+                    mixture_status = float(z[len(folder_header):])
+                    if (mixture_status <= self.__mix_status_max) and (mixture_status >= self.__mix_status_min):
+                        i_equilibrium_total = self.__InterpolateFlameletData(self.__flameletdata_dir + "/equilibrium_data/", z, i_start, i_equilibrium_total)
             print("Done!")
             i_start +=  i_equilibrium_total
 
@@ -413,13 +441,13 @@ class FlameletConcatenator:
             self.mfracs_equilibrium = listdir(self.__flameletdata_dir + "/equilibrium_data")
             mixture_folders = np.sort(np.array(self.mfracs_equilibrium))
             for z in tqdm(mixture_folders[::self.__mfrac_skip]):
-                # if z[:len(folder_header)] == folder_header:
-                    # mixture_status = float(z[len(folder_header):])
-                    # if (mixture_status <= self.__mix_status_max) and (mixture_status >= self.__mix_status_min):
-                n_eq += len(listdir(self.__flameletdata_dir + "/equilibrium_data/" + z))
-                for f in listdir(self.__flameletdata_dir + "/equilibrium_data/" + z):
-                    with open(self.__flameletdata_dir + "/equilibrium_data/" + z + "/" + f, "r") as fid:
-                        Np_tot += len(fid.readlines())-1
+                if z[:len(folder_header)] == folder_header:
+                    mixture_status = float(z[len(folder_header):])
+                    if (mixture_status <= self.__mix_status_max) and (mixture_status >= self.__mix_status_min):
+                        n_eq += len(listdir(self.__flameletdata_dir + "/equilibrium_data/" + z))
+                        for f in listdir(self.__flameletdata_dir + "/equilibrium_data/" + z):
+                            with open(self.__flameletdata_dir + "/equilibrium_data/" + z + "/" + f, "r") as fid:
+                                Np_tot += len(fid.readlines())-1
 
         # Count the number of chemical equilibrium data files.
         if self.__include_fuzzy:
