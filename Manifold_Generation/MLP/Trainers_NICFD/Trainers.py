@@ -1,3 +1,29 @@
+###############################################################################################
+#       #      _____ __  _____      ____        __        __  ____                   #        #
+#       #     / ___// / / /__ \    / __ \____ _/ /_____ _/  |/  (_)___  ___  _____   #        #
+#       #     \__ \/ / / /__/ /   / / / / __ `/ __/ __ `/ /|_/ / / __ \/ _ \/ ___/   #        #
+#       #    ___/ / /_/ // __/   / /_/ / /_/ / /_/ /_/ / /  / / / / / /  __/ /       #        #
+#       #   /____/\____//____/  /_____/\__,_/\__/\__,_/_/  /_/_/_/ /_/\___/_/        #        #
+#       #                                                                            #        #
+###############################################################################################
+
+################################ FILE NAME: Trainers.py #######################################
+#=============================================================================================#
+# author: Evert Bunschoten                                                                    |
+#    :PhD Candidate ,                                                                         |
+#    :Flight Power and Propulsion                                                             |
+#    :TU Delft,                                                                               |
+#    :The Netherlands                                                                         |
+#                                                                                             |
+#                                                                                             |
+# Description:                                                                                |
+#  Classes for training multi-layer perceptrons on fluid data.                                |
+#                                                                                             |
+# Version: 1.0.0                                                                              |
+#                                                                                             |
+#=============================================================================================#
+
+# Set seed values.
 seed_value = 2
 import os
 os.environ['PYTHONASHSEED'] = str(seed_value)
@@ -12,14 +38,9 @@ import tensorflow as tf
 tf.random.set_seed(seed_value)
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
-import time 
-from tensorflow import keras
 import matplotlib.pyplot as plt 
-from sklearn.metrics import r2_score
-import csv 
 
 from Common.DataDrivenConfig import EntropicAIConfig
-from Common.Properties import DefaultProperties 
 from Common.CommonMethods import GetReferenceData
 from Manifold_Generation.MLP.Trainer_Base import TensorFlowFit,PhysicsInformedTrainer,EvaluateArchitecture
 
@@ -32,7 +53,14 @@ class Train_Entropic_Direct(TensorFlowFit):
         self._controlling_vars = ["Density", "Energy"]
         self._train_vars = ["s"]
         return                
-    
+
+class Train_Entropic_Derivatives(TensorFlowFit):
+    def __init__(self):
+        TensorFlowFit.__init__(self)
+        self._mlp_output_file_name = "SU2_MLP_segregated"
+        self._controlling_vars = ["Density", "Energy"]
+        self._train_vars = ["s","dsdrho_e","dsde_rho","d2sdrho2","d2sdedrho","d2sde2"]
+
 class Train_Entropic_PINN(PhysicsInformedTrainer):
 
     __idx_rho:int
@@ -499,6 +527,27 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         self.__Generate_Error_Plots()
 
         return super().CustomCallback()
+    
+    def Save_Relevant_Data(self):
+        """Save network performance characteristics in text file and write SU2 MLP input file.
+        """
+        fid = open(self._save_dir + "/Model_"+str(self._model_index)+"/MLP_NICFD_PINN_performance.txt", "w+")
+        fid.write("Training time[minutes]: %+.3e\n" % self._train_time)
+        fid.write("Temperature test loss: %+.16e\n" % self.T_test_loss)
+        fid.write("Pressure test loss: %+.16e\n" % self.P_test_loss)
+        fid.write("SoS test loss: %+.16e\n" % self.C2_test_loss)
+        fid.write("Total neuron count:  %i\n" % np.sum(np.array(self._hidden_layers)))
+        fid.write("Evaluation time[seconds]: %+.3e\n" % (self._test_time))
+        fid.write("Evaluation cost parameter: %+.3e\n" % (self._cost_parameter))
+        fid.write("Alpha exponent: %+.4e\n" % self._alpha_expo)
+        fid.write("Learning rate decay: %+.4e\n" % self._lr_decay)
+        fid.write("Batch size exponent: %i\n" % self._batch_expo)
+        fid.write("Decay steps: %i\n" % self._decay_steps)
+        fid.write("Activation function index: %i\n" % self._i_activation_function)
+        fid.write("Number of hidden layers: %i\n" % len(self._hidden_layers))
+        fid.write("Architecture: " + " ".join(str(n) for n in self._hidden_layers) + "\n")
+        fid.close()
+        return 
     
     def __Generate_Error_Plots(self):
         """Make nice plots of the interpolated test data.

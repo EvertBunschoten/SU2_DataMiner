@@ -1,3 +1,29 @@
+###############################################################################################
+#       #      _____ __  _____      ____        __        __  ____                   #        #
+#       #     / ___// / / /__ \    / __ \____ _/ /_____ _/  |/  (_)___  ___  _____   #        #
+#       #     \__ \/ / / /__/ /   / / / / __ `/ __/ __ `/ /|_/ / / __ \/ _ \/ ___/   #        #
+#       #    ___/ / /_/ // __/   / /_/ / /_/ / /_/ /_/ / /  / / / / / /  __/ /       #        #
+#       #   /____/\____//____/  /_____/\__,_/\__/\__,_/_/  /_/_/_/ /_/\___/_/        #        #
+#       #                                                                            #        #
+###############################################################################################
+
+############################## FILE NAME: Trainer_Base.py #####################################
+#=============================================================================================#
+# author: Evert Bunschoten                                                                    |
+#    :PhD Candidate ,                                                                         |
+#    :Flight Power and Propulsion                                                             |
+#    :TU Delft,                                                                               |
+#    :The Netherlands                                                                         |
+#                                                                                             |
+#                                                                                             |
+# Description:                                                                                |
+#   Base class for the various MLP trainer types and MLP evaluator class.                     |
+#                                                                                             |
+# Version: 1.0.0                                                                              |
+#                                                                                             |
+#=============================================================================================#
+
+# Set seed values.
 seed_value = 2
 import os
 os.environ['PYTHONASHSEED'] = str(seed_value)
@@ -12,15 +38,18 @@ import tensorflow as tf
 tf.random.set_seed(seed_value)
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
+
 import time 
 from tensorflow import keras
 import matplotlib.pyplot as plt 
 from sklearn.metrics import r2_score
 import csv 
+
 from Common.Config_base import Config
 from Common.Properties import DefaultProperties 
 from Common.CommonMethods import GetReferenceData
 
+# Activation function options
 activation_function_names_options:list[str] = ["linear","elu","relu","tanh","exponential","gelu"]
 activation_function_options = [tf.keras.activations.linear,
                             tf.keras.activations.elu,\
@@ -28,6 +57,7 @@ activation_function_options = [tf.keras.activations.linear,
                             tf.keras.activations.tanh,\
                             tf.keras.activations.exponential,\
                             tf.keras.activations.gelu]
+
 class MLPTrainer:
     # Base class for flamelet MLP trainer
 
@@ -887,10 +917,6 @@ class CustomTrainer(MLPTrainer):
         return 
     
     def SetTrainBatches(self):
-        indices = tf.range(start=0, limit=self._Np_train, dtype=tf.int32)
-        shuffled_indices = tf.random.shuffle(indices)
-        X_train_shuffled = tf.gather(self._X_train_norm, shuffled_indices)
-        Y_train_shuffled = tf.gather(self._Y_train_norm, shuffled_indices)
         train_batches = tf.data.Dataset.from_tensor_slices((self._X_train_norm, self._Y_train_norm)).batch(2**self._batch_expo)
         return train_batches
     
@@ -898,7 +924,7 @@ class CustomTrainer(MLPTrainer):
         t_start = time.time()
         worst_error = 1e32
         i = 0
-        train_batches = tf.data.Dataset.from_tensor_slices((self._X_train_norm, self._Y_train_norm)).batch(2**self._batch_expo)
+        train_batches = self.SetTrainBatches()
         while (i < self._n_epochs) and self.__keep_training:
             #train_batches_shuffled = self.SetTrainBatches()
             self.LoopBatches(train_batches=train_batches)
@@ -985,6 +1011,7 @@ class CustomTrainer(MLPTrainer):
         self.TestLoss()
         self.CustomCallback()
         self.SaveWeights()
+        self.Save_Relevant_Data()
         return 
     
 class PhysicsInformedTrainer(CustomTrainer):

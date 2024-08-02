@@ -2,7 +2,7 @@
 
 import os 
 import sys 
-from Manifold_Generation.MLP.Trainers import Train_Entropic_Direct
+from Manifold_Generation.MLP.Trainers_NICFD.Trainers import Train_Entropic_Direct
 
 from Common.DataDrivenConfig import EntropicAIConfig 
 
@@ -12,7 +12,7 @@ M = Train_Entropic_Direct()
 M.SetTrainFileHeader(os.getcwd()+"/"+C.GetConcatenationFileHeader())
 M.SetAlphaExpo(-3.0)
 M.SetLRDecay(0.85)
-M.SetBatchSize(4)
+M.SetBatchExpo(4)
 M.SetHiddenLayers([20])
 M.SetNEpochs(10)
 M.SetVerbose(0)

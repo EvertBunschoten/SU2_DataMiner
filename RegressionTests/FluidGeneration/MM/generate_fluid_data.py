@@ -2,7 +2,7 @@
 
 import os 
 import sys
-from Data_Generation.DataGenerators import DataGenerator_CoolProp 
+from Data_Generation.DataGenerator_NICFD import DataGenerator_CoolProp 
 from Common.DataDrivenConfig import EntropicAIConfig 
 
 Config = EntropicAIConfig(sys.argv[-1])
