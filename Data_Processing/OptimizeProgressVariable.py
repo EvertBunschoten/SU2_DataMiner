@@ -1,21 +1,38 @@
+###############################################################################################
+#       #      _____ __  _____      ____        __        __  ____                   #        #
+#       #     / ___// / / /__ \    / __ \____ _/ /_____ _/  |/  (_)___  ___  _____   #        #
+#       #     \__ \/ / / /__/ /   / / / / __ `/ __/ __ `/ /|_/ / / __ \/ _ \/ ___/   #        #
+#       #    ___/ / /_/ // __/   / /_/ / /_/ / /_/ /_/ / /  / / / / / /  __/ /       #        #
+#       #   /____/\____//____/  /_____/\__,_/\__/\__,_/_/  /_/_/_/ /_/\___/_/        #        #
+#       #                                                                            #        #
+###############################################################################################
+
+######################### FILE NAME: OptimizeProgressVariable.py ##############################
+#=============================================================================================#
+# author: Evert Bunschoten                                                                    |
+#    :PhD Candidate ,                                                                         |
+#    :Flight Power and Propulsion                                                             |
+#    :TU Delft,                                                                               |
+#    :The Netherlands                                                                         |
+#                                                                                             |
+#                                                                                             |
+# Description:                                                                                |
+#  Class for optimizing the definition for the progress variable for a given set of flamelet  |
+#  data.                                                                                      |
+#                                                                                             |
+# Version: 1.0.0                                                                              |
+#                                                                                             |
+#=============================================================================================#
+
 import numpy as np 
 import sys
 import os
-import cantera as ct 
 from tqdm import tqdm
-import matplotlib as mpl
 import matplotlib.pyplot as plt 
+from scipy.optimize import differential_evolution, Bounds, LinearConstraint
+
 from Common.DataDrivenConfig import FlameletAIConfig
-from scipy.optimize import differential_evolution, Bounds, LinearConstraint,NonlinearConstraint
 
-import tensorflow as tf 
-
-mpl.rcParams['mathtext.fontset'] = 'cm'
-mpl.rcParams['mathtext.rm'] = 'Times New Roman'
-plt.rcParams["font.family"] = "Times New Roman"
-np.random.seed(1)
-prop_cycle = plt.rcParams["axes.prop_cycle"]
-colors = prop_cycle.by_key()['color']
 class PVOptimizer:
     """Optimize the progress variable weights for all flamelets in the manifold given relevant species in the mixture.
     """
@@ -34,7 +51,6 @@ class PVOptimizer:
     __idx_additional_vars = [] 
 
     __delta_Y_flamelets:np.ndarray[float] = None
-    __delta_Y_flamelets_constraints:np.ndarray[float] = None
     __progress_vector:np.ndarray[float] = None
 
 
@@ -59,16 +75,9 @@ class PVOptimizer:
     __phi_min:float = 0.0
     __phi_max:float = 600 
 
-    __initial_pv_definition:list[str] = []
-    __initial_pv_weights:list[float] = []
     __species_bounds_set:list[str] = []
     __species_custom_lb:list[float] = []
     __species_custom_ub:list[float] = []
-
-    __phi_to_plot_for:float = 1.0
-    __Tu_to_plot_for:float = 300.00
-    __species_plot:list[str] = ["NO","NO2"]
-    __initial:bool = True 
 
     __output_dir:str = None 
 
