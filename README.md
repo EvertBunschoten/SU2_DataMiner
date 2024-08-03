@@ -1,19 +1,20 @@
-# PINNTraining
-Manifold generation for data-driven fluid modeling in SU2. This workflow allows the user to train physics-informed neural networks to be used for the data-driven fluid model in SU2. 
+# SU2 DataMiner
+This repository describes the workflow for manifold generation for data-driven fluid modeling in SU2. The workflow allows the user to generate fluid data and convert these into tables and train multi-layer perceptrons in order to retrieve thermo-chemical quantities during simulations in SU2. The applications are currently limited to non-ideal computational fluid dynamics and flamelet-generated manifold simulations for arbitrary fluids and reactants respectively. 
 
 The workflow is python-based and was generated with python 3.11.
 You require the following modules for this workflow to run:
-- numpy==1.26.4
+- numpy
 - pickle
 - os
-- CoolProp==6.6.0
-- tqdm==4.65.0
-- csv==1.0
-- matplotlib==3.9.0
+- CoolProp
+- cantera
+- tqdm
+- csv
+- matplotlib
 - random 
-- tensorflow==2.16.2
+- tensorflow
 - time 
-- sklearn=1.2.2
+- sklearn
 - pyfiglet
 
 After cloning this repository, add the following lines to your ```~/.bashrc``` in order to update your pythonpath accordingly:
