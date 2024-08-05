@@ -22,7 +22,7 @@ jobs:
         run: echo "hi there"
 
       - name: Pre Cleanup
-        uses: docker://ghcr.io/evertbunschoten/pinnraining_test:1.0.0
+        uses: docker://ghcr.io/evertbunschoten/pinntraining_test:1.0.0
         with:
           entrypoint: /bin/rm
           args: -rf install install_bin.tgz src ccache ${{ matrix.config_set }}
