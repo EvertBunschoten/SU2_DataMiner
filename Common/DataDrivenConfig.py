@@ -36,9 +36,9 @@ import cantera as ct
 #---------------------------------------------------------------------------------------------#
 # Importing DataMiner classes and functions
 #---------------------------------------------------------------------------------------------#
-from Common.Properties import DefaultProperties 
-from Config_base import Config 
-from CommonMethods import *
+from Common.Properties import DefaultSettings_NICFD, DefaultSettings_FGM
+from Common.Config_base import Config 
+from Common.CommonMethods import *
 
 #---------------------------------------------------------------------------------------------#
 # NI-CFD DataMiner configuration class
@@ -59,25 +59,21 @@ class EntropicAIConfig(Config):
     __use_PT:bool = True 
 
 
-    __T_lower:float = DefaultProperties.T_min   # Lower temperature bound.
-    __T_upper:float = DefaultProperties.T_max   # Upper temperature bound.
-    __Np_T:int = DefaultProperties.Np_temp      # Number of temperature samples between bounds.
+    __T_lower:float = DefaultSettings_NICFD.T_min   # Lower temperature bound.
+    __T_upper:float = DefaultSettings_NICFD.T_max   # Upper temperature bound.
+    __Np_T:int = DefaultSettings_NICFD.Np_temp      # Number of temperature samples between bounds.
 
-    __P_lower:float = DefaultProperties.P_min
-    __P_upper:float = DefaultProperties.P_max
-    __Np_P:int = DefaultProperties.Np_p
+    __P_lower:float = DefaultSettings_NICFD.P_min
+    __P_upper:float = DefaultSettings_NICFD.P_max
+    __Np_P:int = DefaultSettings_NICFD.Np_p
 
-    __Rho_lower:float = DefaultProperties.Rho_min
-    __Rho_upper:float = DefaultProperties.Rho_max 
-    __Energy_lower:float = DefaultProperties.Energy_min
-    __Energy_upper:float = DefaultProperties.Energy_max
+    __Rho_lower:float = DefaultSettings_NICFD.Rho_min
+    __Rho_upper:float = DefaultSettings_NICFD.Rho_max 
+    __Energy_lower:float = DefaultSettings_NICFD.Energy_min
+    __Energy_upper:float = DefaultSettings_NICFD.Energy_max
     
     # MLP training settings
-    __init_learning_rate_expo:float = DefaultProperties.init_learning_rate_expo
-    __learning_rate_decay:float =  DefaultProperties.learning_rate_decay
-    __batch_size_exponent:int = DefaultProperties.batch_size_exponent
-    __NN_hidden:int = DefaultProperties.NN_hidden
-    __N_epochs:int = DefaultProperties.N_epochs 
+    
 
     # Table Generation Settings
 
@@ -89,6 +85,12 @@ class EntropicAIConfig(Config):
 
     def __init__(self, load_file:str=None):
         Config.__init__(self)
+
+        self.SetAlphaExpo(DefaultSettings_NICFD.init_learning_rate_expo)
+        self.SetLRDecay(DefaultSettings_NICFD.learning_rate_decay)
+        self.SetBatchExpo(DefaultSettings_NICFD.batch_size_exponent)
+        self.SetHiddenLayerArchitecture(DefaultSettings_NICFD.hidden_layer_architecture)
+
         """Class constructor
         """
         self._config_name = "EntropicAIConfig" # Configuration name.
@@ -125,16 +127,6 @@ class EntropicAIConfig(Config):
             print("Data generation grid: density-based")
         
         return 
-    
-    def GetConfigName(self):
-        """
-        Return configuration name.
-
-        :return: EntropicAI configuration name.
-        :rtype: str
-
-        """
-        return self._config_name
     
 
     def SetFluid(self, fluid_name):
@@ -219,7 +211,7 @@ class EntropicAIConfig(Config):
     def GetPTGrid(self):
         return self.__use_PT 
     
-    def SetTemperatureBounds(self, T_lower:float=DefaultProperties.T_min, T_upper:float=DefaultProperties.T_max):
+    def SetTemperatureBounds(self, T_lower:float=DefaultSettings_NICFD.T_min, T_upper:float=DefaultSettings_NICFD.T_max):
         """Set the upper and lower temperature limits for the fluid data grid.
 
         :param T_lower: lower temperature limit in Kelvin.
@@ -235,7 +227,7 @@ class EntropicAIConfig(Config):
             self.__T_upper = T_upper
         return
     
-    def SetEnergyBounds(self, E_lower:float=DefaultProperties.Energy_min, E_upper:float=DefaultProperties.Energy_max):
+    def SetEnergyBounds(self, E_lower:float=DefaultSettings_NICFD.Energy_min, E_upper:float=DefaultSettings_NICFD.Energy_max):
         self.__Energy_lower=E_lower
         self.__Energy_upper=E_upper
         return 
@@ -243,16 +235,16 @@ class EntropicAIConfig(Config):
     def GetEnergyBounds(self):
         return [self.__Energy_lower, self.__Energy_upper]
     
-    def SetNpEnergy(self, Np_Energy:int=DefaultProperties.Np_temp):
+    def SetNpEnergy(self, Np_Energy:int=DefaultSettings_NICFD.Np_temp):
         self.__Np_T = Np_Energy
         return 
     
-    def SetDensityBounds(self, Rho_lower:float=DefaultProperties.Rho_min, Rho_upper:float=DefaultProperties.Rho_max):
+    def SetDensityBounds(self, Rho_lower:float=DefaultSettings_NICFD.Rho_min, Rho_upper:float=DefaultSettings_NICFD.Rho_max):
         self.__Rho_lower=Rho_lower
         self.__Rho_upper=Rho_upper
         return 
     
-    def SetNpDensity(self, Np_rho:int=DefaultProperties.Np_p):
+    def SetNpDensity(self, Np_rho:int=DefaultSettings_NICFD.Np_p):
         self.__Np_P = Np_rho
         return 
     
@@ -263,7 +255,7 @@ class EntropicAIConfig(Config):
         return [self.__T_lower, self.__T_upper]
     
     
-    def SetNpTemp(self, Np_Temp:int=DefaultProperties.Np_temp):
+    def SetNpTemp(self, Np_Temp:int=DefaultSettings_NICFD.Np_temp):
         """
         Set number of divisions for the temperature grid.
 
@@ -289,7 +281,7 @@ class EntropicAIConfig(Config):
         return self.__Np_T
     
 
-    def SetPressureBounds(self, P_lower:float=DefaultProperties.P_min, P_upper:float=DefaultProperties.P_max):
+    def SetPressureBounds(self, P_lower:float=DefaultSettings_NICFD.P_min, P_upper:float=DefaultSettings_NICFD.P_max):
         """Set the upper and lower limits for the fluid pressure.
 
         :param P_lower: lower pressure limit in Pa.
@@ -309,7 +301,7 @@ class EntropicAIConfig(Config):
         return [self.__P_lower, self.__P_upper]
     
     
-    def SetNpPressure(self, Np_P:int=DefaultProperties.Np_p):
+    def SetNpPressure(self, Np_P:int=DefaultSettings_NICFD.Np_p):
         """
         Set number of divisions for the fluid pressure grid.
 
@@ -380,129 +372,6 @@ class EntropicAIConfig(Config):
         """
         return self.__Table_ref_radius, self.__Table_curv_threshold
     
-    def SetAlphaExpo(self, alpha_expo:float=DefaultProperties.init_learning_rate_expo):
-        """Set initial learning rate decay parameter.
-
-        :param alpha_expo: initial learning rate exponent (base 10), defaults to -2.6
-        :type alpha_expo: float, optional
-        :raises Exception: if initial learning rate exponent is positive.
-        """
-
-        if alpha_expo >= 0:
-            raise Exception("Initial learning rate exponent should be negative.")
-        self.__init_learning_rate_expo = alpha_expo 
-
-        return 
-    
-    def GetAlphaExpo(self):
-        """Get initial learning rate exponent (base 10).
-
-        :return: log10 of initial learning rate exponent.
-        :rtype: float
-        """
-        return self.__init_learning_rate_expo 
-    
-    def SetLearningRateDecay(self, lr_decay:float=DefaultProperties.learning_rate_decay):
-        """Set the learning rate decay parameter.
-
-        :param lr_decay: learning rate decay parameter for exponential learning rate scheduler, defaults to 0.9985
-        :type lr_decay: float, optional
-        :raises Exception: if decay parameter is not between 0.0 and 1.0.
-        """
-
-        if lr_decay <= 0.0 or lr_decay >= 1.0:
-            raise Exception("Learning rate decay parameter should be between 0 and 1.")
-        self.__learning_rate_decay = lr_decay
-
-        return 
-    
-    def GetLearningRateDecay(self):
-        """Get learning rate decay parameter.
-
-        :return: learning rate decay parameter.
-        :rtype: float
-        """
-        
-        return self.__learning_rate_decay 
-    
-    def SetMLPArchitecture(self, group_index:int, architecture_in:list[int]):
-        """Save an MLP architecture for a given group index.
-
-        :param group_index: MLP output group index.
-        :type group_index: int
-        :param architecture_in: number of neurons per hidden layer.
-        :type architecture_in: list[int]
-        :raises Exception: if the provided list of neuron counts is empty.
-        :raises Exception: if the provided group index exceeds the number of MLPs.
-        """
-        if len(architecture_in) == 0:
-            raise Exception("MLP should have at least one layer.")
-        if group_index >= len(self.__MLP_architectures):
-            raise Exception("Group index should be below "+str(len(self.__MLP_architectures)))
-        
-        if self.__MLP_architectures == None:
-            self.__MLP_architectures = []
-            for iGroup in range(len(self.__MLP_output_groups)):
-                self.__MLP_architectures[iGroup] = [] 
-        
-        self.__MLP_architectures[group_index] = []
-        for NN in architecture_in:
-            self.__MLP_architectures[group_index].append(NN)
-
-    def GetMLPArchitecture(self, group_index:int):
-        """Get the saved MLP architecture for a given group.
-
-        :param group_index: MLP output group index.
-        :type group_index: int
-        :return: neurons per hidden layer in the network.
-        :rtype: list[int]
-        """
-        return self.__MLP_architectures[group_index]
-    
-    def SetTrainParams(self, group_index:int, alpha_expo:float, lr_decay:float, batch_expo:int, activation_index:int):
-        """Save the training parameters for a set MLP.
-
-        :param group_index: MLP output group index.
-        :type group_index: int
-        :param alpha_expo: alpha exponent value for the learning rate.
-        :type alpha_expo: float
-        :param lr_decay: learning rate decay parameter.
-        :type lr_decay: float
-        :param batch_expo: mini-batch size exponent.
-        :type batch_expo: int
-        :param activation_index: activation function index for hidden layers.
-        :type activation_index: int
-        :raises Exception: if the provided group index exceeds the number of MLPs.
-        """
-        if group_index >= len(self.__MLP_architectures):
-            raise Exception("Group index should be below "+str(len(self.__MLP_architectures)))
-        
-        if self.__MLP_trainparams == None:
-            self.__MLP_trainparams = []
-            for iGroup in range(len(self.__MLP_output_groups)):
-                self.__MLP_trainparams[iGroup] = [] 
-        
-        self.__MLP_trainparams[iGroup] = []
-        self.__MLP_trainparams[iGroup].append(alpha_expo)
-        self.__MLP_trainparams[iGroup].append(lr_decay)
-        self.__MLP_trainparams[iGroup].append(batch_expo)
-        self.__MLP_trainparams[iGroup].append(activation_index)
-
-    def GetTrainParams(self, group_index:int):
-        """Get the saved training parameters for a given MLP
-
-        :param group_index: MLP output group index.
-        :type group_index: int
-        :return: learning rate alpha exponent, learning rate decay parameter, batch size exponent, and activation function index.
-        :rtype: float, float, int, int
-        """
-
-        alpha_expo = self.__MLP_architectures[group_index][0]
-        lr_decay = self.__MLP_architectures[group_index][1]
-        batch_expo = self.__MLP_architectures[group_index][2]
-        activation_index = self.__MLP_architectures[group_index][3]
-
-        return alpha_expo, lr_decay, batch_expo, activation_index
         
     def AddOutputGroup(self, variable_names_in:list[str]):
         """Add an MLP output group of fluid variables.
@@ -572,18 +441,6 @@ class EntropicAIConfig(Config):
         """
         return self.__MLP_output_groups[i_group]
     
-    def SaveConfig(self, file_name:str):
-        """
-        Save the current EntropicAI configuration.
-
-        :param file_name: configuration file name.
-        :type file_name: str
-        """
-
-        self._config_name = file_name
-        file = open(file_name+'.cfg','wb')
-        pickle.dump(self, file)
-        file.close()
 
 
 #---------------------------------------------------------------------------------------------#
@@ -598,33 +455,38 @@ class FlameletAIConfig(Config):
     :type load_file: str
     """
     # FlameletAI configuration class containing all relevant info on flamelet manifold settings.
+    _config_name = DefaultSettings_FGM.config_name
+
 
     # Flamelet Generation Settings           
-    __reaction_mechanism:str = 'gri30.yaml'   # Reaction mechanism name.
+    __reaction_mechanism:str = DefaultSettings_FGM.reaction_mechanism   # Reaction mechanism name.
+    __transport_model:str = DefaultSettings_FGM.transport_model 
 
-    __fuel_species:list[str] = ['CH4'] # Fuel species composition.
-    __fuel_weights:list[float] = [1.0]  # Fuel species weights.
+    __fuel_species:list[str] = DefaultSettings_FGM.fuel_definition # Fuel species composition.
+    __fuel_weights:list[float] = DefaultSettings_FGM.fuel_weights  # Fuel species weights.
+    __fuel_string:str 
 
-    __oxidizer_species:list[str] = ['O2', 'N2']   # Oxidizer species composition.
-    __oxidizer_weights:list[float] = [1.0, 3.76]    # Oxidizer species weights.
+    __oxidizer_species:list[str] = DefaultSettings_FGM.oxidizer_definition   # Oxidizer species composition.
+    __oxidizer_weights:list[float] = DefaultSettings_FGM.oxidizer_weights    # Oxidizer species weights.
+    __oxidizer_string:str
 
-    __carrier_specie:str = 'N2' # Carrier specie definition.
+    __carrier_specie:str = DefaultSettings_FGM.carrier_specie # Carrier specie definition.
 
-    __run_mixture_fraction:bool = False    # Define premixed status as mixture fraction (True) or as equivalence ratio (False)
-    __preferential_diffusion:bool = False  # Include preferential diffusion effects. 
+    __run_mixture_fraction:bool = DefaultSettings_FGM.run_mixture_fraction    # Define premixed status as mixture fraction (True) or as equivalence ratio (False)
+    __preferential_diffusion:bool = DefaultSettings_FGM.preferential_diffusion  # Include preferential diffusion effects. 
 
-    __T_unb_lower:float = 280   # Lower bound of unburnt reactants temperature.
-    __T_unb_upper:float = 500   # Upper bound of unburnt reactants temperature.
-    __Np_T_unb:int = 100      # Number of unburnt temperature samples between bounds.
+    __T_unb_lower:float = DefaultSettings_FGM.T_min   # Lower bound of unburnt reactants temperature.
+    __T_unb_upper:float = DefaultSettings_FGM.T_max   # Upper bound of unburnt reactants temperature.
+    __Np_T_unb:int = DefaultSettings_FGM.Np_temp      # Number of unburnt temperature samples between bounds.
 
-    __mix_status_lower:float = 0.1  # Lower bound of premixed status
-    __mix_status_upper:float = 20.0 # Upper bound of premixed status
-    __Np_mix_unb:int = 100    # Number of mixture samples between bounds.
+    __mix_status_lower:float = DefaultSettings_FGM.eq_ratio_min  # Lower bound of premixed status
+    __mix_status_upper:float = DefaultSettings_FGM.eq_ratio_max # Upper bound of premixed status
+    __Np_mix_unb:int = DefaultSettings_FGM.Np_eq    # Number of mixture samples between bounds.
 
-    __generate_freeflames:bool = True      # Generate adiabatic flamelets
-    __generate_burnerflames:bool = True    # Generate burner-stabilized flamelets
-    __generate_equilibrium:bool = True     # Generate chemical equilibrium data
-    __generate_counterflames:bool = True   # Generate counter-flow diffusion flamelets.
+    __generate_freeflames:bool = DefaultSettings_FGM.include_freeflames      # Generate adiabatic flamelets
+    __generate_burnerflames:bool = DefaultSettings_FGM.include_burnerflames   # Generate burner-stabilized flamelets
+    __generate_equilibrium:bool = DefaultSettings_FGM.include_equilibrium     # Generate chemical equilibrium data
+    __generate_counterflames:bool = DefaultSettings_FGM.include_counterflames   # Generate counter-flow diffusion flamelets.
 
     __write_MATLAB_files:bool = False  # Write TableGenerator compatible flamelet files.
 
@@ -632,15 +494,14 @@ class FlameletAIConfig(Config):
     __species_in_mixture:list[str] = None # Species names in mixture. 
 
     # Flamelet Data Concatination Settings
-
-    __pv_definition:list[str] = ['H2O', 'CO2'] # Progress variable species.
-    __pv_weights:list[float] = [1.0, 1.0]      # Progress variable mass fraction weights.
+    __pv_definition:list[str] = DefaultSettings_FGM.pv_species # Progress variable species.
+    __pv_weights:list[float] = DefaultSettings_FGM.pv_weights      # Progress variable mass fraction weights.
 
     __passive_species:list[str] = [] # Passive species for which to generate source terms.
 
     __lookup_variables:list[str] = ["Heat_Release"] # Extra look-up variables to read from flamelet data 
 
-    __Np_per_flamelet:int = 60    # Number of data points to interpolate from flamelet data.
+    __Np_per_flamelet:int = 2**DefaultSettings_FGM.batch_size_exponent    # Number of data points to interpolate from flamelet data.
 
     # MLP output groups and architecture information.
     __MLP_output_groups:list[list[str]] = None  # Output variables for each MLP.
@@ -667,16 +528,40 @@ class FlameletAIConfig(Config):
         """
         Config.__init__(self)
 
+        self.SetAlphaExpo(DefaultSettings_FGM.init_learning_rate_expo)
+        self.SetLRDecay(DefaultSettings_FGM.learning_rate_decay)
+        self.SetBatchExpo(DefaultSettings_FGM.batch_size_exponent)
+        self.SetHiddenLayerArchitecture(DefaultSettings_FGM.hidden_layer_architecture)
+        self.SetControllingVariables(DefaultSettings_FGM.controlling_variables)
+
         if load_file:
             print("Loading configuration for flamelet generation")
             with open(load_file, "rb") as fid:
-                loaded_config = pickle.load(fid)
+                loaded_config:FlameletAIConfig = pickle.load(fid)
             self.__dict__ = loaded_config.__dict__.copy()
-            print("Loaded configuration file with name " + loaded_config._config_name)
+            print("Loaded configuration file with name " + loaded_config.GetConfigName())
         else:
             print("Generating empty flameletAI config")
         
+        self.__SynchronizeSettings()
+
+        return 
+    
+    def SetControllingVariables(self, controlling_variables:list[str]=DefaultSettings_FGM.controlling_variables):
+        if DefaultSettings_FGM.name_pv not in controlling_variables:
+            raise Exception(DefaultSettings_FGM.name_pv + " should be in the controlling variables")
+        super().SetControllingVariables(controlling_variables)
+        return
+    
+    def __SynchronizeSettings(self):
         self.gas = ct.Solution(self.__reaction_mechanism)
+        self.__species_in_mixture = self.gas.species_names
+        n_fuel = len(self.__fuel_species)
+        n_ox = len(self.__oxidizer_species)
+        self.__fuel_string = ','.join([self.__fuel_species[i] + ':'+str(self.__fuel_weights[i]) for i in range(n_fuel)])
+        self.__oxidizer_string = ','.join([self.__oxidizer_species[i] + ':'+str(self.__oxidizer_weights[i]) for i in range(n_ox)])
+        self.ComputeMixFracConstants()
+
         return 
     
     def PrintBanner(self):
@@ -688,6 +573,7 @@ class FlameletAIConfig(Config):
         print("Flamelet generation settings:")
         print("Flamelet data output directory: " + self._output_dir)
         print("Reaction mechanism: " + self.__reaction_mechanism)
+        print("Transport model: "+self.__transport_model)
         print("Fuel definition: " + ",".join("%s: %.2e" % (self.__fuel_species[i], self.__fuel_weights[i]) for i in range(len(self.__fuel_species))))
         print("Oxidizer definition: " + ",".join("%s: %.2e" % (self.__oxidizer_species[i], self.__oxidizer_weights[i]) for i in range(len(self.__oxidizer_species))))
         print("")
@@ -711,6 +597,7 @@ class FlameletAIConfig(Config):
         print("")
 
         print("Flamelet manifold data characteristics: ")
+        print("Controlling variable names: " + ", ".join(c for c in self._controlling_variables))
         print("Progress variable definition: " + ", ".join("%+.2e %s" % (self.__pv_weights[i], self.__pv_definition[i]) for i in range(len(self.__pv_weights))))
         if len(self.__passive_species) > 0:
             print("Passive species in manifold: " + ", ".join(s for s in self.__passive_species))
@@ -743,8 +630,8 @@ class FlameletAIConfig(Config):
         n_ox = len(self.__oxidizer_species)
 
         # Joining fuel and oxidizer definitions into a single string
-        fuel_string = ','.join([self.__fuel_species[i] + ':'+str(self.__fuel_weights[i]) for i in range(n_fuel)])
-        oxidizer_string = ','.join([self.__oxidizer_species[i] + ':'+str(self.__oxidizer_weights[i]) for i in range(n_ox)])
+        self.__fuel_string = ','.join([self.__fuel_species[i] + ':'+str(self.__fuel_weights[i]) for i in range(n_fuel)])
+        self.__oxidizer_string = ','.join([self.__oxidizer_species[i] + ':'+str(self.__oxidizer_weights[i]) for i in range(n_ox)])
 
         
         # Getting the carrier specie index
@@ -752,8 +639,8 @@ class FlameletAIConfig(Config):
 
         #--- Computing mixture fraction coefficients ---#
         # setting up mixture in stochiometric condition
-        self.gas.TP = 300, ct.one_atm
-        self.gas.set_equivalence_ratio(1.0, fuel_string, oxidizer_string)
+        self.gas.TP = 300, DefaultSettings_FGM.pressure
+        self.gas.set_equivalence_ratio(1.0, self.__fuel_string, self.__oxidizer_string)
         self.gas.equilibrate('TP')
 
 
@@ -882,6 +769,9 @@ class FlameletAIConfig(Config):
         """
         return self.__fuel_weights
     
+    def GetFuelString(self):
+        return self.__fuel_string 
+    
     def GetOxidizerDefinition(self):
         """
         Get a list of species comprising the oxidizer reactants.
@@ -900,6 +790,9 @@ class FlameletAIConfig(Config):
         """
         return self.__oxidizer_weights
 
+    def GetOxidizerString(self):
+        return self.__oxidizer_string
+    
     def GetMixtureSpecies(self):
         """
         Get the list of passive species.
@@ -933,8 +826,11 @@ class FlameletAIConfig(Config):
         for w in fuel_weights:
             self.__fuel_weights.append(w)
 
-    def SetOxidizerDefinition(self, oxidizer_species:list[str]=["O2", "N2"], \
-                              oxidizer_weights:list[float]=[1.0, 3.76]):
+        self.__SynchronizeSettings()
+        return 
+    
+    def SetOxidizerDefinition(self, oxidizer_species:list[str]=DefaultSettings_FGM.oxidizer_definition, \
+                              oxidizer_weights:list[float]=DefaultSettings_FGM.oxidizer_weights):
         """
         Define oxidizer species and weights. Default arguments are for air.
 
@@ -957,8 +853,10 @@ class FlameletAIConfig(Config):
             self.__oxidizer_species.append(o)
         for w in oxidizer_weights:
             self.__oxidizer_weights.append(w)
-
-    def SetReactionMechanism(self, mechanism_input:str="gri30.yaml"):
+        self.__SynchronizeSettings()
+        return 
+    
+    def SetReactionMechanism(self, mechanism_input:str=DefaultSettings_FGM.reaction_mechanism):
         """
         Define reaction mechanism used for flamelet data generation. The default setting is the gri30 mechanism for methane/hydrogen.
 
@@ -973,7 +871,9 @@ class FlameletAIConfig(Config):
             self.gas = ct.Solution(mechanism_input)
         except:
             raise Exception("Specified reaction mechanism not found.")
-
+        self.__SynchronizeSettings()
+        return 
+    
     def GetReactionMechanism(self):
         """
         Get the reaction mechanism used for flamelet generation.
@@ -983,7 +883,13 @@ class FlameletAIConfig(Config):
         """
         return self.__reaction_mechanism
     
-    def SetMixtureBounds(self, mix_lower:float, mix_upper:float):
+    def SetTransportModel(self, transport_model:str=DefaultSettings_FGM.transport_model):
+        self.__transport_model=transport_model
+        return 
+    def GetTransportModel(self):
+        return self.__transport_model
+    
+    def SetMixtureBounds(self, mix_lower:float=DefaultSettings_FGM.eq_ratio_min, mix_upper:float=DefaultSettings_FGM.eq_ratio_max):
         """
         Set upper and lower bounds of mixture status for flamelet data manifold.
 
@@ -1010,7 +916,7 @@ class FlameletAIConfig(Config):
         """
         return [self.__mix_status_lower, self.__mix_status_upper]
     
-    def SetNpMix(self, input:int):
+    def SetNpMix(self, input:int=DefaultSettings_FGM.Np_eq):
         """
         Set number of divisions between lean and rich mixture status for flamelet generation.
 
@@ -1034,7 +940,7 @@ class FlameletAIConfig(Config):
         """
         return self.__Np_mix_unb
 
-    def SetUnbTempBounds(self, T_unb_lower:float, T_unb_upper:float):
+    def SetUnbTempBounds(self, T_unb_lower:float=DefaultSettings_FGM.T_min, T_unb_upper:float=DefaultSettings_FGM.T_max):
         """
         Define lower and upper reactant temperature for flamelet data generation.
 
@@ -1062,7 +968,7 @@ class FlameletAIConfig(Config):
         """
         return [self.__T_unb_lower, self.__T_unb_upper]
     
-    def SetNpTemp(self, Np_Temp:int):
+    def SetNpTemp(self, Np_Temp:int=DefaultSettings_FGM.Np_temp):
         """
         Set number of divisions for the reactant temperature at each mixture fraction/equivalence ratio.
 
@@ -1086,7 +992,7 @@ class FlameletAIConfig(Config):
         """
         return self.__Np_T_unb 
 
-    def DefineMixStatus(self, run_as_mixture_fraction:bool):
+    def DefineMixStatus(self, run_as_mixture_fraction:bool=DefaultSettings_FGM.run_mixture_fraction):
         """
         Define the reactant mixture status as mixture fraction or equivalence ratio.
 
@@ -1105,7 +1011,7 @@ class FlameletAIConfig(Config):
         """
         return self.__run_mixture_fraction
     
-    def RunFreeFlames(self, input:bool):
+    def RunFreeFlames(self, input:bool=DefaultSettings_FGM.include_freeflames):
         """
         Include adiabatic free flame data in the manifold.
 
@@ -1115,7 +1021,7 @@ class FlameletAIConfig(Config):
         """
         self.__generate_freeflames = input 
 
-    def RunBurnerFlames(self, input:bool):
+    def RunBurnerFlames(self, input:bool=DefaultSettings_FGM.include_burnerflames):
         """
         Include burner-stabilized flame data in the manifold.
 
@@ -1125,7 +1031,7 @@ class FlameletAIConfig(Config):
         """
         self.__generate_burnerflames = input 
 
-    def RunEquilibrium(self, input:bool):
+    def RunEquilibrium(self, input:bool=DefaultSettings_FGM.include_equilibrium):
         """
         Include chemical equilibrium (reactants and products) data in the manifold.
 
@@ -1135,7 +1041,7 @@ class FlameletAIConfig(Config):
         """
         self.__generate_equilibrium = input
 
-    def RunCounterFlames(self, input:bool):
+    def RunCounterFlames(self, input:bool=DefaultSettings_FGM.include_counterflames):
         """
         Include counter-flow diffusion flame data in the manifold.
 
@@ -1198,7 +1104,7 @@ class FlameletAIConfig(Config):
         """
         return self.__write_MATLAB_files
     
-    def SetProgressVariableDefinition(self, pv_species:list[str], pv_weights:list[float]):
+    def SetProgressVariableDefinition(self, pv_species:list[str]=DefaultSettings_FGM.pv_species, pv_weights:list[float]=DefaultSettings_FGM.pv_weights):
         """
         Set the progress variable species and mass-fraction weights.
 
@@ -1233,14 +1139,14 @@ class FlameletAIConfig(Config):
         """
         return self.__pv_weights
     
-    def SetPassiveSpecies(self, __passive_species:list[str]):
+    def SetPassiveSpecies(self, passive_species:list[str]=[]):
         """
         Set the passive transported species for which source terms should be saved in the manifold.
 
         :param __passive_species: list of species names.
         :type __passive_species: list[str]
         """
-        self.__passive_species = __passive_species
+        self.__passive_species = passive_species
         return 
     
     def GetPassiveSpecies(self):
@@ -1252,7 +1158,7 @@ class FlameletAIConfig(Config):
         """
         return self.__passive_species
     
-    def SetLookUpVariables(self, lookup_vars:list[str]):
+    def SetLookUpVariables(self, lookup_vars:list[str]=[]):
         """
         Define passive look-up terms to be included in the manifold.
 
@@ -1353,7 +1259,7 @@ class FlameletAIConfig(Config):
                 ppv += self.__pv_weights[iPv] * (prodrate_pos + prodrate_neg * mass_fraction)
             return ppv 
     
-    def EnablePreferentialDiffusion(self, use_PD:bool=True):
+    def EnablePreferentialDiffusion(self, use_PD:bool=DefaultSettings_FGM.preferential_diffusion):
         self.__preferential_diffusion = use_PD 
         
     def PreferentialDiffusion(self):
@@ -1420,15 +1326,15 @@ class FlameletAIConfig(Config):
         :rtype mixfrac_unb: float
         """
 
-        if equivalence_ratio < 0:
-            raise Exception("Equivalence ratio should be positive.")
+        # if equivalence_ratio < 0:
+        #     raise Exception("Equivalence ratio should be positive.")
         if temperature < 200:
             raise Exception("Temperature should be above 200 degrees Kelvin.")
         
-        fuel_string = ",".join(self.__fuel_species[i]+":"+str(self.__fuel_weights[i]) for i in range(len(self.__fuel_species)))
-        oxidizer_string = ",".join(self.__oxidizer_species[i]+":"+str(self.__oxidizer_weights[i]) for i in range(len(self.__oxidizer_species)))
-        self.gas.set_equivalence_ratio(equivalence_ratio, fuel_string, oxidizer_string)
-        self.gas.TP = temperature, ct.one_atm
+        self.__fuel_string = ",".join(self.__fuel_species[i]+":"+str(self.__fuel_weights[i]) for i in range(len(self.__fuel_species)))
+        self.__oxidizer_string = ",".join(self.__oxidizer_species[i]+":"+str(self.__oxidizer_weights[i]) for i in range(len(self.__oxidizer_species)))
+        self.gas.set_equivalence_ratio(equivalence_ratio, self.__fuel_string, self.__oxidizer_string)
+        self.gas.TP = temperature, DefaultSettings_FGM.pressure
 
         pv_unb = 0
         for iPV, pvSp in enumerate(self.__pv_definition):
@@ -1436,7 +1342,7 @@ class FlameletAIConfig(Config):
         
         enth_unb = self.gas.enthalpy_mass
 
-        mixfrac_unb = self.gas.mixture_fraction(fuel_string, oxidizer_string)
+        mixfrac_unb = self.gas.mixture_fraction(self.__fuel_string, self.__oxidizer_string)
 
         if (temperature > self.__T_unb_upper) or (temperature < self.__T_unb_lower):
             raise Warning("Provided temperature is outside flamelet data bounds.")
@@ -1465,10 +1371,10 @@ class FlameletAIConfig(Config):
         :return mixfrac_b: products mixture fraction value.
         :rtype mixfrac_b: float
         """
-        fuel_string = ",".join(self.__fuel_species[i]+":"+str(self.__fuel_weights[i]) for i in range(len(self.__fuel_species)))
-        oxidizer_string = ",".join(self.__oxidizer_species[i]+":"+str(self.__oxidizer_weights[i]) for i in range(len(self.__oxidizer_species)))
-        self.gas.set_equivalence_ratio(equivalence_ratio, fuel_string, oxidizer_string)
-        self.gas.TP = temperature, ct.one_atm
+        self.__fuel_string = ",".join(self.__fuel_species[i]+":"+str(self.__fuel_weights[i]) for i in range(len(self.__fuel_species)))
+        self.__oxidizer_string = ",".join(self.__oxidizer_species[i]+":"+str(self.__oxidizer_weights[i]) for i in range(len(self.__oxidizer_species)))
+        self.gas.set_equivalence_ratio(equivalence_ratio, self.__fuel_string, self.__oxidizer_string)
+        self.gas.TP = temperature, DefaultSettings_FGM.pressure
         self.gas.equilibrate('TP')
         pv_b = 0
         for iPV, pvSp in enumerate(self.__pv_definition):
@@ -1476,7 +1382,7 @@ class FlameletAIConfig(Config):
         
         enth_b = self.gas.enthalpy_mass
 
-        mixfrac_b = self.gas.mixture_fraction(fuel_string, oxidizer_string)
+        mixfrac_b = self.gas.mixture_fraction(self.__fuel_string, self.__oxidizer_string)
         
         if (temperature > self.__T_unb_upper) or (temperature < self.__T_unb_lower):
             raise Warning("Provided temperature is outside flamelet data bounds.")
@@ -1586,85 +1492,6 @@ class FlameletAIConfig(Config):
         """
         return self.__Table_mixfrac_lower, self.__Table_mixfrac_upper
     
-    def SetMLPArchitecture(self, group_index:int, architecture_in:list[int]):
-        """Save an MLP architecture for a given group index.
-
-        :param group_index: MLP output group index.
-        :type group_index: int
-        :param architecture_in: number of neurons per hidden layer.
-        :type architecture_in: list[int]
-        :raises Exception: if the provided list of neuron counts is empty.
-        :raises Exception: if the provided group index exceeds the number of MLPs.
-        """
-        if len(architecture_in) == 0:
-            raise Exception("MLP should have at least one layer.")
-        if group_index >= len(self.__MLP_architectures):
-            raise Exception("Group index should be below "+str(len(self.__MLP_architectures)))
-        
-        if self.__MLP_architectures == None:
-            self.__MLP_architectures = []
-            for iGroup in range(len(self.__MLP_output_groups)):
-                self.__MLP_architectures[iGroup] = [] 
-        
-        self.__MLP_architectures[group_index] = []
-        for NN in architecture_in:
-            self.__MLP_architectures[group_index].append(NN)
-
-    def GetMLPArchitecture(self, group_index:int):
-        """Get the saved MLP architecture for a given group.
-
-        :param group_index: MLP output group index.
-        :type group_index: int
-        :return: neurons per hidden layer in the network.
-        :rtype: list[int]
-        """
-        return self.__MLP_architectures[group_index]
-    
-    def SetTrainParams(self, group_index:int, alpha_expo:float, lr_decay:float, batch_expo:int, activation_index:int):
-        """Save the training parameters for a set MLP.
-
-        :param group_index: MLP output group index.
-        :type group_index: int
-        :param alpha_expo: alpha exponent value for the learning rate.
-        :type alpha_expo: float
-        :param lr_decay: learning rate decay parameter.
-        :type lr_decay: float
-        :param batch_expo: mini-batch size exponent.
-        :type batch_expo: int
-        :param activation_index: activation function index for hidden layers.
-        :type activation_index: int
-        :raises Exception: if the provided group index exceeds the number of MLPs.
-        """
-        if group_index >= len(self.__MLP_architectures):
-            raise Exception("Group index should be below "+str(len(self.__MLP_architectures)))
-        
-        if self.__MLP_trainparams == None:
-            self.__MLP_trainparams = []
-            for iGroup in range(len(self.__MLP_output_groups)):
-                self.__MLP_trainparams[iGroup] = [] 
-        
-        self.__MLP_trainparams[iGroup] = []
-        self.__MLP_trainparams[iGroup].append(alpha_expo)
-        self.__MLP_trainparams[iGroup].append(lr_decay)
-        self.__MLP_trainparams[iGroup].append(batch_expo)
-        self.__MLP_trainparams[iGroup].append(activation_index)
-
-    def GetTrainParams(self, group_index:int):
-        """Get the saved training parameters for a given MLP
-
-        :param group_index: MLP output group index.
-        :type group_index: int
-        :return: learning rate alpha exponent, learning rate decay parameter, batch size exponent, and activation function index.
-        :rtype: float, float, int, int
-        """
-
-        alpha_expo = self.__MLP_architectures[group_index][0]
-        lr_decay = self.__MLP_architectures[group_index][1]
-        batch_expo = self.__MLP_architectures[group_index][2]
-        activation_index = self.__MLP_architectures[group_index][3]
-
-        return alpha_expo, lr_decay, batch_expo, activation_index
-        
     def AddOutputGroup(self, variable_names_in:list[str]):
         """Add an MLP output group of flamelet variables.
 
@@ -1734,20 +1561,16 @@ class FlameletAIConfig(Config):
         """
         return self.__MLP_output_groups[i_group]
     
-    def SaveConfig(self, file_name:str):
+    def SaveConfig(self):
         """
         Save the current FlameletAI configuration.
 
         :param file_name: configuration file name.
         :type file_name: str
         """
-        self.ComputeMixFracConstants()
-        
+        self.__SynchronizeSettings()
 
-        self.__species_in_mixture = self.gas.species_names
-
-        self._config_name = file_name
-        file = open(file_name+'.cfg','wb')
-        pickle.dump(self, file)
-        file.close()
+        super().SaveConfig()
+        return 
+    
 
