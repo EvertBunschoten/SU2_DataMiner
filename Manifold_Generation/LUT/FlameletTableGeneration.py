@@ -28,7 +28,9 @@ from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt 
 from tqdm import tqdm
 import sys,os
-from Common.DataDrivenConfig import FlameletAIConfig
+from Common.DataDrivenConfig import FlameletAIConfig, Config
+from Common.CommonMethods import GetReferenceData
+#from Common.Config_base import Config
 import cantera as ct
 import gmsh 
 import pickle
@@ -37,6 +39,147 @@ from sklearn.metrics import mean_squared_error
 from Common.Interpolators import Invdisttree 
 from random import sample 
 
+class SU2TableGenerator_Base:
+    _Config = None 
+    _savedir:str 
+    _table_variables:list[str] = None 
+    _manifold_variables:list[str]
+    _controlling_variables:list[str] = None 
+    _manifold_data:np.ndarray[float] = None 
+    _manifold_data_interpolator:Invdisttree = None 
+    _base_cell_size:float = 1e-2#3.7e-3      # Table level base cell size.
+
+    _refined_cell_size:float = 1e-3#2.5e-3#1.5e-3   # Table level refined cell size.
+    _refinement_radius:float = 5e-3#5e-2     # Table level radius within which refinement is applied.
+    _curvature_threshold:float = 0.3    # Curvature threshold above which refinement is applied.
+    _n_near:int = 4     # Number of nearest neighbors from which to evaluate flamelet data.
+    _p_fac:int = 5      # Power by which to weigh distances from query point.
+    _control_var_scaler:MinMaxScaler =None 
+    _table_nodes = []       # Progress variable, total enthalpy, and mixture fraction node values for each table level.
+    _table_nodes_norm = []  # Normalized table nodes for each level.
+    _table_connectivity = []    # Table node connectivity per table level.
+    _table_hullnodes = []   # Hull node indices per table level.
+    
+    def __init__(self, Config_in):
+        self._Config = Config_in
+        self._savedir = self._Config.GetOutputDir()
+        return 
+    
+    def SetSaveDir(self, save_dir:str):
+        if not os.path.isdir(save_dir):
+            raise Exception("Output directory %s not present on current hardware." % save_dir)
+        self._savedir = save_dir 
+        return 
+    
+    def SetBaseCellSize(self, cell_size:float):
+        """
+        Define the base cell size for the table levels.
+
+        :param cell_size: Normalized coarse cell size for each 2D table mesh.
+        :type cell_size: float
+        :raise: Exception: if cell size is lower or equal to zero.
+        """
+        if cell_size > 0:
+            self._base_cell_size = cell_size 
+        else:
+            raise Exception("Proviced cell size should be higher than zero.")
+        return
+    
+    def SetRefinedCellSize(self, cell_size:float):
+        """
+        Define the refinement cell size for the table levels.
+
+        :param cell_size: Normalized fine cell size for each 2D table mesh.
+        :type cell_size: float
+        :raise: Exception: if cell size is lower or equal to zero.
+        """
+        if cell_size > 0:
+            self._refined_cell_size = cell_size 
+        else:
+            raise Exception("Proviced cell size should be higher than zero.")
+        return 
+    
+    def SetRefinementThreshold(self, val_threshold:float):
+        """
+        Define normalized curvature threshold beyond which refinement should be applied to each table level.
+
+        :param val_threshold: Normalized curvature threshold value. All locations in the mesh with a higher curvature receive refinement.
+        :type val_threshold: float
+        :raises: Exception: If the threshold value is lower than zero.
+        """       
+
+        if val_threshold > 0:
+            self._curvature_threshold = val_threshold
+        else:
+            raise Exception("Curvature threshold value should be higher than zero.")
+        return 
+    
+    def DefineFlameletDataInterpolator(self):
+
+        print("Configuring KD-tree for most accurate lookups")
+
+        print("Loading flamelet data...")
+        # Define scaler for FGM controlling variables.
+        full_data_file = self._Config.GetOutputDir()+"/LUT_data_full.csv"
+        with open(full_data_file,'r') as fid:
+            self._manifold_variables = fid.readline().strip().split(',')
+        #D_full = np.loadtxt(full_data_file,delimiter=',',skiprows=1)
+        self._control_var_scaler = MinMaxScaler()
+        CV_full, D_full = GetReferenceData(full_data_file, self._controlling_variables, self._manifold_variables)
+        data_scaler = MinMaxScaler()
+        data_scaler.fit_transform(D_full)
+
+        CV_full_scaled = self._control_var_scaler.fit_transform(CV_full)
+
+        # Exctract train and test data
+        train_data_file = self._Config.GetOutputDir()+"/"+self._Config.GetConcatenationFileHeader()+"_train.csv"
+        test_data_file = self._Config.GetOutputDir()+"/"+self._Config.GetConcatenationFileHeader()+"_test.csv"
+        
+        CV_train, D_train = GetReferenceData(train_data_file, self._controlling_variables, self._manifold_variables)
+        CV_test, D_test = GetReferenceData(test_data_file, self._controlling_variables, self._manifold_variables)
+        
+        CV_train_scaled = self._control_var_scaler.transform(CV_train)
+        CV_test_scaled = self._control_var_scaler.transform(CV_test)
+        D_train_scaled = data_scaler.transform(D_train)
+        D_test_scaled = data_scaler.transform(D_test)
+        
+        print("Done!")
+        print("Setting up KD-tree...")
+        self._lookup_tree = Invdisttree(X=CV_train_scaled,z=D_train_scaled)
+        print("Done!")
+        
+        print("Search for best tree parameters...")
+        # Do brute-force search to get the optimum number of nearest neighbors and distance power.
+        n_near_range = range(1, 20)
+        p_range = range(1, 6)
+        RMS_ppv = np.zeros([len(n_near_range), len(p_range)])
+        for i in tqdm(range(len(n_near_range))):
+            for j in range(len(p_range)):
+                PPV_predicted = self._lookup_tree(q=CV_test_scaled, nnear=n_near_range[i], p=p_range[j])
+                rms_local = mean_squared_error(y_true=D_test_scaled, y_pred=PPV_predicted)
+                RMS_ppv[i,j] = rms_local 
+        [imin,jmin] = divmod(RMS_ppv.argmin(), RMS_ppv.shape[1])
+        self._n_near = n_near_range[imin]
+        self._p_fac = p_range[jmin]
+        print("Done!")
+        print("Best found number of nearest neighbors: "+str(self._n_near))
+        print("Best found distance power: "+str(self._p_fac))
+        print("Setting up KD-tree...")
+        self._lookup_tree = Invdisttree(X=CV_full_scaled,z=D_full)
+        print("Done!")
+        
+        return
+    
+    def EvaluateManifoldInterpolator(self, CV_unscaled:np.ndarray):
+        CV_scaled = self._control_var_scaler.transform(CV_unscaled)
+        data_interp = self._lookup_tree(q=CV_scaled,nnear=self._n_near,p=self._p_fac)
+        return data_interp
+
+    def Compute2DTable(self, CV_1:str, CV_2:str):
+        Np_grid = 300
+        
+        return
+    
 class SU2TableGenerator:
 
     _Config:FlameletAIConfig = None # FlameletAIConfig class from which to read settings.
