@@ -24,7 +24,8 @@
 #=============================================================================================#
 import os 
 import pyfiglet
-from Properties import DefaultProperties 
+import pickle
+from Common.Properties import DefaultProperties 
 
 class Config:
     """!
@@ -37,15 +38,23 @@ class Config:
     _output_dir:str = "./"
     _config_name:str = "config"
 
-    __concatenated_file_header:str="MLP_data"
+    __concatenated_file_header:str=DefaultProperties.output_file_header
     __train_fraction:float = DefaultProperties.train_fraction
     __test_fraction:float = DefaultProperties.test_fraction
-    
+    _controlling_variables:list[str]
+
+    _alpha_expo:float = DefaultProperties.init_learning_rate_expo
+    _lr_decay:float = DefaultProperties.learning_rate_decay
+    _batch_expo:int = DefaultProperties.batch_size_exponent
+    _hidden_layer_architecture:list[int] = DefaultProperties.hidden_layer_architecture
+    _activation_function:str = DefaultProperties.activation_function
+
     def __init__(self):
         """!
         @brief Class constructor
 
         """
+        self._output_dir = os.getcwd()
         return 
     
     def PrintBanner(self):
@@ -106,6 +115,10 @@ class Config:
         """
         return self.__concatenated_file_header
     
+    def SetConfigName(self, config_name:str):
+        self._config_name = config_name 
+        return 
+    
     def GetConfigName(self):
         """!
         @brief [Function's description]
@@ -115,6 +128,15 @@ class Config:
 
         """
         return self._config_name 
+    
+    def SetControllingVariables(self, names_cv:list[str]):
+        self._controlling_variables = []
+        for c in names_cv:
+            self._controlling_variables.append(c)
+        return 
+    
+    def GetControllingVariables(self):
+        return self._controlling_variables
     
     def SetTrainFraction(self, input:float=DefaultProperties.train_fraction):
         """!
@@ -190,3 +212,59 @@ class Config:
         """
         return self.__test_fraction
     
+    def GetAlphaExpo(self):
+        return self._alpha_expo
+    
+    def SetAlphaExpo(self, alpha_expo_in:float=DefaultProperties.init_learning_rate_expo):
+        """Set initial learning rate decay parameter.
+
+        :param alpha_expo: initial learning rate exponent (base 10), defaults to -2.6
+        :type alpha_expo: float, optional
+        :raises Exception: if initial learning rate exponent is positive.
+        """
+
+        if alpha_expo_in >= 0:
+            raise Exception("Initial learning rate exponent should be negative.")
+        self._alpha_expo = alpha_expo_in
+        return 
+    
+    def GetLRDecay(self):
+        return self._lr_decay
+    
+    def SetLRDecay(self, lr_decay_in:float=DefaultProperties.learning_rate_decay):
+        self._lr_decay = lr_decay_in
+        return 
+    
+    def SetBatchExpo(self, batch_expo_in:int=DefaultProperties.batch_size_exponent):
+        self._batch_expo = batch_expo_in
+        return 
+    
+    def GetBatchExpo(self):
+        return self._batch_expo 
+    
+    def SetHiddenLayerArchitecture(self, hidden_layer_architecture:list[int]=DefaultProperties.hidden_layer_architecture):
+        self._hidden_layer_architecture = []
+        for n in hidden_layer_architecture:
+            self._hidden_layer_architecture.append(n)
+        return 
+    def GetHiddenLayerArchitecture(self):
+        return self._hidden_layer_architecture
+    
+    def SetActivationFunction(self, activation_function_in:str):
+        self._activation_function = activation_function_in 
+        return 
+    
+    def GetActivationFunction(self):
+        return self._activation_function
+    
+    def SaveConfig(self):
+        """
+        Save the current FlameletAI configuration.
+
+        :param file_name: configuration file name.
+        :type file_name: str
+        """
+
+        file = open(self._config_name+'.cfg','wb')
+        pickle.dump(self, file)
+        file.close()
