@@ -41,8 +41,9 @@ config.gpu_options.allow_growth = True
 import matplotlib.pyplot as plt 
 
 from Common.DataDrivenConfig import FlameletAIConfig
-from Manifold_Generation.MLP.Trainer_Base import MLPTrainer, TensorFlowFit,PhysicsInformedTrainer,EvaluateArchitecture
-from CommonMethods import GetReferenceData
+from Manifold_Generation.MLP.Trainer_Base import MLPTrainer, TensorFlowFit,PhysicsInformedTrainer,EvaluateArchitecture, CustomTrainer
+from Common.CommonMethods import GetReferenceData
+from Common.Properties import DefaultSettings_FGM as DefaultProperties
 
 class Train_Flamelet_Direct(TensorFlowFit):
     __Config:FlameletAIConfig
@@ -53,7 +54,7 @@ class Train_Flamelet_Direct(TensorFlowFit):
         # Set train variables based on what kind of network is trained
         self.__Config = Config_in
         self._filedata_train = self.__Config.GetOutputDir()+"/"+self.__Config.GetConcatenationFileHeader()
-        self._controlling_vars = ["ProgressVariable","EnthalpyTot","MixtureFraction"]
+        self._controlling_vars = DefaultProperties.controlling_variables
         self._train_vars = self.__Config.GetMLPOutputGroup(group_idx)
         self._train_name = "Group"+str(group_idx+1)
 
@@ -67,10 +68,20 @@ class Train_Flamelet_Direct(TensorFlowFit):
         PlotFlameletData(self, self.__Config, self._train_name)
         return super().CustomCallback()
    
-        
-class Train_Source_PINN(PhysicsInformedTrainer):
+    def SetDecaySteps(self):
+        self._decay_steps=0.01157 * self._Np_train
+        return 
+
+    def GetTrainData(self):
+        super().GetTrainData()
+        fig = plt.figure()
+        ax = plt.axes(projection='3d')
+        ax.plot3D(self._X_train_norm[:,0],self._X_train_norm[:,1],self._X_train_norm[:,2],'k.')
+        plt.show()
+        return 
+class Train_Source_PINN(CustomTrainer):
     __Config:FlameletAIConfig
-    __boundary_data_file:str 
+    __boundary_data_file:str =DefaultProperties.boundary_file_header+"_full.csv"
     __X_unb_train:np.ndarray
     __X_b_train:np.ndarray
     __Y_unb_train:np.ndarray 
@@ -85,23 +96,27 @@ class Train_Source_PINN(PhysicsInformedTrainer):
     __val_lambda:float=1.0
 
     def __init__(self, Config_in:FlameletAIConfig, group_idx:int=0):
-        PhysicsInformedTrainer.__init__(self)
+        CustomTrainer.__init__(self)
         self.__Config = Config_in 
-        self._controlling_vars = ["ProgressVariable","EnthalpyTot","MixtureFraction"]
+        self._controlling_vars = DefaultProperties.controlling_variables
         self._train_vars = self.__Config.GetMLPOutputGroup(group_idx)
-        self.callback_every = 4
+        self.callback_every = 10
         
         return 
-    
+
     def SetBoundaryDataFile(self, boundary_data_file:str):
         self.__boundary_data_file = boundary_data_file 
         return 
     
+    def SetDecaySteps(self):
+        self._decay_steps=0.01157 * self._Np_train
+        return 
+    
     def GetBoundaryData(self):
         X_boundary, Y_boundary = GetReferenceData(self.__boundary_data_file, x_vars=self._controlling_vars, train_variables=self._train_vars)
-        mixfrac_boundary = X_boundary[:, self._controlling_vars.index("MixtureFraction")]
-        pv_boundary = X_boundary[:, self._controlling_vars.index("ProgressVariable")]
-        h_boundary = X_boundary[:, self._controlling_vars.index("EnthalpyTot")]
+        mixfrac_boundary = X_boundary[:, self._controlling_vars.index(DefaultProperties.name_mixfrac)]
+        pv_boundary = X_boundary[:, self._controlling_vars.index(DefaultProperties.name_pv)]
+        h_boundary = X_boundary[:, self._controlling_vars.index(DefaultProperties.name_enth)]
         is_unb = np.ones(np.shape(X_boundary)[0],dtype=bool)
 
         fuel_definition = self.__Config.GetFuelDefinition()
@@ -112,7 +127,7 @@ class Train_Source_PINN(PhysicsInformedTrainer):
         oxidizer_string = ",".join((sp+":"+str(w) for sp, w in zip(oxidizer_definition, oxidizer_weights)))
         
         for iz, z in enumerate(mixfrac_boundary):
-            self.__Config.gas.set_mixture_fraction(z, fuel_string, oxidizer_string)
+            self.__Config.gas.set_mixture_fraction(max(z,0), fuel_string, oxidizer_string)
             self.__Config.gas.TP=300,101325
             Y = self.__Config.gas.Y 
             pv_unb = self.__Config.ComputeProgressVariable(variables=None, flamelet_data=None, Y_flamelet=Y[:,np.newaxis])
@@ -121,6 +136,7 @@ class Train_Source_PINN(PhysicsInformedTrainer):
         
         X_boundary_norm = (X_boundary - self._X_min)/(self._X_max-self._X_min)
         Y_boundary_norm = (Y_boundary - self._Y_min)/(self._Y_max-self._Y_min)
+
         X_unb_n, Y_unb_n = X_boundary_norm[is_unb, :], Y_boundary_norm[is_unb, :]
         X_b_n, Y_b_n = X_boundary_norm[np.invert(is_unb), :], Y_boundary_norm[np.invert(is_unb), :]
 
@@ -151,9 +167,6 @@ class Train_Source_PINN(PhysicsInformedTrainer):
         self.__pv_b_constraint_factor_lean = dpv_dz_b_lean / (self._X_max[0] - self._X_min[0])
         self.__pv_b_constraint_factor_rich = dpv_dz_b_rich / (self._X_max[0] - self._X_min[0])
 
-        self.__Np_unb = np.shape(self.__X_unb_train)[0]
-        self.__Np_b = np.shape(self.__X_b_train)[0]
-        
         return 
     
     def GetTrainData(self):
@@ -169,52 +182,47 @@ class Train_Source_PINN(PhysicsInformedTrainer):
         with tf.GradientTape(watch_accessed_variables=False) as tape_con:
             tape_con.watch(x_var)
             Y_norm = self._MLP_Evaluation(x_var)
-            dY_norm = tape_con.jacobian(Y_norm, x_var)
+            dY_norm = tape_con.gradient(Y_norm[:, idx_out], x_var)
         return Y_norm, dY_norm
 
     @tf.function
     def ComputeUnburntSourceConstraint(self, x_boundary_norm:tf.constant, y_boundary_norm:tf.constant):
-        with tf.GradientTape(watch_accessed_variables=False) as tape_con:
-            tape_con.watch(x_boundary_norm)
-            Y_norm = self._MLP_Evaluation(x_boundary_norm)
-            dY_norm = tape_con.jacobian(Y_norm, x_boundary_norm)
         penalty=0
         for iVar in range(len(self._train_vars)):
-            dY_dpv_norm = tf.linalg.diag_part(dY_norm[:, iVar, :, self._controlling_vars.index("ProgressVariable")])
-            dY_dh_norm = tf.linalg.diag_part(dY_norm[:, iVar, :, self._controlling_vars.index("EnthalpyTot")])
-            dY_dz_norm = tf.linalg.diag_part(dY_norm[:, iVar, :, self._controlling_vars.index("MixtureFraction")])
-
+            Y_norm, dY_norm = self.ComputeDerivatives(x_boundary_norm)
+            dY_dpv_norm = dY_norm[:, 0]
+            dY_dh_norm = dY_norm[:, 1]
+            dY_dz_norm = dY_norm[:, 2]
+            
             dY_dpvz = dY_dpv_norm * self.__pv_unb_constraint_factor + dY_dz_norm
             term_1 = tf.reduce_mean(tf.pow(dY_dpvz, 2))
             term_2 = tf.reduce_mean(tf.pow(dY_dh_norm, 2))
             term_3 = tf.reduce_mean(tf.pow(Y_norm - y_boundary_norm, 2))
             penalty = penalty + term_1 + term_2 + term_3
-        
+
         return penalty
     
     @tf.function
     def ComputeBurntSourceConstraint(self, x_boundary_norm:tf.constant, y_boundary_norm:tf.constant):
-        with tf.GradientTape(watch_accessed_variables=False) as tape_con:
-            tape_con.watch(x_boundary_norm)
-            Y_norm = self._MLP_Evaluation(x_boundary_norm)
-            dY_norm = tape_con.jacobian(Y_norm, x_boundary_norm)
-        idx_rich = tf.where(x_boundary_norm[:,self._controlling_vars.index("MixtureFraction")] >= self.__Z_st_norm,True,False)
-        idx_lean = tf.where(x_boundary_norm[:,self._controlling_vars.index("MixtureFraction")] < self.__Z_st_norm,True,False)
         penalty = 0
         for iVar in range(len(self._train_vars)):
-            dY_dpv_rich = tf.boolean_mask(tf.linalg.diag_part(dY_norm[:, iVar,:,self._controlling_vars.index("ProgressVariable")]), idx_rich)
-            dY_dpv_lean = tf.boolean_mask(tf.linalg.diag_part(dY_norm[:, iVar,:,self._controlling_vars.index("ProgressVariable")]), idx_lean)
-            dY_dz_rich = tf.boolean_mask(tf.linalg.diag_part(dY_norm[:, iVar,:,self._controlling_vars.index("MixtureFraction")]), idx_rich)
-            dY_dz_lean = tf.boolean_mask(tf.linalg.diag_part(dY_norm[:, iVar,:,self._controlling_vars.index("MixtureFraction")]), idx_lean)
-            dY_dh = dY_norm[iVar,:,self._controlling_vars.index("EnthalpyTot"),:]
-
-            dY_dpvz_lean = dY_dpv_lean * self.__pv_b_constraint_factor_lean + dY_dz_lean
-            dY_dpvz_rich = dY_dpv_rich * self.__pv_b_constraint_factor_rich + dY_dz_rich 
+            Y_norm, dY_norm = self.ComputeDerivatives(x_boundary_norm, idx_out=iVar)
+            dY_dpv_norm = dY_norm[:, 0]
+            dY_dh_norm = dY_norm[:, 1]
+            dY_dz_norm = dY_norm[:, 2]
+            
+            dppv_dpv_rich = dY_dpv_norm[x_boundary_norm[:,2]>=self.__Z_st_norm]
+            dppv_dz_rich = dY_dz_norm[x_boundary_norm[:,2]>=self.__Z_st_norm]
+            dppv_dpv_lean = dY_dpv_norm[x_boundary_norm[:,2]<self.__Z_st_norm]
+            dppv_dz_lean = dY_dz_norm[x_boundary_norm[:,2]<self.__Z_st_norm]
+            
+            dY_dpvz_lean = dppv_dpv_lean * self.__pv_b_constraint_factor_lean + dppv_dz_lean
+            dY_dpvz_rich = dppv_dpv_rich * self.__pv_b_constraint_factor_rich + dppv_dz_rich
 
             term_1 = tf.reduce_mean(tf.pow(dY_dpvz_lean,2)) + tf.reduce_mean(tf.pow(dY_dpvz_rich,2))
-            term_2 = tf.reduce_mean(tf.pow(dY_dh,2))
+            term_2 = tf.reduce_mean(tf.pow(dY_dh_norm,2))
             term_3 = tf.reduce_mean(tf.pow(Y_norm - y_boundary_norm,2))
-            penalty = penalty + term_1 + term_2 + term_3 
+            penalty = penalty+ term_1 + term_2 + term_3 
         return penalty 
 
     @tf.function 
@@ -230,36 +238,51 @@ class Train_Source_PINN(PhysicsInformedTrainer):
     @tf.function
     def ComputeTotalGrads(self, x_domain, y_domain, x_boundary, y_boundary, x_b_boundary, y_b_boundary):
         _, grads_direct = self.ComputeGradients_Direct_Error(x_domain, y_domain)
-        grads_ub = self.GetBoundsGrads(x_boundary, y_boundary, x_b_boundary, y_b_boundary)
         
+        grads_ub = self.GetBoundsGrads(x_boundary, y_boundary, x_b_boundary, y_b_boundary)
         return grads_direct, grads_ub
     
     @tf.function
     def Train_Step(self, x_domain, y_domain, x_ub_boundary, y_ub_boundary, x_b_boundary, y_b_boundary, val_lambda):
+        
         grads_direct, grads_ub = self.ComputeTotalGrads(x_domain, y_domain, x_ub_boundary, y_ub_boundary, x_b_boundary, y_b_boundary)
         Np_domain = tf.cast(tf.shape(x_domain)[0],tf.float32)
         Np_boundary = tf.cast(tf.shape(x_ub_boundary)[0],tf.float32)
         Np_tot = Np_domain + Np_boundary
-        total_grads = [(Np_domain*g_d + 0.001*Np_boundary*val_lambda*g_b)/Np_tot for (g_d, g_b) in zip(grads_direct, grads_ub)]
+        total_grads = [(Np_domain*g_d + 0.01*Np_boundary*val_lambda*g_b)/Np_tot for (g_d, g_b) in zip(grads_direct, grads_ub)]
         #total_grads = [(Np_domain*g_d + Np_boundary*val_lambda*g_b)/Np_tot for (g_d, g_b) in zip(grads_direct, grads_ub)]
         
         self._optimizer.apply_gradients(zip(total_grads, self._trainable_hyperparams))
         return grads_direct, grads_ub
     
+    def FinalAdjustment(self):
+        Y_unb_pred = self._MLP_Evaluation(self.__X_unb_train)
+        max_Y_pred = tf.reduce_max(Y_unb_pred,axis=0)
+        delta_b = -max_Y_pred
+        self._biases[-1].assign_add(delta_b)
+        return
+    
+    def PostProcessing(self):
+        self.FinalAdjustment()
+        return super().PostProcessing()
     def SetTrainBatches(self):
         train_batches_domain = super().SetTrainBatches()
-        batch_size_train = 2**self._batch_expo
-        print(self.__Np_unb, self._Np_train)
-        batch_size_unb = int(float(self.__Np_unb/self._Np_train)*batch_size_train)
-        batch_size_b = int(float(self.__Np_b/self._Np_train)*batch_size_train)
-        
-        train_batches_unb = tf.data.Dataset.from_tensor_slices((self.__X_unb_train, self.__Y_unb_train)).batch(batch_size_unb)
-        train_batches_b = tf.data.Dataset.from_tensor_slices((self.__X_b_train, self.__Y_b_train)).batch(batch_size_b)
+        domain_batches_list = [b for b in train_batches_domain]
 
-        return (train_batches_domain, train_batches_unb, train_batches_b)
+        batch_size_train = 2**self._batch_expo
+        
+        train_batches_unb = tf.data.Dataset.from_tensor_slices((self.__X_unb_train, self.__Y_unb_train)).batch(batch_size_train)
+        train_batches_b = tf.data.Dataset.from_tensor_slices((self.__X_b_train, self.__Y_b_train)).batch(batch_size_train)
+        unb_batches_list = [b for b in train_batches_unb]
+        b_batches_list = [b for b in train_batches_b]
+        Nb_unb = len(unb_batches_list)
+        Nb_b = len(b_batches_list)
+
+        unb_batches_list_resized = [unb_batches_list[i % Nb_unb] for i in range(len(domain_batches_list))]
+        b_batches_list_resized = [b_batches_list[i % Nb_b] for i in range(len(domain_batches_list))]
+        return (domain_batches_list, unb_batches_list_resized, b_batches_list_resized)
     
     def LoopBatches(self, train_batches):
-
         for XY_domain, XY_unb, XY_b in zip(train_batches[0],train_batches[1],train_batches[2]):
             X_domain = XY_domain[0]
             Y_domain = XY_domain[1]
@@ -269,7 +292,7 @@ class Train_Source_PINN(PhysicsInformedTrainer):
             Y_b = XY_b[1]
             grads_domain, grads_boundary = self.Train_Step(X_domain, Y_domain, X_unb, Y_unb, X_b, Y_b,self.__val_lambda)
             self.__val_lambda = self.update_lambda(grads_domain, grads_boundary, self.__val_lambda)
-            
+            #print(grads_boundary[0].numpy())
         return 
     
     @tf.function
@@ -291,6 +314,7 @@ class Train_Source_PINN(PhysicsInformedTrainer):
         self.Plot_and_Save_History()
         PlotFlameletData(self, self.__Config, self._train_name)
         self.PlotBoundaryData()
+        self.write_SU2_MLP(self._save_dir + "/Model_"+str(self._model_index)+"/MLP_Source")
         return super().CustomCallback()
     
     def PlotBoundaryData(self):
@@ -300,22 +324,29 @@ class Train_Source_PINN(PhysicsInformedTrainer):
 
         fig, axs = plt.subplots(nrows=1, ncols=len(self._train_vars),figsize=[6*len(self._train_vars), 6])
         fig_b, axs_b = plt.subplots(nrows=1, ncols=len(self._train_vars),figsize=[6*len(self._train_vars), 6])
+       
         Y_unb_pred = (self._Y_max - self._Y_min)*Y_unb_pred_norm + self._Y_min
         Y_b_pred = (self._Y_max - self._Y_min)*Y_b_pred_norm + self._Y_min
         X_unb = (self._X_max - self._X_min)*self.__X_unb_train + self._X_min
         X_b = (self._X_max - self._X_min)*self.__X_b_train + self._X_min
         for iVar in range(len(self._train_vars)):
-            sc = axs[iVar].scatter(X_unb[:, 1], X_unb[:, 2], c=Y_unb_pred[:, iVar])
-            sc_b = axs_b[iVar].scatter(X_b[:, 1], X_b[:, 2], c=Y_b_pred[:, iVar])
-            cbar = fig.colorbar(sc, ax=axs[iVar])
-            cbar.set_label("Scaled reaction rate",rotation=270,fontsize=18)
-            cbar_b = fig_b.colorbar(sc_b, ax=axs_b[iVar])
+            if len(self._train_vars) == 1:
+                ax_unb = axs 
+                ax_b = axs_b 
+            else:
+                ax_unb = axs[iVar]
+                ax_b = axs_b[iVar]
+            sc = ax_unb.scatter(X_unb[:, 1], X_unb[:, 2], c=Y_unb_pred[:, iVar])
+            sc_b = ax_b.scatter(X_b[:, 1], X_b[:, 2], c=Y_b_pred[:, iVar])
+            cbar = fig.colorbar(sc, ax=ax_unb)
+            cbar.set_label(self._train_vars[iVar],rotation=270,fontsize=18)
+            cbar_b = fig_b.colorbar(sc_b, ax=ax_b)
             cbar_b.set_label("Scaled reaction rate",rotation=270,fontsize=18)
-            axs[iVar].set_xlabel("Total enthalpy", fontsize=20)
-            axs_b[iVar].set_xlabel("Total enthalpy", fontsize=20)
+            ax_unb.set_xlabel("Total enthalpy", fontsize=20)
+            ax_b.set_xlabel("Total enthalpy", fontsize=20)
             if iVar == 0:
-                axs[iVar].set_ylabel("Mixture fraction", fontsize=20)
-                axs_b[iVar].set_ylabel("Mixture fraction", fontsize=20)
+                ax_unb.set_ylabel("Mixture fraction", fontsize=20)
+                ax_b.set_ylabel("Mixture fraction", fontsize=20)
         fig.savefig(self._save_dir+"/Model_"+str(self._model_index)+"/Unburnt_Pred."+self._figformat,format=self._figformat,bbox_inches='tight')
         plt.close(fig)
 
@@ -332,7 +363,7 @@ class EvaluateArchitecture_FGM(EvaluateArchitecture):
     __trainer_PINN:Train_Source_PINN = None 
     __kind_trainer:str = "direct"
 
-    def __init__(self, Config:FlameletAIConfig, group_idx:int=0, kind_trainer:str="direct"):
+    def __init__(self, Config:FlameletAIConfig, group_idx:int=0):
         """Define EvaluateArchitecture instance and prepare MLP trainer with
         default settings.
 
@@ -342,14 +373,13 @@ class EvaluateArchitecture_FGM(EvaluateArchitecture):
         :type group_idx: int, optional
         :raises Exception: if MLP output group index is undefined by flameletAI configuration.
         """
-        if kind_trainer == "direct":
-            self._trainer_direct = Train_Flamelet_Direct(Config_in=Config, group_idx=group_idx)
-        elif kind_trainer == "physicsinformed":
+        output_vars = Config.GetMLPOutputGroup(group_idx)
+        if "ProdRateTot_PV" in output_vars:
+            self.__kind_trainer = "physicsinformed"
             self.__trainer_PINN = Train_Source_PINN(Config_in=Config,group_idx=group_idx)
             self._trainer_direct = self.__trainer_PINN
         else:
-            raise Exception("Kind of training procedure should be \"direct\" or \"physicsinformed\"")
-        self.__kind_trainer = kind_trainer 
+            self._trainer_direct = Train_Flamelet_Direct(Config_in=Config, group_idx=group_idx)
 
         self.__output_group=group_idx
         EvaluateArchitecture.__init__(self, Config_in=Config)
@@ -430,7 +460,7 @@ def PlotFlameletData(Trainer:MLPTrainer, Config:FlameletAIConfig, train_name:str
         # Collect flamelet controlling variables.
         CV_flamelet = np.zeros([len(flameletData), len(Trainer._controlling_vars)])
         for iCv, Cv in enumerate(Trainer._controlling_vars):
-            if Cv == 'ProgressVariable':
+            if Cv == DefaultProperties.name_pv:
                 CV_flamelet[:, iCv] = Config.ComputeProgressVariable(variables_flamelet, flameletData)
             else:
                 CV_flamelet[:, iCv] = flameletData[:, variables_flamelet.index(Cv)]
