@@ -13,5 +13,5 @@ D.SetOutputDir(os.getcwd())
 D.PreprocessData()
 
 D.ComputeData()
-D.VisualizeFluidData()
+
 D.SaveData()
