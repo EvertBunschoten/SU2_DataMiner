@@ -39,6 +39,7 @@ np.random.seed(2)
 from Common.DataDrivenConfig import FlameletAIConfig
 from Data_Generation.DataGenerator_Base import DataGenerator_Base
 from Common.CommonMethods import ComputeLewisNumber
+from Common.Properties import DefaultSettings_FGM
 
 class FlameletGenerator_Cantera(DataGenerator_Base):
     """Generate flamelet data using Cantera.
@@ -52,29 +53,29 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
     # Save directory for computed flamelet data
     __matlab__output_dir:str = "./"
 
-    __fuel_definition:list[str] = ['H2']    # Fuel species
-    __fuel_weights:list[float] = [1.0]        # Fuel molar weights
+    __fuel_definition:list[str] = DefaultSettings_FGM.fuel_definition    # Fuel species
+    __fuel_weights:list[float] = DefaultSettings_FGM.fuel_weights        # Fuel molar weights
     __fuel_string:str = ''
-    __oxidizer_definition:list[str] = ['O2', 'N2']  # Oxidizer species
-    __oxidizer_weights:list[float] = [1.0, 3.76]      # Oxidizer molar weights
+    __oxidizer_definition:list[str] = DefaultSettings_FGM.oxidizer_definition  # Oxidizer species
+    __oxidizer_weights:list[float] = DefaultSettings_FGM.oxidizer_weights      # Oxidizer molar weights
     __oxidizer_string:str = ''
 
-    __n_flamelets:int = 100       # Number of adiabatic and burner flame computations per mixture fraction
-    __T_unburnt_upper:float = 800   # Highest unburnt reactant temperature
-    __T_unburnt_lower:float = 350   # Lowest unburnt reactant temperature
+    __n_flamelets:int = DefaultSettings_FGM.Np_temp       # Number of adiabatic and burner flame computations per mixture fraction
+    __T_unburnt_upper:float = DefaultSettings_FGM.T_max   # Highest unburnt reactant temperature
+    __T_unburnt_lower:float = DefaultSettings_FGM.T_min   # Lowest unburnt reactant temperature
 
-    __reaction_mechanism:str = 'gri30.yaml'   # Cantera reaction mechanism
-    __transport_model:str = "multicomponent"
+    __reaction_mechanism:str = DefaultSettings_FGM.reaction_mechanism   # Cantera reaction mechanism
+    __transport_model:str = DefaultSettings_FGM.transport_model
 
-    __define_equivalence_ratio:bool = True # Define unburnt mixture via the equivalence ratio
+    __define_equivalence_ratio:bool = not DefaultSettings_FGM.run_mixture_fraction # Define unburnt mixture via the equivalence ratio
     __unb_mixture_status:list[float] = [] 
 
     __translate_to_matlab:bool = False # Save a copy of the flamelet data file in Matlab table generator format
 
-    __run_freeflames:bool = False      # Run adiabatic flame computations
-    __run_burnerflames:bool = False    # Run burner stabilized flame computations
-    __run_equilibrium:bool = False     # Run chemical equilibrium computations
-    __run_counterflames:bool = False   # Run counter-flow diffusion flamelet simulations.
+    __run_freeflames:bool = DefaultSettings_FGM.include_freeflames      # Run adiabatic flame computations
+    __run_burnerflames:bool = DefaultSettings_FGM.include_burnerflames    # Run burner stabilized flame computations
+    __run_equilibrium:bool = DefaultSettings_FGM.include_equilibrium    # Run chemical equilibrium computations
+    __run_counterflames:bool = DefaultSettings_FGM.include_counterflames   # Run counter-flow diffusion flamelet simulations.
     __run_fuzzy:bool = False           # Add randomized data around flamelet solutions to manifold.
 
     __u_fuel:float = 1.0       # Fuel stream velocity in counter-flow diffusion flame.
@@ -92,16 +93,18 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         """
 
         print("Initializing flamelet generator from FlameletAIConfig with name " + self._Config.GetConfigName())
-        self.__fuel_definition = self._Config.GetFuelDefinition()
-        self.__fuel_weights = self._Config.GetFuelWeights()
+        self.__SynchronizeSettings()
         
-        self.__oxidizer_definition = self._Config.GetOxidizerDefinition()
-        self.__oxidizer_weights = self._Config.GetOxidizerWeights()
-
-        self.__fuel_string = ",".join([self.__fuel_definition[i] + ":" + str(self.__fuel_weights[i]) for i in range(len(self.__fuel_definition))])
-        self.__oxidizer_string = ",".join([self.__oxidizer_definition[i] + ":" + str(self.__oxidizer_weights[i]) for i in range(len(self.__oxidizer_definition))])
-
+        return 
+    
+    def __SynchronizeSettings(self):
+        
+        self.__fuel_string = self._Config.GetFuelString()
+        self.__oxidizer_string = self._Config.GetOxidizerString()
+        
         self.__reaction_mechanism = self._Config.GetReactionMechanism()
+        self.__transport_model = self._Config.GetTransportModel()
+
         self.gas = ct.Solution(self._Config.GetReactionMechanism())
 
         self.__n_flamelets = self._Config.GetNpTemp()
@@ -118,7 +121,7 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         self.__translate_to_matlab = self._Config.WriteMatlabFiles()
         if self.__translate_to_matlab:
             self.__PrepareOutputDirectories_Matlab()
-
+        self._Config.ComputeMixFracConstants()
         self.z_i = self._Config.GetMixtureFractionCoefficients()
         self.c = self._Config.GetMixtureFractionConstant()
         return 
@@ -133,22 +136,9 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         :raises Exception: if no fuel species are provided.
         :raises Exception: if the number of species does not correspond to the number of weights.
         """
-        # Set the premixed fuel for the flame computations
-        if len(fuel_species) == 0:
-            raise Exception("Fuel definition should contain at least one specie.")
-        if len(fuel_species) != (len(fuel_weights)):
-            raise Exception("The number of fuel species and weights should be equal.")
-        self.__fuel_definition = []
-        self.__fuel_weights = []
-        for f in fuel_species:
-            self.__fuel_definition.append(f)
-        for w in fuel_weights:
-            self.__fuel_weights.append(w)
-        self.__fuel_string = ",".join([self.__fuel_definition[i] + ":" + str(self.__fuel_weights[i]) for i in range(len(self.__fuel_definition))])
         self._Config.SetFuelDefinition(fuel_species, fuel_weights)
-        self._Config.ComputeMixFracConstants()
-        self.z_i = self._Config.GetMixtureFractionCoefficients()
-        self.c = self._Config.GetMixtureFractionConstant()
+        self.__SynchronizeSettings()
+        
         return 
     
     def SetOxidizerDefinition(self, oxidizer_species:list[str], oxidizer_weights:list[float]):
@@ -161,23 +151,9 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         :raises Exception: if no oxidizer species are provided.
         :raises Exception: if the number of species does not correspond to the number of weights.
         """
-
-        if len(oxidizer_species) == 0:
-            raise Exception("Oxidizer definition should contain at least one specie.")
-        if len(oxidizer_species) != (len(oxidizer_weights)):
-            raise Exception("The number of oxidizer species and weights should be equal.")
-        self.__oxidizer_definition = []
-        self.__oxidizer_weights = []
-        for o in oxidizer_species:
-            self.__oxidizer_definition.append(o)
-        for w in oxidizer_weights:
-            self.__oxidizer_weights.append(w)
-        self.__oxidizer_string = ",".join([self.__oxidizer_definition[i] + ":" + str(self.__oxidizer_weights[i]) for i in range(len(self.__oxidizer_definition))])
         self._Config.SetOxidizerDefinition(oxidizer_species, oxidizer_weights)
-        self._Config.ComputeMixFracConstants()
-        self._Config.ComputeMixFracConstants()
-        self.z_i = self._Config.GetMixtureFractionCoefficients()
-        self.c = self._Config.GetMixtureFractionConstant()
+        self.__SynchronizeSettings()
+        
         return 
     
     def SetNpTemp(self, n_flamelets_new:int):
@@ -289,8 +265,15 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         :param __reaction_mechanism: name of the reaction mechanism.
         :type __reaction_mechanism: str
         """
-        self.__reaction_mechanism = reaction_mechanism
-        self.gas = ct.Solution(self.__reaction_mechanism)
+        self._Config.SetReactionMechanism(reaction_mechanism)
+        self.__SynchronizeSettings()
+        # self.__reaction_mechanism = reaction_mechanism
+        # self.gas = ct.Solution(self.__reaction_mechanism)
+        return 
+    
+    def SetTransportModel(self, transport_model:str):
+        self._Config.SetTransportModel(transport_model)
+        self.__SynchronizeSettings()
         return 
     
     def SetTransportMechanism(self, transport_mechanism:str="multicomponent"):
@@ -310,10 +293,12 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         :type output_dir_new: str
         :raises Exception: If provided directory doesn't exist.
         """
-        if not path.isdir(output_dir_new):
-            raise Exception("Provided output path doesn't exist.")
-        self.SetOutputDir(output_dir_new)
-        self.__PrepareOutputDirectories()
+        self._Config.SetOutputDir(output_dir=output_dir_new)
+        self.__SynchronizeSettings()
+        # if not path.isdir(output_dir_new):
+        #     raise Exception("Provided output path doesn't exist.")
+        # self.SetOutputDir(output_dir_new)
+        # self.__PrepareOutputDirectories()
         return
     
     def SetMatlabOutputDir(self, output_dir_new):
@@ -942,9 +927,9 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
 
 
         if flame_is_gas:
-            variables += ',EnthalpyTot,'
+            variables += ','+DefaultSettings_FGM.name_enth+','
             data_matrix = np.append(data_matrix, np.array([[enthalpy]]), axis=1)
-            variables += 'MixtureFraction,'
+            variables += DefaultSettings_FGM.name_mixfrac+','
             data_matrix = np.append(data_matrix, np.array([mixture_fraction]), axis=1)
             variables += 'Temperature,'
             data_matrix = np.append(data_matrix, np.array([[T]]), axis=1)
@@ -961,9 +946,9 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
             variables += 'Heat_Release'
             data_matrix = np.append(data_matrix, np.array([[heat_rel]]), axis=1)
         else:
-            variables += ',EnthalpyTot,'
+            variables += ','+DefaultSettings_FGM.name_enth+','
             data_matrix = np.append(data_matrix, np.reshape(enthalpy, [len(enthalpy),1]), axis=1)
-            variables += 'MixtureFraction,'
+            variables += DefaultSettings_FGM.name_mixfrac+','
             data_matrix = np.append(data_matrix, np.reshape(mixture_fraction, [len(mixture_fraction),1]), axis=1)
             variables += 'Temperature,'
             data_matrix = np.append(data_matrix, np.reshape(T, [len(T), 1]), axis=1)
@@ -1095,9 +1080,19 @@ def ComputeFlameletData(Config:FlameletAIConfig, run_parallel:bool=False, N_proc
 
     mix_bounds = Config.GetMixtureBounds()
     Np_unb_mix = Config.GetNpMix()
-
-    # Equivalence ratios to calculate flamelets for are system inputs
-    mixture_range = np.linspace(mix_bounds[0], mix_bounds[1], Np_unb_mix)
+    Config.gas.TP=300,101325
+    Config.gas.set_equivalence_ratio(1.0, Config.GetFuelString(), Config.GetOxidizerString())
+    if Config.GetMixtureStatus():
+        mix_status_stoch = Config.gas.mixture_fraction(Config.GetFuelString(), Config.GetOxidizerString())
+    else:
+        mix_status_stoch = Config.gas.equivalence_ratio(Config.GetFuelString(), Config.GetOxidizerString())
+    if mix_bounds[0] < mix_status_stoch and mix_bounds[1] > mix_status_stoch:
+        mixture_range_lean = np.linspace(mix_bounds[0], mix_status_stoch, int(Np_unb_mix/2))
+        mixture_range_rich = np.linspace(mix_status_stoch, mix_bounds[1], int(Np_unb_mix/2)+1)
+        mixture_range = np.append(mixture_range_lean, mixture_range_rich[1:])
+    else:
+        # Equivalence ratios to calculate flamelets for are system inputs
+        mixture_range = np.linspace(mix_bounds[0], mix_bounds[1], Np_unb_mix)
 
     # Set up Cantera flamelet generator object
 
@@ -1112,3 +1107,37 @@ def ComputeFlameletData(Config:FlameletAIConfig, run_parallel:bool=False, N_proc
         F = FlameletGenerator_Cantera(Config)
         F.SetMixtureValues(mixture_range)
         F.ComputeFlamelets()
+
+def ComputeBoundaryData(Config:FlameletAIConfig, run_parallel:bool=False, N_processors:int=2):
+
+    def ComputeEquilibriumData(mix_input):
+        F = FlameletGenerator_Cantera(Config)
+        F.RunMixtureFraction()
+        F.RunEquilibrium(True)
+        F.RunFreeFlames(False)
+        F.RunBurnerFlames(False)
+        F.RunCounterFlowFlames(False)
+        F.ComputeFlameletsOnMixStatus(mix_input)
+
+
+    mix_bounds = Config.GetMixtureBounds()
+    Np_unb_mix = Config.GetNpMix()
+    Config.gas.TP=300,101325
+    Config.gas.set_equivalence_ratio(1.0, Config.GetFuelString(), Config.GetOxidizerString())
+    if Config.GetMixtureStatus():
+        mix_status_stoch = Config.gas.mixture_fraction(Config.GetFuelString(), Config.GetOxidizerString())
+    else:
+        mix_status_stoch = Config.gas.equivalence_ratio(Config.GetFuelString(), Config.GetOxidizerString())
+    if mix_bounds[0] < mix_status_stoch and mix_bounds[1] > mix_status_stoch:
+        mixture_range_lean = np.linspace(mix_bounds[0], mix_status_stoch, int(Np_unb_mix/2))
+        mixture_range_rich = np.linspace(mix_status_stoch, mix_bounds[1], int(Np_unb_mix/2)+1)
+        mixture_range = np.append(mixture_range_lean, mixture_range_rich[1:])
+    else:
+        # Equivalence ratios to calculate flamelets for are system inputs
+        mixture_range = np.linspace(mix_bounds[0], mix_bounds[1], Np_unb_mix)
+    
+    if run_parallel:
+        Parallel(n_jobs=N_processors)(delayed(ComputeEquilibriumData)(mix_status) for mix_status in mixture_range)
+    else:
+        for z in mixture_range:
+            ComputeEquilibriumData(z)

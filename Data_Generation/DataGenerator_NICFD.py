@@ -37,7 +37,7 @@ np.random.seed(2)
 # Importing DataMiner classes and functions
 #---------------------------------------------------------------------------------------------#
 from Common.DataDrivenConfig import EntropicAIConfig
-from Common.Properties import DefaultProperties
+from Common.Properties import DefaultSettings_NICFD
 from Data_Generation.DataGenerator_Base import DataGenerator_Base
 
 class DataGenerator_CoolProp(DataGenerator_Base):
@@ -47,20 +47,20 @@ class DataGenerator_CoolProp(DataGenerator_Base):
     __fluid = None 
 
     # Pressure and temperature limits
-    __use_PT:bool = DefaultProperties.use_PT_grid
-    __T_min:float = DefaultProperties.T_min
-    __T_max:float = DefaultProperties.T_max
-    __Np_Y:int = DefaultProperties.Np_temp
+    __use_PT:bool = DefaultSettings_NICFD.use_PT_grid
+    __T_min:float = DefaultSettings_NICFD.T_min
+    __T_max:float = DefaultSettings_NICFD.T_max
+    __Np_Y:int = DefaultSettings_NICFD.Np_temp
 
-    __P_min:float = DefaultProperties.P_min
-    __P_max:float = DefaultProperties.P_max
-    __Np_X:int = DefaultProperties.Np_p
+    __P_min:float = DefaultSettings_NICFD.P_min
+    __P_max:float = DefaultSettings_NICFD.P_max
+    __Np_X:int = DefaultSettings_NICFD.Np_p
 
     # Density and static energy limits
-    __rho_min:float = DefaultProperties.Rho_min
-    __rho_max:float = DefaultProperties.Rho_max
-    __e_min:float = DefaultProperties.Energy_min 
-    __e_max:float = DefaultProperties.Energy_max 
+    __rho_min:float = DefaultSettings_NICFD.Rho_min
+    __rho_max:float = DefaultSettings_NICFD.Rho_max
+    __e_min:float = DefaultSettings_NICFD.Energy_min 
+    __e_max:float = DefaultSettings_NICFD.Energy_max 
     __X_grid:np.ndarray[float] = None
     __Y_grid:np.ndarray[float] = None 
 
@@ -148,7 +148,7 @@ class DataGenerator_CoolProp(DataGenerator_Base):
         plt.show()
         return 
     
-    def SetTemperatureBounds(self, T_lower:float=DefaultProperties.T_min, T_upper:float=DefaultProperties.T_max):
+    def SetTemperatureBounds(self, T_lower:float=DefaultSettings_NICFD.T_min, T_upper:float=DefaultSettings_NICFD.T_max):
         """Set the upper and lower temperature limits for the fluid data grid.
 
         :param T_lower: lower temperature limit in Kelvin.
@@ -172,32 +172,32 @@ class DataGenerator_CoolProp(DataGenerator_Base):
         """
         return [self.__T_lower, self.__T_upper]
     
-    def SetNpDensity(self, Np_density:int=DefaultProperties.Np_p):
+    def SetNpDensity(self, Np_density:int=DefaultSettings_NICFD.Np_p):
         self.SetNpPressure(Np_P=Np_density)
         return 
 
     def GetNpDensity(self):
         return self.GetNpPressure()
     
-    def SetDensityBounds(self, Density_lower:float=DefaultProperties.Rho_min, Density_upper:float=DefaultProperties.Rho_max):
+    def SetDensityBounds(self, Density_lower:float=DefaultSettings_NICFD.Rho_min, Density_upper:float=DefaultSettings_NICFD.Rho_max):
         self.__rho_min = Density_lower
         self.__rho_max = Density_upper
         return 
     
-    def SetNpEnergy(self, Np_energy:int=DefaultProperties.Np_temp):
+    def SetNpEnergy(self, Np_energy:int=DefaultSettings_NICFD.Np_temp):
         self.SetNpTemp(Np_Temp=Np_energy)
         return 
     
     def GetNpEnergy(self):
         return self.GetNpTemp()
     
-    def SetEnergyBounds(self, Energy_lower:float=DefaultProperties.Energy_min, Energy_upper:float=DefaultProperties.Energy_max):
+    def SetEnergyBounds(self, Energy_lower:float=DefaultSettings_NICFD.Energy_min, Energy_upper:float=DefaultSettings_NICFD.Energy_max):
         self.__e_min = Energy_lower
         self.__e_max = Energy_upper
         return 
     
     
-    def SetNpTemp(self, Np_Temp:int=DefaultProperties.Np_temp):
+    def SetNpTemp(self, Np_Temp:int=DefaultSettings_NICFD.Np_temp):
         """
         Set number of divisions for the temperature grid.
 
@@ -224,7 +224,7 @@ class DataGenerator_CoolProp(DataGenerator_Base):
     
 
     
-    def SetNpPressure(self, Np_P:int=DefaultProperties.Np_p):
+    def SetNpPressure(self, Np_P:int=DefaultSettings_NICFD.Np_p):
         """
         Set number of divisions for the fluid pressure grid.
 
@@ -242,7 +242,7 @@ class DataGenerator_CoolProp(DataGenerator_Base):
     def GetNpPressure(self):
         return self.__Np_X
     
-    def SetPressureBounds(self, P_lower:float=DefaultProperties.P_min, P_upper:float=DefaultProperties.P_max):
+    def SetPressureBounds(self, P_lower:float=DefaultSettings_NICFD.P_min, P_upper:float=DefaultSettings_NICFD.P_max):
         """Set the upper and lower limits for the fluid pressure.
 
         :param P_lower: lower pressure limit in Pa.
