@@ -91,9 +91,13 @@ class PVOptimizer:
         self.__consider_burnerflames = self.__Config.GenerateBurnerFlames()
         self.__consider_freeflames = self.__Config.GenerateFreeFlames()
         self.__output_dir = self.__Config.GetOutputDir()
-
+        
+        for sp in self.__Config.GetFuelDefinition():
+            self.SetSpeciesBounds(sp, ub=0.0)
+            
         print("Loading flameletAI configuration with name " + self.__Config.GetConfigName())
-
+        return 
+    
     def SetOutputDir(self, output_dir:str):
         self.__output_dir = output_dir 
 
