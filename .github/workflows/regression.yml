@@ -25,9 +25,3 @@ jobs:
         run: |
           export CR_PAT=${{ secrets.DOCKER_TOKEN }}
           echo $CR_PAT | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          
-      - name: Pre Cleanup
-        uses: docker://ghcr.io/evertbunschoten/pinntraining_test:1.0.0
-        with:
-          entrypoint: /bin/rm
-          args: -rf install install_bin.tgz src ccache ${{ matrix.config_set }}
