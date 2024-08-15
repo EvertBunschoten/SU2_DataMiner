@@ -30,7 +30,8 @@ import pickle
 import csv
 import numpy as np
 import matplotlib.pyplot as plt 
-from scipy.optimize import minimize, Bounds
+from scipy.optimize import minimize, Bounds, differential_evolution
+from multiprocessing import current_process
 
 from Common.Properties import DefaultProperties
 from Common.Config_base import Config 
@@ -77,6 +78,7 @@ class MLPOptimizer:
     # Optimization history.
     __population_history:list = []
     __fitness_history:list = []
+    __generation_number:int = 0
 
     def __init__(self, Config_in:Config=None, load_file:str=None):
         """Class constructor
@@ -274,6 +276,49 @@ class MLPOptimizer:
             upperbound.append(self.__NN_max)
 
         return gene_trainparams, lowerbound, upperbound 
+    def __prepareBounds_DE(self):
+        lowerbound = []
+        upperbound = []
+        integrality = []
+        if self.__optimize_batch:
+            integrality.append(True)
+            lowerbound.append(self.__batch_expo_min)
+            upperbound.append(self.__batch_expo_max)
+        if self.__optimize_LR:
+            integrality.append(False)
+            integrality.append(False)
+            lowerbound.append(self.__alpha_expo_min)
+            lowerbound.append(self.__lr_decay_min)
+            upperbound.append(self.__alpha_expo_max)
+            upperbound.append(self.__lr_decay_max)
+        if self.__optimize_NN:
+            integrality.append(True)
+            lowerbound.append(int(self.__NN_min))
+            upperbound.append(int(self.__NN_max))
+        return np.array(integrality), np.array(lowerbound), np.array(upperbound)
+    
+    def __setOptimizer_DE(self):
+        integrality, lowerbound, upperbound = self.__prepareBounds_DE()
+        N_genes = len(integrality)
+        bounds = Bounds(lb=lowerbound, ub=upperbound)
+        # Determine update strategy based on whether parallel processing is used.
+        if self.__n_workers > 1:
+            update_strategy = "deferred"
+        else:
+            update_strategy = "immediate"
+        self.__generation_number = 0
+        result = differential_evolution(func = self.DE_fitnessFunction,\
+                                        callback=self.saveGenerationInfo_DE,\
+                                        maxiter=10*N_genes,\
+                                        popsize=10,\
+                                        bounds=bounds,\
+                                        workers=self.__n_workers,\
+                                        updating=update_strategy,\
+                                        integrality=integrality,\
+                                        strategy='best1exp',\
+                                        seed=1,\
+                                        tol=1e-6)
+        return 
     
     def __setOptimizer(self):
         """Prepare PyGaD optimization routine.
@@ -285,6 +330,7 @@ class MLPOptimizer:
         gene_space = []
         for lb, ub in zip(lowerbound, upperbound):
             gene_space.append({'low':lb,'high':ub})
+
 
         # Initiate PyGaD instance with 
         self.__optimizer = pygad.GA(num_generations=10*N_genes,\
@@ -351,15 +397,46 @@ class MLPOptimizer:
             os.mkdir(self.save_dir)
         
         # Prepare bounds and set optimizer.
-        if self.__optimize_NN or self.__optimize_batch:
-            self.__setOptimizer()
+        self.__setOptimizer_DE()
+        # if self.__optimize_NN or self.__optimize_batch:
+        #     #self.__setOptimizer()
             
-            # Initiate HP optimization.
-            self.__optimizer.run()
-        else:
-            self.__setSimplexOptimizer()
+        #     # Initiate HP optimization.
+        #     self.__optimizer.run()
+        # else:
+        #     self.__setSimplexOptimizer()
 
         return 
+    
+    def saveGenerationInfo_DE(self, x, convergence):
+        #x = ga_result.x 
+        f_best = convergence 
+        idx_x = 0
+        batch_expo = self.__batch_expo
+        alpha_expo = self.__alpha_expo
+        lr_decay = self.__lr_decay
+        architecture = self.__architecture
+        if self.__optimize_batch:
+            batch_expo = int(x[idx_x])
+            idx_x += 1 
+        if self.__optimize_LR:
+            alpha_expo = x[idx_x]
+            idx_x += 1 
+            lr_decay = x[idx_x]
+            idx_x += 1 
+        if self.__optimize_NN:
+            architecture = [int(x[idx_x])]
+            idx_x += 1 
+        
+        line_to_write = ("%i,%i,%+.5e,%+.5e," % (self.__generation_number, batch_expo, alpha_expo, lr_decay))
+        line_to_write += ",".join(("%i" % n) for n in architecture)
+        line_to_write += ",%+.6e" % f_best
+        line_to_write += "\n"
+        with open(self.opt_history_filepath, 'a+') as fid:
+            fid.write(line_to_write)
+        print("HELLO")
+        self.__generation_number += 1
+        return
     
     def saveGenerationInfo(self, ga_instance:pygad.GA):
         """Save population information per completed generation.
@@ -403,7 +480,7 @@ class MLPOptimizer:
         # Set hyper-parameter according to gene.
         idx_x = 0
         if self.__optimize_batch:
-            batch_expo = x[idx_x]
+            batch_expo = int(x[idx_x])
             Evaluator.SetBatchExpo(batch_expo)
             idx_x += 1 
         if self.__optimize_LR:
@@ -414,11 +491,46 @@ class MLPOptimizer:
             Evaluator.SetLRDecay(lr_decay)
             idx_x += 1 
         if self.__optimize_NN:
-            architecture = [x[idx_x]]
+            architecture = [int(x[idx_x])]
             Evaluator.SetHiddenLayers(architecture)
             idx_x += 1 
 
         return
+
+    def DE_fitnessFunction(self, x:np.ndarray):
+        if self.__n_workers > 1:
+            p = current_process()
+            worker_idx = p._identity[0]
+        else:
+            worker_idx = 0
+        Evaluator:EvaluateArchitecture = EvaluateArchitecture_NICFD(self._Config)
+
+        # Set CPU index.
+        Evaluator.SetTrainHardware("CPU", worker_idx)
+
+        Evaluator.SetVerbose(0)
+
+        # Translate gene and update hyper-parameters.
+        self.__translateGene(x, Evaluator=Evaluator)
+
+        # Set output directory for MLP training callbacks.
+        Evaluator.SetSaveDir(self.save_dir)
+
+        # Train for 1000 epochs direct and physics-informed.
+        Evaluator.SetNEpochs(1000)
+        Evaluator.CommenceTraining()
+
+        # Extract test set evaluation score.
+        Evaluator.TrainPostprocessing()
+        test_score = Evaluator.GetTestScore() 
+
+        # Scale test set loss to fitness.
+        fitness_test_score = np.log10(test_score)
+
+        # Free up memory
+        del Evaluator 
+
+        return fitness_test_score
 
     def fitnessFunction(self, ga_instance:pygad.GA, x:np.ndarray, x_idx:int):
         """ Fitness function evaluated during GA routine.
