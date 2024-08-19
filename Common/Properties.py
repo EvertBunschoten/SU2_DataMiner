@@ -23,6 +23,7 @@
 #                                                                                             |
 #=============================================================================================#
 
+import tensorflow as tf 
 
 class DefaultProperties:
     
@@ -38,6 +39,7 @@ class DefaultProperties:
     hidden_layer_architecture:list[int] = [20,20,20]
     activation_function:str = "gelu"
     output_file_header:str = "fluid_data"
+    config_name:str = "DataMiner"
 
 class DefaultSettings_NICFD(DefaultProperties):
     T_min:float = 300
@@ -59,6 +61,8 @@ class DefaultSettings_NICFD(DefaultProperties):
     use_PT_grid:bool = False 
 
     controlling_variables:list[str] = ["Density", "Energy"]
+    name_density:str = "Density"
+    name_energy:str = "Energy"
 
     hidden_layer_architecture:list[int] = [30]
 
@@ -113,3 +117,12 @@ class DefaultSettings_FGM(DefaultProperties):
     affinity_threshold:float = 0.7
     output_file_header:str = "flamelet_data"
     boundary_file_header:str = "boundary_data"
+
+
+ActivationFunctionOptions = {"linear" : tf.keras.activations.linear,\
+                             "elu" : tf.keras.activations.elu,\
+                             "relu" : tf.keras.activations.relu,\
+                             "tanh" : tf.keras.activations.tanh,\
+                             "exponential" : tf.keras.activations.exponential,\
+                             "gelu" : tf.keras.activations.gelu,\
+                             "sigmoid" : tf.keras.activations.sigmoid}

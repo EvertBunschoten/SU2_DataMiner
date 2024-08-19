@@ -83,7 +83,7 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
 
     __fuzzy_delta:float = 0.1
 
-    def __init__(self, Config:FlameletAIConfig):
+    def __init__(self, Config:FlameletAIConfig=None):
         DataGenerator_Base.__init__(self, Config_in=Config)
 
         """Constructur, load flamelet generation settings from FlameletAIConfig.
@@ -92,13 +92,18 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         :type Config: FlameletAIConfig
         """
 
-        print("Initializing flamelet generator from FlameletAIConfig with name " + self._Config.GetConfigName())
-        self.__SynchronizeSettings()
+        if Config is None:
+            print("Initializing flamelet generator with default settings")
+            self._Config = FlameletAIConfig()
+        else:
+            print("Initializing flamelet generator from FlameletAIConfig with name " + self._Config.GetConfigName())
+            self.__SynchronizeSettings()
         
         return 
     
     def __SynchronizeSettings(self):
-        
+        """Update settings from configuration
+        """
         self.__fuel_string = self._Config.GetFuelString()
         self.__oxidizer_string = self._Config.GetOxidizerString()
         
@@ -267,8 +272,6 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         """
         self._Config.SetReactionMechanism(reaction_mechanism)
         self.__SynchronizeSettings()
-        # self.__reaction_mechanism = reaction_mechanism
-        # self.gas = ct.Solution(self.__reaction_mechanism)
         return 
     
     def SetTransportModel(self, transport_model:str):
@@ -295,10 +298,6 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         """
         self._Config.SetOutputDir(output_dir=output_dir_new)
         self.__SynchronizeSettings()
-        # if not path.isdir(output_dir_new):
-        #     raise Exception("Provided output path doesn't exist.")
-        # self.SetOutputDir(output_dir_new)
-        # self.__PrepareOutputDirectories()
         return
     
     def SetMatlabOutputDir(self, output_dir_new):
