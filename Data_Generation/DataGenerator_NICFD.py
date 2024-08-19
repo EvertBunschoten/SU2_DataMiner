@@ -80,32 +80,37 @@ class DataGenerator_CoolProp(DataGenerator_Base):
     __c2_fluid:np.ndarray[float] = None 
     __success_locations:np.ndarray[bool] = None 
 
-    def __init__(self, Config_in:EntropicAIConfig):
+    def __init__(self, Config_in:EntropicAIConfig=None):
         DataGenerator_Base.__init__(self, Config_in=Config_in)
-        # Load configuration and set default properties.
-        self.__use_PT = self._Config.GetPTGrid()
-        if len(self._Config.GetFluidNames()) > 1:
-            fluid_names = self._Config.GetFluidNames()
-            CAS_1 = CP.get_fluid_param_string(fluid_names[0], "CAS")
-            CAS_2 = CP.get_fluid_param_string(fluid_names[1], "CAS")
-            CP.apply_simple_mixing_rule(CAS_1, CAS_2,'linear')
-        self.__fluid = CP.AbstractState("HEOS", self._Config.GetFluidName())
-        if len(self._Config.GetFluidNames()) > 1:
-            mole_fractions = self._Config.GetMoleFractions()
-            self.__fluid.set_mole_fractions(mole_fractions)
-        self.__use_PT = self._Config.GetPTGrid()
-        P_bounds = self._Config.GetPressureBounds()
-        T_bounds = self._Config.GetTemperatureBounds()
-        rho_bounds = self._Config.GetDensityBounds()
-        e_bounds = self._Config.GetEnergyBounds()
 
-        self.__P_min, self.__P_max = P_bounds[0], P_bounds[1]
-        self.__rho_min, self.__rho_max = rho_bounds[0], rho_bounds[1]
-        self.__Np_X = self._Config.GetNpPressure()
+        if Config_in is None:
+            print("Initializing NICFD data generator with default settings.")
+            self._Config = EntropicAIConfig()
+        else:
+            # Load configuration and set default properties.
+            self.__use_PT = self._Config.GetPTGrid()
+            if len(self._Config.GetFluidNames()) > 1:
+                fluid_names = self._Config.GetFluidNames()
+                CAS_1 = CP.get_fluid_param_string(fluid_names[0], "CAS")
+                CAS_2 = CP.get_fluid_param_string(fluid_names[1], "CAS")
+                CP.apply_simple_mixing_rule(CAS_1, CAS_2,'linear')
+            self.__fluid = CP.AbstractState("HEOS", self._Config.GetFluid())
+            if len(self._Config.GetFluidNames()) > 1:
+                mole_fractions = self._Config.GetMoleFractions()
+                self.__fluid.set_mole_fractions(mole_fractions)
+            self.__use_PT = self._Config.GetPTGrid()
+            P_bounds = self._Config.GetPressureBounds()
+            T_bounds = self._Config.GetTemperatureBounds()
+            rho_bounds = self._Config.GetDensityBounds()
+            e_bounds = self._Config.GetEnergyBounds()
 
-        self.__T_min, self.__T_max = T_bounds[0], T_bounds[1]
-        self.__e_min, self.__e_max = e_bounds[0], e_bounds[1]
-        self.__Np_Y = self._Config.GetNpTemp()
+            self.__P_min, self.__P_max = P_bounds[0], P_bounds[1]
+            self.__rho_min, self.__rho_max = rho_bounds[0], rho_bounds[1]
+            self.__Np_X = self._Config.GetNpPressure()
+
+            self.__T_min, self.__T_max = T_bounds[0], T_bounds[1]
+            self.__e_min, self.__e_max = e_bounds[0], e_bounds[1]
+            self.__Np_Y = self._Config.GetNpTemp()
 
         return 
     

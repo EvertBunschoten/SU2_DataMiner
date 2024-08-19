@@ -45,15 +45,19 @@ class DataGenerator_Base:
 
     __output_dir:str    # Path location at which to save fluid data.
     
-    def __init__(self, Config_in:Config):
-        """Class constructor
+    def __init__(self, Config_in:Config=None):
+        """Class constructor, define data generator optionally through SU2 DataMiner configuration. If no configuration is provided, default settings are applied.
 
-        :param Config_in: DataDrivenConfig base class.
-        :type Config_in: Config
+
+        :param Config_in: SU2 DataMiner configuration, defaults to None
+        :type Config_in: Config, optional
         """
 
-        # Copy settings read from configuration.
-        self._Config = Config_in
+        if (Config_in is None):
+            self._Config = Config()
+        else:
+            # Copy settings read from configuration.
+            self._Config = Config_in
         self.__train_fraction = self._Config.GetTrainFraction()
         self.__test_fraction = self._Config.GetTestFraction()
         self.__output_dir = self._Config.GetOutputDir()
