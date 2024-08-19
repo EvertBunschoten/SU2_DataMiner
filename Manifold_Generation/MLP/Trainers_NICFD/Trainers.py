@@ -133,11 +133,11 @@ class Train_Entropic_Derivatives(PhysicsInformedTrainer):
         s, dsdrhoe, d2sdrho2e2 = self.__ComputeEntropyGradients(rhoe_norm)
         rho_norm = tf.gather(rhoe_norm, indices=0, axis=1)
         rho = (self.__rho_max - self.__rho_min)*rho_norm + self.__rho_min 
-        T, P, c2 = self.__EntropicEOS(rho, dsdrhoe, d2sdrho2e2)
+        T, P, c2 = self.EntropicEOS(rho, dsdrhoe, d2sdrho2e2)
         return s, T, P, c2
     
     @tf.function 
-    def __EntropicEOS(self,rho, dsdrhoe, d2sdrho2e2):
+    def EntropicEOS(self,rho, dsdrhoe, d2sdrho2e2):
         dsdrho_e = dsdrhoe[0]
         dsde_rho = dsdrhoe[1]
         d2sdrho2 = d2sdrho2e2[0][0]
@@ -680,7 +680,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         return s_dim, dsdrhoe, d2sdrho2e2
     
     @tf.function 
-    def __EntropicEOS(self,rho, dsdrhoe, d2sdrho2e2):
+    def EntropicEOS(self,rho, dsdrhoe, d2sdrho2e2):
         dsdrho_e = dsdrhoe[0]
         dsde_rho = dsdrhoe[1]
         d2sdrho2 = d2sdrho2e2[0][0]
@@ -699,7 +699,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         s, dsdrhoe, d2sdrho2e2 = self.__ComputeEntropyGradients(rhoe_norm)
         rho_norm = tf.gather(rhoe_norm, indices=self.__idx_rho, axis=1)
         rho = (self.__rho_max - self.__rho_min)*rho_norm + self.__rho_min 
-        T, P, c2 = self.__EntropicEOS(rho, dsdrhoe, d2sdrho2e2)
+        T, P, c2 = self.EntropicEOS(rho, dsdrhoe, d2sdrho2e2)
         return s, T, P, c2 
     
     @tf.function
@@ -707,7 +707,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         _, dsdrhoe, d2sdrho2e2 = self.__ComputeEntropyGradients(X_norm)
         rho_norm = tf.gather(X_norm, indices=self.__idx_rho, axis=1)
         rho = (self.__rho_max - self.__rho_min)*rho_norm + self.__rho_min 
-        T, P, c2 = self.__EntropicEOS(rho, dsdrhoe, d2sdrho2e2)
+        T, P, c2 = self.EntropicEOS(rho, dsdrhoe, d2sdrho2e2)
         Y_state_pred = tf.stack((T, P, c2),axis=1)
         return Y_state_pred 
     
