@@ -395,7 +395,6 @@ class PVOptimizer:
 
         bounds = Bounds(lb=lb, ub=ub)
 
-        print(bounds)
         # Generate convergence output file.
         self.__convergence = []
         self.__convergence_history_filename = self.__output_dir + "/" + self.__Config.GetConfigName() + "_PV_convergence_history.csv"
@@ -601,12 +600,12 @@ class PVOptimizer:
                 delta_Y_mon = Y_mon[1:, :] - Y_mon[:-1, :]
 
                 # Normalize mass fraction increment vector to generate progress vector components.
-                range_Y = np.max(Y_filtered,axis=0) - np.min(Y_filtered,axis=0)
+                range_Y = np.max(Y_filtered,axis=0) - np.min(Y_filtered,axis=0) + 1e-32
                 delta_Y_norm = delta_Y_mon / range_Y
 
                 # Add additional data as progress vector components if defined.
                 if any(self.__idx_additional_vars):
-                    range_otherdata = np.max(otherdata,axis=0) - np.min(otherdata,axis=0)
+                    range_otherdata = np.max(otherdata,axis=0) - np.min(otherdata,axis=0) + 1e-32
                     otherdata_mon = otherdata[idx_mon, :]
                     delta_otherdata_mon = otherdata_mon[1:, :] - otherdata_mon[:-1,:]
                     delta_Y_norm = np.hstack((delta_Y_norm, delta_otherdata_mon / range_otherdata))
@@ -640,7 +639,7 @@ class PVOptimizer:
         range_Y = np.max(flamedata,axis=0) - np.min(flamedata,axis=0)
     
         # Compute normalized flamelet data increment vector.
-        delta_Y_scaled = (flamedata[1:, :]-flamedata[:-1, :]) / range_Y[np.newaxis, :]
+        delta_Y_scaled = (flamedata[1:, :]-flamedata[:-1, :]) / (range_Y[np.newaxis, :]+1e-32)
 
         # Compute flamelet progress vector and accumulation.
         abs_delta_Y_scaled = np.linalg.norm(delta_Y_scaled, axis=1)
