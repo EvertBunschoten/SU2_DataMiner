@@ -56,7 +56,7 @@ class EntropicAIConfig(Config):
     __fluid_names:list[str] = ["MM"]
     __fluid_string:str="MM"
     __fluid_mole_fractions:list[float] = []
-    __use_PT:bool = True 
+    __use_PT:bool = DefaultSettings_NICFD.use_PT_grid
 
 
     __T_lower:float = DefaultSettings_NICFD.T_min   # Lower temperature bound.
@@ -85,7 +85,8 @@ class EntropicAIConfig(Config):
 
     def __init__(self, load_file:str=None):
         Config.__init__(self)
-
+        self._controlling_variables = [DefaultSettings_NICFD.name_density, DefaultSettings_NICFD.name_energy]
+        
         self.SetAlphaExpo(DefaultSettings_NICFD.init_learning_rate_expo)
         self.SetLRDecay(DefaultSettings_NICFD.learning_rate_decay)
         self.SetBatchExpo(DefaultSettings_NICFD.batch_size_exponent)
@@ -184,7 +185,7 @@ class EntropicAIConfig(Config):
         self.__fluid_mole_fractions.append(mole_fraction_2_norm)
         return 
         
-    def GetFluidName(self):
+    def GetFluid(self):
         """
         Get the fluid used for entropic data generation.
         :return: fluid name
@@ -199,16 +200,22 @@ class EntropicAIConfig(Config):
     def GetMoleFractions(self):
         return self.__fluid_mole_fractions
     
-    def UsePTGrid(self, PT_grid:bool=True):
+    def UsePTGrid(self, PT_grid:bool=DefaultSettings_NICFD.use_PT_grid):
         """Define fluid data grid in the pressure-temperature space. If not, the fluid data grid is defined in the density-energy space.
 
-        :param PT_grid: use pressure-temperature based grid, defaults to True
+        :param PT_grid: use pressure-temperature based grid, defaults to DefaultSettings_NICFD.use_PT_grid
         :type PT_grid: bool, optional
         """
         self.__use_PT = PT_grid 
         return 
     
     def GetPTGrid(self):
+        """Get the fluid data grid definition.
+
+        :return: Fluid data grid definition  (pressure-temperature based = True, density-energy-based = False).
+        :rtype: bool
+        """
+
         return self.__use_PT 
     
     def SetTemperatureBounds(self, T_lower:float=DefaultSettings_NICFD.T_min, T_upper:float=DefaultSettings_NICFD.T_max):
@@ -228,30 +235,110 @@ class EntropicAIConfig(Config):
         return
     
     def SetEnergyBounds(self, E_lower:float=DefaultSettings_NICFD.Energy_min, E_upper:float=DefaultSettings_NICFD.Energy_max):
-        self.__Energy_lower=E_lower
-        self.__Energy_upper=E_upper
+        """Define the internal energy bounds of the density-energy based fluid data grid.
+
+        :param E_lower: lower limit internal energy value, defaults to DefaultSettings_NICFD.Energy_min
+        :type E_lower: float, optional
+        :param E_upper: upper limit for internal energy, defaults to DefaultSettings_NICFD.Energy_max
+        :type E_upper: float, optional
+        :raises Exception: if lower value for internal energy exceeds upper value.
+        """
+        if (E_lower >= E_upper):
+            raise Exception("Lower energy level should be below upper energy level.")
+        else:
+            self.__Energy_lower=E_lower
+            self.__Energy_upper=E_upper
         return 
     
     def GetEnergyBounds(self):
+        """Get the interal energy bounds for the density-energy based fluid data grid.
+
+        :return: lower and upper internal energy values.
+        :rtype: list[float]
+        """
+
         return [self.__Energy_lower, self.__Energy_upper]
     
     def SetNpEnergy(self, Np_Energy:int=DefaultSettings_NICFD.Np_temp):
-        self.__Np_T = Np_Energy
+        """Set the number of data points along the energy axis of the fluid data grid.
+
+        :param Np_Energy: number of divisions between the lower and upper internal energy values, defaults to DefaultSettings_NICFD.Np_temp
+        :type Np_Energy: int, optional
+        :raises Exception: if fewer than two nodes are set.
+        """
+
+        if Np_Energy <= 2:
+            raise Exception("Number of divisions should be higher than 2.")
+        else:
+            self.__Np_T = Np_Energy
+
         return 
     
+    def GetNpEnergy(self):
+        """
+        Get the number of divisions for the fluid static energy range.
+
+        :return: Number of divisions for the fluid static energy range.
+        :rtype: int
+
+        """
+        return self.__Np_T
+    
     def SetDensityBounds(self, Rho_lower:float=DefaultSettings_NICFD.Rho_min, Rho_upper:float=DefaultSettings_NICFD.Rho_max):
-        self.__Rho_lower=Rho_lower
-        self.__Rho_upper=Rho_upper
+        """Define the density bounds of the density-energy based fluid data grid.
+
+        :param Rho_lower: lower limit density value, defaults to DefaultSettings_NICFD.Rho_min
+        :type Rho_lower: float, optional
+        :param Rho_upper: upper limit for density, defaults to DefaultSettings_NICFD.Rho_max
+        :type Rho_upper: float, optional
+        :raises Exception: if lower value for density exceeds upper value.
+        """
+        if (Rho_lower >= Rho_upper):
+            raise Exception("Lower density value should not exceed upper value.")
+        else:
+            self.__Rho_lower=Rho_lower
+            self.__Rho_upper=Rho_upper
         return 
     
     def SetNpDensity(self, Np_rho:int=DefaultSettings_NICFD.Np_p):
-        self.__Np_P = Np_rho
+        """Set the number of data points along the density axis of the fluid data grid.
+
+        :param Np_rho: number of divisions between the lower and upper density values, defaults to DefaultSettings_NICFD.Np_p
+        :type Np_rho: int, optional
+        :raises Exception: if fewer than two nodes are set.
+        """
+
+        if Np_rho <= 2:
+            raise Exception("Number of divisions should be higher than two.")
+        else:
+            self.__Np_P = Np_rho
+
         return 
     
+    def GetNpDensity(self):
+        """
+        Get the number of divisions for the fluid density range.
+
+        :return: Number of divisions for the fluid density range.
+        :rtype: int
+
+        """
+        return self.__Np_P
+    
     def GetDensityBounds(self):
+        """Get the density bounds for the density-energy based fluid data grid.
+
+        :return: lower and upper density values.
+        :rtype: list[float]
+        """
         return [self.__Rho_lower, self.__Rho_upper]
     
     def GetTemperatureBounds(self):
+        """Get the temperature bounds for the pressure-temperature based fluid data grid.
+
+        :return: lower and upper temperature values.
+        :rtype: list[float]
+        """
         return [self.__T_lower, self.__T_upper]
     
     
@@ -261,11 +348,11 @@ class EntropicAIConfig(Config):
 
         :param Np_Temp: Number of divisions for the temperature range.
         :type Np_Temp: int
-        :rase: Exception: If the number of divisions is lower than one.
+        :rase: Exception: If the number of divisions is lower than 2.
 
         """
         if (Np_Temp <= 0):
-            raise Exception("Number of unburnt temperature samples should be higher than one.")
+            raise Exception("Number of divisions should be higher than two.")
         else:
             self.__Np_T = Np_Temp
         return 
@@ -298,6 +385,11 @@ class EntropicAIConfig(Config):
         return 
     
     def GetPressureBounds(self):
+        """Get the pressure bounds for the pressure-temperature based fluid data grid.
+
+        :return: lower and upper pressure values.
+        :rtype: list[float]
+        """
         return [self.__P_lower, self.__P_upper]
     
     
@@ -307,16 +399,23 @@ class EntropicAIConfig(Config):
 
         :param Np_Temp: Number of divisions for the fluid pressure.
         :type Np_Temp: int
-        :rase: Exception: If the number of divisions is lower than one.
+        :rase: Exception: If the number of divisions is lower than two.
 
         """
-        if (Np_P <= 0):
-            raise Exception("Number of unburnt temperature samples should be higher than one.")
+        if (Np_P <= 2):
+            raise Exception("At least two divisions should be provided.")
         else:
             self.__Np_P = Np_P 
         return 
     
     def GetNpPressure(self):
+        """
+        Get the number of divisions for the fluid pressure range.
+
+        :return: Number of divisions for the fluid pressure range.
+        :rtype: int
+
+        """
         return self.__Np_P
     
     def SetTableCellSize(self, base_cell_size:float, refined_cell_size:float=None):
@@ -373,73 +472,6 @@ class EntropicAIConfig(Config):
         return self.__Table_ref_radius, self.__Table_curv_threshold
     
         
-    def AddOutputGroup(self, variable_names_in:list[str]):
-        """Add an MLP output group of fluid variables.
-
-        :param variable_names_in: list of output variables to include in the outputs of a single MLP.
-        :type variable_names_in: list[str]
-        :raises Exception: if the number of variables is equal to zero.
-        """
-        if len(variable_names_in) == 0:
-            raise Exception("An MLP output group should be made up of at least one variable.")
-        
-        if self.__MLP_output_groups == None:
-            self.__MLP_output_groups = []
-        self.__MLP_output_groups.append([])
-        for var in variable_names_in:
-            self.__MLP_output_groups[-1].append(var)
-
-    def DefineOutputGroup(self, i_group:int, variable_names_in:list[str]):
-        """Re-define the variables in a specific MLP output group.
-
-        :param i_group: MLP output group index to adapt.
-        :type i_group: int
-        :param variable_names_in: list of output variables to include in the outputs of a single MLP.
-        :type variable_names_in: list[str]
-        :raises Exception: if group index exceeds number of output groups.
-        :raises Exception: if the number of variables is equal to zero.
-        """
-        if i_group >= len(self.__MLP_output_groups):
-            raise Exception("Group not present in MLP outputs.")
-        if len(variable_names_in) == 0:
-            raise Exception("An MLP output group should be made up of at least one variable.")
-        
-        self.__MLP_output_groups[i_group] = []
-        for var in variable_names_in:
-            self.__MLP_output_groups[i_group].append(var)
-
-    def RemoveOutputGroup(self, i_group:int):
-        if i_group > len(self.__MLP_output_groups):
-            raise Exception("Group not present in MLP outputs.")
-        print("Removing output group %i: %s" % (i_group, ",".join(s for s in self.__MLP_output_groups[i_group-1])))
-        self.__MLP_output_groups.remove(self.__MLP_output_groups[i_group-1])
-
-    def ClearOutputGroups(self):
-        self.__MLP_output_groups = []
-        
-    def DisplayOutputGroups(self):
-        """Print the MLP output variables grouping arrangement.
-        """
-        for i_group, group in enumerate(self.__MLP_output_groups):
-            print("Group %i: " % (i_group+1) +",".join(var for var in group) )
-    
-    def GetNMLPOutputGroups(self):
-        """Get the number of MLP output groups.
-
-        :return: number of MLP output groups
-        :rtype: int
-        """
-        return len(self.__MLP_output_groups)
-    
-    def GetMLPOutputGroup(self, i_group:int):
-        """Get the list of variables in a specific MLP group.
-
-        :param i_group: MLP output group index.
-        :type i_group: int
-        :return: list of variables for this group.
-        :rtype: list[str]
-        """
-        return self.__MLP_output_groups[i_group]
     
 
 
@@ -454,9 +486,6 @@ class FlameletAIConfig(Config):
     :param load_file: path to file of configuration to be loaded.
     :type load_file: str
     """
-    # FlameletAI configuration class containing all relevant info on flamelet manifold settings.
-    _config_name = DefaultSettings_FGM.config_name
-
 
     # Flamelet Generation Settings           
     __reaction_mechanism:str = DefaultSettings_FGM.reaction_mechanism   # Reaction mechanism name.
@@ -528,6 +557,7 @@ class FlameletAIConfig(Config):
         """
         Config.__init__(self)
 
+        self._config_name = DefaultSettings_FGM.config_name
         self.SetAlphaExpo(DefaultSettings_FGM.init_learning_rate_expo)
         self.SetLRDecay(DefaultSettings_FGM.learning_rate_decay)
         self.SetBatchExpo(DefaultSettings_FGM.batch_size_exponent)
@@ -548,9 +578,16 @@ class FlameletAIConfig(Config):
         return 
     
     def SetControllingVariables(self, controlling_variables:list[str]=DefaultSettings_FGM.controlling_variables):
+        """Define the set of controlling variables for the current manifold.
+
+        :param controlling_variables: list with controlling variable names, defaults to DefaultSettings_FGM.controlling_variables
+        :type controlling_variables: list[str], optional
+        :raises Exception: if "ProgressVariable" is not included in the list of controlling variables.
+        """
         if DefaultSettings_FGM.name_pv not in controlling_variables:
             raise Exception(DefaultSettings_FGM.name_pv + " should be in the controlling variables")
         super().SetControllingVariables(controlling_variables)
+
         return
     
     def __SynchronizeSettings(self):
@@ -617,7 +654,8 @@ class FlameletAIConfig(Config):
             print("MLP Output Groups:")
             self.DisplayOutputGroups()
         print("")
-        
+        return 
+    
     def ComputeMixFracConstants(self):
         """
         
@@ -884,9 +922,21 @@ class FlameletAIConfig(Config):
         return self.__reaction_mechanism
     
     def SetTransportModel(self, transport_model:str=DefaultSettings_FGM.transport_model):
+        """Define the transport model for the 1D flamelet computations: "unity-Lewis" or "multicomponent".
+
+        :param transport_model: transport model name, defaults to DefaultSettings_FGM.transport_model
+        :type transport_model: str, optional
+        """
         self.__transport_model=transport_model
+
         return 
+    
     def GetTransportModel(self):
+        """Get the transport model for 1D flamelet computations.
+
+        :return: flamelet transport model name.
+        :rtype: str
+        """
         return self.__transport_model
     
     def SetMixtureBounds(self, mix_lower:float=DefaultSettings_FGM.eq_ratio_min, mix_upper:float=DefaultSettings_FGM.eq_ratio_max):
@@ -906,6 +956,8 @@ class FlameletAIConfig(Config):
         else:
             self.__mix_status_lower = mix_lower
             self.__mix_status_upper = mix_upper
+    
+        return 
     
     def GetMixtureBounds(self):
         """
@@ -981,6 +1033,7 @@ class FlameletAIConfig(Config):
             raise Exception("Number of unburnt temperature samples should be higher than one.")
         else:
             self.__Np_T_unb = Np_Temp
+        return 
     
     def GetNpTemp(self):
         """
@@ -992,7 +1045,7 @@ class FlameletAIConfig(Config):
         """
         return self.__Np_T_unb 
 
-    def DefineMixStatus(self, run_as_mixture_fraction:bool=DefaultSettings_FGM.run_mixture_fraction):
+    def DefineMixtureStatus(self, run_as_mixture_fraction:bool=DefaultSettings_FGM.run_mixture_fraction):
         """
         Define the reactant mixture status as mixture fraction or equivalence ratio.
 
@@ -1000,6 +1053,7 @@ class FlameletAIConfig(Config):
 
         """
         self.__run_mixture_fraction = run_as_mixture_fraction
+        return
     
     def GetMixtureStatus(self):
         """
@@ -1020,7 +1074,8 @@ class FlameletAIConfig(Config):
 
         """
         self.__generate_freeflames = input 
-
+        return
+    
     def RunBurnerFlames(self, input:bool=DefaultSettings_FGM.include_burnerflames):
         """
         Include burner-stabilized flame data in the manifold.
@@ -1030,7 +1085,8 @@ class FlameletAIConfig(Config):
 
         """
         self.__generate_burnerflames = input 
-
+        return
+    
     def RunEquilibrium(self, input:bool=DefaultSettings_FGM.include_equilibrium):
         """
         Include chemical equilibrium (reactants and products) data in the manifold.
@@ -1040,7 +1096,8 @@ class FlameletAIConfig(Config):
 
         """
         self.__generate_equilibrium = input
-
+        return
+    
     def RunCounterFlames(self, input:bool=DefaultSettings_FGM.include_counterflames):
         """
         Include counter-flow diffusion flame data in the manifold.
@@ -1050,7 +1107,8 @@ class FlameletAIConfig(Config):
 
         """
         self.__generate_counterflames = input 
-        
+        return
+    
     def GenerateFreeFlames(self):
         """
         Whether the manifold data contains adiabatic free-flame data.
@@ -1094,7 +1152,8 @@ class FlameletAIConfig(Config):
         :param input: save a MATLAB TableMaster copy of flamelet data.
         """
         self.__write_MATLAB_files = input 
-
+        return
+    
     def WriteMatlabFiles(self):
         """
         Save a copy of flamelet data as MATLAB TableMaster format.
@@ -1166,7 +1225,8 @@ class FlameletAIConfig(Config):
         :type lookup_vars: list[str]
         """
         self.__lookup_variables = lookup_vars
-
+        return 
+    
     def GetLookUpVariables(self):
         """
         Get the variable names of the passive look-up variables in the manifold.
@@ -1199,17 +1259,20 @@ class FlameletAIConfig(Config):
         return self.__Np_per_flamelet
     
     def ComputeProgressVariable(self, variables:list[str], flamelet_data:np.ndarray, Y_flamelet:np.ndarray=None):
-        """
-        Compute the progress variable based on the corresponding progress variable definition for an array of provided flamelet data.
+        """Compute the progress variable based on the corresponding progress variable definition for an array of provided flamelet data or species mass fractions.
 
         :param variables: list of variable names in the flamelet data.
         :type variables: list[str]
         :param flamelet_data: flamelet data array.
         :type flamelet_data: np.ndarray
+        :param Y_flamelet: species mass fraction array, defaults to None
+        :type Y_flamelet: np.ndarray, optional
+        :raise: Exception: if number of columns in Y_flamelet do not match the number of species in the reaction mechanism.
         :raise: Exception: if number of variables does not match number of columns in flamelet data.
         :return: Progress variable array.
         :rtype: np.array
         """
+
         if Y_flamelet is not None:
             if np.shape(Y_flamelet)[0] != self.gas.n_species:
                 raise Exception("Number of species does not match mass fraction array content.")
@@ -1235,6 +1298,8 @@ class FlameletAIConfig(Config):
         :type variables: list[str]
         :param flamelet_data: flamelet data array.
         :type flamelet_data: np.ndarray
+        :param net_production_rate_flamelet: species net production rates (kg m^{-3} s^{-1}), defaults to None
+        :type net_production_rate_flamelet: np.ndarray
         :raise: Exception: if number of variables does not match number of columns in flamelet data.
         :return: Progress variable source terms.
         :rtype: np.array
@@ -1260,9 +1325,22 @@ class FlameletAIConfig(Config):
             return ppv 
     
     def EnablePreferentialDiffusion(self, use_PD:bool=DefaultSettings_FGM.preferential_diffusion):
+        """Include preferential diffusion scalars in flamelet data manifold.
+
+        :param use_PD: include diffusion scalars, defaults to DefaultSettings_FGM.preferential_diffusion
+        :type use_PD: bool, optional
+        """
+
         self.__preferential_diffusion = use_PD 
-        
+
+        return
+    
     def PreferentialDiffusion(self):
+        """Inclusion of preferential diffusion in flamelet data manifold.
+
+        :return: whether preferential diffusion scalars are included (True) or not (False).
+        :rtype: bool
+        """
         return self.__preferential_diffusion
     
     def ComputeBetaTerms(self, variables:list[str], flamelet_data:np.ndarray):
@@ -1320,10 +1398,10 @@ class FlameletAIConfig(Config):
         :raise: Warning: If temperature or equivalence ratio exceed flamelet data range.
         :return: pv_unb: reactants progress variable value.
         :rtype: pv_unb: float
-        :return enth_unb: reactants total enthalpy value.
-        :rtype enth_unb: float
-        :return mixfrac_unb: reactants mixture fraction value.
-        :rtype mixfrac_unb: float
+        :return: enth_unb: reactants total enthalpy value.
+        :rtype: enth_unb: float
+        :return: mixfrac_unb: reactants mixture fraction value.
+        :rtype: mixfrac_unb: float
         """
 
         # if equivalence_ratio < 0:
@@ -1439,7 +1517,8 @@ class FlameletAIConfig(Config):
             raise Exception("Refinement threshold should be between zero and one.")
         self.__Table_ref_radius = refinement_radius 
         self.__Table_curv_threshold = refinement_threshold 
-
+        return 
+    
     def GetTableRefinement(self):
         """Returns the table refinement radius and refinement threshold values.
 
@@ -1458,7 +1537,8 @@ class FlameletAIConfig(Config):
         if level_count < 2:
             raise Exception("Number of table levels should be higher than 2.")
         self.__Table_level_count = level_count 
-
+        return 
+    
     def GetTableLevelCount(self):
         """Returns the number of levels in the table.
 
@@ -1483,7 +1563,8 @@ class FlameletAIConfig(Config):
             raise Exception("Upper mixture fraction value should be higher than lower mixture fraction value.")
         self.__Table_mixfrac_lower = mixfrac_lower
         self.__Table_mixfrac_upper = mixfrac_upper
-
+        return 
+    
     def GetTableMixtureFractionLimits(self):
         """Returns the lower and upper mixture fraction limits of the table between which table levels are generated.
 
@@ -1507,7 +1588,8 @@ class FlameletAIConfig(Config):
         self.__MLP_output_groups.append([])
         for var in variable_names_in:
             self.__MLP_output_groups[-1].append(var)
-
+        return 
+    
     def DefineOutputGroup(self, i_group:int, variable_names_in:list[str]):
         """Re-define the variables in a specific MLP output group.
 
@@ -1526,13 +1608,15 @@ class FlameletAIConfig(Config):
         self.__MLP_output_groups[i_group] = []
         for var in variable_names_in:
             self.__MLP_output_groups[i_group].append(var)
-
+        return 
+    
     def RemoveOutputGroup(self, i_group:int):
         if i_group > len(self.__MLP_output_groups):
             raise Exception("Group not present in MLP outputs.")
         print("Removing output group %i: %s" % (i_group, ",".join(s for s in self.__MLP_output_groups[i_group-1])))
         self.__MLP_output_groups.remove(self.__MLP_output_groups[i_group-1])
-
+        return
+    
     def ClearOutputGroups(self):
         self.__MLP_output_groups = []
         return 
@@ -1542,6 +1626,7 @@ class FlameletAIConfig(Config):
         """
         for i_group, group in enumerate(self.__MLP_output_groups):
             print("Group %i: " % (i_group+1) +",".join(var for var in group) )
+        return 
     
     def GetNMLPOutputGroups(self):
         """Get the number of MLP output groups.
