@@ -75,6 +75,8 @@ class MLPOptimizer:
     __NN_max:int = 100 
     __architecture:list[int]=[30]
 
+    __activation_function:str = "exponential"
+
     # Optimization history.
     __population_history:list = []
     __fitness_history:list = []
@@ -184,6 +186,10 @@ class MLPOptimizer:
         self.__batch_expo = batch_expo 
         
         return 
+    
+    def SetActivationFunction(self, activation_function:str="exponential"):
+        self.__activation_function = activation_function
+        return
     
     def SetBounds_Batch_Expo(self, batch_expo_min:int=3, batch_expo_max:int=7):
         """Set minimum and maximum values for the training batch exponent (base 2) during optimization.
@@ -476,7 +482,7 @@ class MLPOptimizer:
         Evaluator.SetAlphaExpo(self.__alpha_expo)
         Evaluator.SetLRDecay(self.__lr_decay)
         Evaluator.SetHiddenLayers(self.__architecture)
-
+        Evaluator.SetActivationFunction(self.__activation_function)
         # Set hyper-parameter according to gene.
         idx_x = 0
         if self.__optimize_batch:
