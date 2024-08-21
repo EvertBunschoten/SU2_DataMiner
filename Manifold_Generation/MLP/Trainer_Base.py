@@ -752,7 +752,7 @@ class CustomTrainer(MLPTrainer):
     _train_name:str = ""
     _figformat:str="pdf"
     __keep_training:bool = True 
-
+    __stagnation_iter:int = 0
     def __init__(self):
         MLPTrainer.__init__(self)
 
