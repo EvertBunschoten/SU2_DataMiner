@@ -79,6 +79,7 @@ class DataGenerator_CoolProp(DataGenerator_Base):
     __rho_fluid:np.ndarray[float] = None 
     __c2_fluid:np.ndarray[float] = None 
     __success_locations:np.ndarray[bool] = None 
+    __mixture:bool = False 
 
     def __init__(self, Config_in:EntropicAIConfig=None):
         DataGenerator_Base.__init__(self, Config_in=Config_in)
@@ -91,13 +92,18 @@ class DataGenerator_CoolProp(DataGenerator_Base):
             self.__use_PT = self._Config.GetPTGrid()
             if len(self._Config.GetFluidNames()) > 1:
                 fluid_names = self._Config.GetFluidNames()
-                CAS_1 = CP.get_fluid_param_string(fluid_names[0], "CAS")
-                CAS_2 = CP.get_fluid_param_string(fluid_names[1], "CAS")
-                CP.apply_simple_mixing_rule(CAS_1, CAS_2,'linear')
-            self.__fluid = CP.AbstractState("HEOS", self._Config.GetFluid())
+                #CAS_1 = CP.get_fluid_param_string(fluid_names[0], "CAS")
+                #CAS_2 = CP.get_fluid_param_string(fluid_names[1], "CAS")
+                #CP.apply_simple_mixing_rule(CAS_1, CAS_2,'linear')
+                self.__mixture = True 
+
+            self.__fluid = CP.AbstractState(self._Config.GetEquationOfState(), self._Config.GetFluid())
+            
+
             if len(self._Config.GetFluidNames()) > 1:
                 mole_fractions = self._Config.GetMoleFractions()
                 self.__fluid.set_mole_fractions(mole_fractions)
+            
             self.__use_PT = self._Config.GetPTGrid()
             P_bounds = self._Config.GetPressureBounds()
             T_bounds = self._Config.GetTemperatureBounds()
@@ -131,7 +137,6 @@ class DataGenerator_CoolProp(DataGenerator_Base):
         
         X_range = (X_min - X_max) * np.cos(np.linspace(0, 0.5*np.pi, self.__Np_X)) + X_max
         Y_range = np.linspace(Y_min, Y_max, self.__Np_Y)
-
         self.__X_grid, self.__Y_grid = np.meshgrid(X_range, Y_range)
         return 
     
@@ -165,8 +170,8 @@ class DataGenerator_CoolProp(DataGenerator_Base):
         if (T_lower >= T_upper):
             raise Exception("Lower temperature should be lower than upper temperature.")
         else:
-            self.__T_lower = T_lower
-            self.__T_upper = T_upper
+            self.__T_min = T_lower
+            self.__T_max = T_upper
         return
     
     def GetTemperatureBounds(self):
@@ -175,7 +180,7 @@ class DataGenerator_CoolProp(DataGenerator_Base):
         :return: list with minimum and maximum temperature.
         :rtype: list[float]
         """
-        return [self.__T_lower, self.__T_upper]
+        return [self.__T_min, self.__T_max]
     
     def SetNpDensity(self, Np_density:int=DefaultSettings_NICFD.Np_p):
         self.SetNpPressure(Np_P=Np_density)
@@ -259,8 +264,8 @@ class DataGenerator_CoolProp(DataGenerator_Base):
         if (P_lower >= P_upper):
             raise Exception("Lower temperature should be lower than upper temperature.")
         else:
-            self.__P_lower = P_lower
-            self.__P_upper = P_upper
+            self.__P_min = P_lower
+            self.__P_max = P_upper
         return 
     
     def GetPressureBounds(self):
@@ -269,7 +274,7 @@ class DataGenerator_CoolProp(DataGenerator_Base):
         :return: list with minimum and maximum fluid pressure.
         :rtype: list[float]
         """
-        return [self.__P_lower, self.__P_upper]
+        return [self.__P_min, self.__P_max]
     
 
     def ComputeData(self):
@@ -300,15 +305,18 @@ class DataGenerator_CoolProp(DataGenerator_Base):
                         self.__fluid.update(CP.PT_INPUTS, self.__X_grid[i,j], self.__Y_grid[i,j])
                     else:
                         self.__fluid.update(CP.DmassUmass_INPUTS, self.__X_grid[j,i], self.__Y_grid[j,i])
-
+                        p = self.__fluid.p()
+                        T = self.__fluid.T()
+                        self.__fluid.update(CP.PT_INPUTS, p, T)
                     # Check if fluid phase is not vapor or liquid
                     if (self.__fluid.phase() != 0) and (self.__fluid.phase() != 3) and (self.__fluid.phase() != 6):
                         self.__s_fluid[i,j] = self.__fluid.smass()
-                        self.__dsde_rho_fluid[i,j] = self.__fluid.first_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass)
-                        self.__dsdrho_e_fluid[i,j] = self.__fluid.first_partial_deriv(CP.iSmass, CP.iDmass, CP.iUmass)
-                        self.__d2sde2_fluid[i,j] = self.__fluid.second_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass, CP.iUmass, CP.iDmass)
-                        self.__d2sdedrho_fluid[i,j] = self.__fluid.second_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass, CP.iDmass, CP.iUmass)
-                        self.__d2sdrho2_fluid[i,j] = self.__fluid.second_partial_deriv(CP.iSmass, CP.iDmass, CP.iUmass, CP.iDmass, CP.iUmass)
+                        if not self.__mixture:
+                            self.__dsde_rho_fluid[i,j] = self.__fluid.first_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass)
+                            self.__dsdrho_e_fluid[i,j] = self.__fluid.first_partial_deriv(CP.iSmass, CP.iDmass, CP.iUmass)
+                            self.__d2sde2_fluid[i,j] = self.__fluid.second_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass, CP.iUmass, CP.iDmass)
+                            self.__d2sdedrho_fluid[i,j] = self.__fluid.second_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass, CP.iDmass, CP.iUmass)
+                            self.__d2sdrho2_fluid[i,j] = self.__fluid.second_partial_deriv(CP.iSmass, CP.iDmass, CP.iUmass, CP.iDmass, CP.iUmass)
                         self.__P_fluid[i,j] = self.__fluid.p()
                         self.__T_fluid[i,j] = self.__fluid.T()
                         self.__c2_fluid[i,j] = self.__fluid.speed_sound()**2
@@ -317,11 +325,12 @@ class DataGenerator_CoolProp(DataGenerator_Base):
                     else:
                         self.__success_locations[i,j] = False
                         self.__s_fluid[i, j] = None
-                        self.__dsde_rho_fluid[i,j] = None 
-                        self.__dsdrho_e_fluid[i,j] = None 
-                        self.__d2sde2_fluid[i,j] = None 
-                        self.__d2sdrho2_fluid[i,j] = None 
-                        self.__d2sdedrho_fluid[i,j] = None 
+                        if not self.__mixture:
+                            self.__dsde_rho_fluid[i,j] = None 
+                            self.__dsdrho_e_fluid[i,j] = None 
+                            self.__d2sde2_fluid[i,j] = None 
+                            self.__d2sdrho2_fluid[i,j] = None 
+                            self.__d2sdedrho_fluid[i,j] = None 
                         self.__c2_fluid[i,j] = None 
                         self.__P_fluid[i,j] = None 
                         self.__T_fluid[i,j] = None 
@@ -330,11 +339,12 @@ class DataGenerator_CoolProp(DataGenerator_Base):
                 except:
                     self.__success_locations[i,j] = False 
                     self.__s_fluid[i, j] = None
-                    self.__dsde_rho_fluid[i,j] = None 
-                    self.__dsdrho_e_fluid[i,j] = None 
-                    self.__d2sde2_fluid[i,j] = None 
-                    self.__d2sdrho2_fluid[i,j] = None 
-                    self.__d2sdedrho_fluid[i,j] = None 
+                    if not self.__mixture:
+                        self.__dsde_rho_fluid[i,j] = None 
+                        self.__dsdrho_e_fluid[i,j] = None 
+                        self.__d2sde2_fluid[i,j] = None 
+                        self.__d2sdrho2_fluid[i,j] = None 
+                        self.__d2sdedrho_fluid[i,j] = None 
                     self.__c2_fluid[i,j] = None 
                     self.__P_fluid[i,j] = None 
                     self.__T_fluid[i,j] = None 
@@ -389,19 +399,26 @@ class DataGenerator_CoolProp(DataGenerator_Base):
 
         # Append controlling and training variable data.
         controlling_vars = ["Density", "Energy"]
-        entropic_vars = ["s","dsdrho_e","dsde_rho","d2sdrho2","d2sde2","d2sdedrho"]
+        if self.__mixture:
+            entropic_vars=["s"]
+        else:
+            entropic_vars = ["s","dsdrho_e","dsde_rho","d2sdrho2","d2sde2","d2sdedrho"]
         TD_vars = ["T","p","c2"]
 
+       
         all_vars = controlling_vars + entropic_vars + TD_vars
 
         CV_data = np.vstack((self.__rho_fluid.flatten(), \
                              self.__e_fluid.flatten())).T 
-        entropic_data = np.vstack((self.__s_fluid.flatten(),\
-                                   self.__dsdrho_e_fluid.flatten(),\
-                                   self.__dsde_rho_fluid.flatten(),\
-                                   self.__d2sdrho2_fluid.flatten(),\
-                                   self.__d2sde2_fluid.flatten(),\
-                                   self.__d2sdedrho_fluid.flatten())).T 
+        if self.__mixture:
+            entropic_data = self.__s_fluid.flatten()[:,np.newaxis]
+        else:
+            entropic_data = np.vstack((self.__s_fluid.flatten(),\
+                                    self.__dsdrho_e_fluid.flatten(),\
+                                    self.__dsde_rho_fluid.flatten(),\
+                                    self.__d2sdrho2_fluid.flatten(),\
+                                    self.__d2sde2_fluid.flatten(),\
+                                    self.__d2sdedrho_fluid.flatten())).T 
         TD_data = np.vstack((self.__T_fluid.flatten(),\
                              self.__P_fluid.flatten(),\
                              self.__c2_fluid.flatten())).T

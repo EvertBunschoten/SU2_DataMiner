@@ -33,10 +33,11 @@ import matplotlib.pyplot as plt
 from scipy.optimize import minimize, Bounds, differential_evolution
 from multiprocessing import current_process
 
-from Common.Properties import DefaultProperties
+from Common.Properties import DefaultProperties, DefaultSettings_NICFD
 from Common.Config_base import Config 
 from Manifold_Generation.MLP.Trainer_Base import EvaluateArchitecture
 from Manifold_Generation.MLP.Trainers_NICFD.Trainers import EvaluateArchitecture_NICFD
+from Common.Properties import ActivationFunctionOptions
 
 class MLPOptimizer:
     """Class for hyper-parameter optimization of entropic fluid model multi-layer perceptrons.
@@ -50,7 +51,7 @@ class MLPOptimizer:
 
     # Mini-batch exponent (base 2) for training.
     __optimize_batch:bool = True 
-    __batch_expo:int = DefaultProperties.batch_size_exponent
+    __batch_expo:int = DefaultSettings_NICFD.batch_size_exponent
     __batch_expo_min:int=3
     __batch_expo_max:int=7
     
@@ -58,17 +59,19 @@ class MLPOptimizer:
     __optimize_LR:bool = True 
 
     # Initial learning rate exponent (base 10).
-    __alpha_expo:float = DefaultProperties.init_learning_rate_expo
+    __alpha_expo:float = DefaultSettings_NICFD.init_learning_rate_expo
     __alpha_expo_min:float = -3.0
     __alpha_expo_max:float = -1.0
 
     # Learning rate decay parameter for exponential learning rate decay schedule.
-    __lr_decay:float=DefaultProperties.learning_rate_decay
+    __lr_decay:float=DefaultSettings_NICFD.learning_rate_decay
     __lr_decay_min:float = 0.9
     __lr_decay_max:float = 1.0 
 
     # Optimize hidden layer architecture.
     __optimize_NN:bool = True
+
+    __optimize_phi:bool = True 
 
     # Number of perceptrons applied to the hidden layer of the network.
     __NN_min:int = 10
@@ -76,16 +79,18 @@ class MLPOptimizer:
     __architecture:list[int]=[30]
 
     __activation_function:str = "exponential"
+    __activation_function_options:list[str] = [a for a in ActivationFunctionOptions.keys()]
 
     # Optimization history.
     __population_history:list = []
     __fitness_history:list = []
     __generation_number:int = 0
 
+    __x_optim:np.ndarray = None 
+
     def __init__(self, Config_in:Config=None, load_file:str=None):
         """Class constructor
         """
-
         # Store configuration
         self._Config = Config_in 
     
@@ -119,7 +124,16 @@ class MLPOptimizer:
         self.__optimize_LR = optimize_LR
         return 
     
-    def SetAlpha_Expo(self, val_alpha_expo:float=-2.8):
+    def Optimize_ActivationFunction(self, optimize_phi:bool=True):
+        """Consider the hidden layer activation function in the optimization.
+
+        :param optimize_phi: consider the hidden layer activation function (True, default), or not (False)
+        :type optimize_phi: bool, optional
+        """
+        self.__optimize_phi = optimize_phi
+        return
+    
+    def SetAlpha_Expo(self, val_alpha_expo:float=DefaultSettings_NICFD.init_learning_rate_expo):
         """Set initial learning rate exponent (base 10).
 
         :param val_alpha_expo: _description_, defaults to -2.8
@@ -133,7 +147,7 @@ class MLPOptimizer:
 
         return 
     
-    def SetLR_Decay(self, val_lr_decay:float=0.996):
+    def SetLR_Decay(self, val_lr_decay:float=DefaultSettings_NICFD.learning_rate_decay):
         """Set the learning rate decay parameter value.
 
         :param val_lr_decay: learning rate decay parameter, defaults to 0.996
@@ -173,7 +187,7 @@ class MLPOptimizer:
         self.__optimize_batch = optimize_batch 
         return 
     
-    def SetBatch_Expo(self, batch_expo:int=6):
+    def SetBatch_Expo(self, batch_expo:int=DefaultSettings_NICFD.batch_size_exponent):
         """Set training batch exponent value (base 2).
 
         :param batch_expo: training batch exponent value, defaults to 6
@@ -187,7 +201,13 @@ class MLPOptimizer:
         
         return 
     
-    def SetActivationFunction(self, activation_function:str="exponential"):
+    def SetActivationFunction(self, activation_function:str=DefaultSettings_NICFD.activation_function):
+        """Set the hiden layer activation function name.
+
+        :param activation_function: hidden layer activation function name, defaults to DefaultSettings_NICFD.activation_function
+        :type activation_function: str, optional
+        """
+
         self.__activation_function = activation_function
         return
     
@@ -220,7 +240,7 @@ class MLPOptimizer:
         self.__optimize_NN = optimize_architecture 
         return 
     
-    def SetArchitecture(self, architecture:list[int]=[40]):
+    def SetArchitecture(self, architecture:list[int]=DefaultSettings_NICFD.hidden_layer_architecture):
         """Set MLP hidden layer architecture.
 
         :param architecture: list with perceptron count per hidden layer, defaults to [40]
@@ -280,8 +300,13 @@ class MLPOptimizer:
             gene_trainparams.append(int)
             lowerbound.append(self.__NN_min)
             upperbound.append(self.__NN_max)
+        if self.__optimize_phi:
+            gene_trainparams.append(int)
+            lowerbound.append(0)
+            upperbound.append(len(self.__activation_function_options))
 
         return gene_trainparams, lowerbound, upperbound 
+    
     def __prepareBounds_DE(self):
         lowerbound = []
         upperbound = []
@@ -301,7 +326,36 @@ class MLPOptimizer:
             integrality.append(True)
             lowerbound.append(int(self.__NN_min))
             upperbound.append(int(self.__NN_max))
+        if self.__optimize_phi:
+            integrality.append(True)
+            lowerbound.append(0)
+            upperbound.append(len(self.__activation_function_options))
+
         return np.array(integrality), np.array(lowerbound), np.array(upperbound)
+    
+    def __setOptimizer(self):
+        run_DE = False
+        if self.__optimize_batch or self.__optimize_phi or self.__optimize_NN:
+            run_DE = True 
+
+        print("Initializing hyper-parameter optimization for:")
+        if self.__optimize_batch:
+            print("- mini-batch size exponent")
+        if self.__optimize_LR:
+            print("- learning rate parameters")
+        if self.__optimize_NN:
+            print("- hidden layer neuron count")
+        if self.__optimize_phi:
+            print("- hidden layer activation function")
+
+        if run_DE:
+            print("Initializing differential evolution algorithm")
+            self.__setOptimizer_DE()
+        else:
+            print("Initializing simplex optimizer")
+            self.__setSimplexOptimizer()
+
+        return
     
     def __setOptimizer_DE(self):
         integrality, lowerbound, upperbound = self.__prepareBounds_DE()
@@ -313,7 +367,7 @@ class MLPOptimizer:
         else:
             update_strategy = "immediate"
         self.__generation_number = 0
-        result = differential_evolution(func = self.DE_fitnessFunction,\
+        result = differential_evolution(func = self.fitnessFunction,\
                                         callback=self.saveGenerationInfo_DE,\
                                         maxiter=10*N_genes,\
                                         popsize=10,\
@@ -324,38 +378,11 @@ class MLPOptimizer:
                                         strategy='best1exp',\
                                         seed=1,\
                                         tol=1e-6)
+        self.__x_optim = result.x 
+
         return 
+
     
-    def __setOptimizer(self):
-        """Prepare PyGaD optimization routine.
-        """
-
-        # Set gene types and bounds
-        gene_trainparams, lowerbound, upperbound = self.__prepareBounds()
-        N_genes = len(gene_trainparams)
-        gene_space = []
-        for lb, ub in zip(lowerbound, upperbound):
-            gene_space.append({'low':lb,'high':ub})
-
-
-        # Initiate PyGaD instance with 
-        self.__optimizer = pygad.GA(num_generations=10*N_genes,\
-                     fitness_func=self.fitnessFunction,\
-                     gene_type=gene_trainparams,\
-                     num_genes=N_genes,\
-                     init_range_low=lowerbound,\
-                     init_range_high=upperbound,\
-                     gene_space=gene_space,\
-                     sol_per_pop=10*N_genes,\
-                     num_parents_mating=6,\
-                     parallel_processing=["process",self.__n_workers],\
-                     random_seed=1,\
-                     on_generation=self.saveGenerationInfo)
-        
-        return 
-
-    def inv_fitnessFunction(self, x):
-        return -self.fitnessFunction(ga_instance=None, x=x, x_idx=0)
     
     def __setSimplexOptimizer(self):
         gene_trainparams, lowerbound, upperbound = self.__prepareBounds()
@@ -363,58 +390,92 @@ class MLPOptimizer:
         x0 = np.zeros(len(lowerbound))
         x0[0] = self.__alpha_expo
         x0[1] = self.__lr_decay
-        print(x0)
         bounds = Bounds(lb=lowerbound, ub=upperbound)
-        print(bounds)
-        options = {"maxiter":1000,\
+        options = {"maxiter":10,\
                    "disp":True}
-        res = minimize(self.inv_fitnessFunction, x0=x0, method='Nelder-Mead',bounds=bounds,options=options)
+        res = minimize(self.inv_fitnessFunction, x0=x0, method='Nelder-Mead',bounds=bounds,options=options, callback=self.saveGenerationInfo_DE)
 
-        x_optim = res.x 
+        self.__x_optim = res.x 
 
         return 
+    
+    def __PostProcessing(self):
+        x = self.__x_optim
+
+        idx_x = 0
+        print("Optimized hyper-parameters:")
+        if self.__optimize_batch:
+            batch_expo = int(x[idx_x])
+            self._Config.SetBatchExpo(batch_expo)
+            idx_x += 1 
+            print("- mini-batch exponent: %i" % batch_expo)
+        if self.__optimize_LR:
+            alpha_expo = x[idx_x]
+            idx_x += 1 
+            print("- initial learning rate exponent: %.5e" % (alpha_expo))
+            self._Config.SetAlphaExpo(alpha_expo)
+            lr_decay = x[idx_x]
+            print("- learning rate decay parameter: %.5e" % lr_decay)
+            self._Config.SetLRDecay(lr_decay)
+            idx_x += 1 
+        if self.__optimize_NN:
+            architecture = [int(x[idx_x])]
+            idx_x += 1 
+            print("- hidden layer architecture: "+ " ".join(("%i" % n) for n in architecture))
+            self._Config.SetHiddenLayerArchitecture(architecture)
+        if self.__optimize_phi:
+            phi = self.__activation_function_options[int(x[idx_x])]
+            idx_x += 1
+            print("- hidden layer activation function: %s" % phi)
+            self._Config.SetActivationFunction(phi)
+        
+        self._Config.SaveConfig()
+        return
     
     def optimizeHP(self):
         """Initate hyper-parameter optimization routine.
 
         :raises Exception: if neither of the available sets of hyper-parameters are considered for optimization.
         """
-        if not any((self.__optimize_batch, self.__optimize_LR, self.__optimize_NN)):
+        if not any((self.__optimize_batch, self.__optimize_LR, self.__optimize_NN, self.__optimize_phi)):
             raise Exception("At least one of the hyper-parameter options should be considered for optimization.")
         
         # Prepare optimization history output file.
         history_extension = ""
+        n_params = 0
         if self.__optimize_batch:
             history_extension += "B"
+            n_params += 1
         if self.__optimize_LR:
             history_extension += "LR"
+            n_params += 1
         if self.__optimize_NN:
             history_extension += "A"
+            n_params += 1
+        if self.__optimize_phi:
+            history_extension += "Phi"
+            n_params += 1
+
         self.opt_history_filepath = self._Config.GetOutputDir() + "/history_entropy_"+history_extension+".csv"
         with open(self.opt_history_filepath, "w+") as fid:
             if self.__optimize_NN:
-                fid.write("Generation nr,solution,fitness,cost\n")
+                fid.write("Iteration,mini-batch exp, activation function, alpha expo, lr decay, architecture,fitness,cost\n")
             else:
-                fid.write("Generation nr,solution,fitness\n")
+                fid.write("Iteration,mini-batch exp, activation function, alpha expo, lr decay, architecture,solution,fitness\n")
         
         # Prepare optimization output directory.
         self.save_dir = self._Config.GetOutputDir()+"/Architectures_Optim"+history_extension
         if not os.path.isdir(self.save_dir):
             os.mkdir(self.save_dir)
         
-        # Prepare bounds and set optimizer.
-        self.__setOptimizer_DE()
-        # if self.__optimize_NN or self.__optimize_batch:
-        #     #self.__setOptimizer()
-            
-        #     # Initiate HP optimization.
-        #     self.__optimizer.run()
-        # else:
-        #     self.__setSimplexOptimizer()
+        # Prepare bounds and commence hyper-parameter optimization.
+        self.__setOptimizer()
 
+        # Extract optimized hyper-parameters and update configuration.
+        self.__PostProcessing()
         return 
     
-    def saveGenerationInfo_DE(self, x, convergence):
+    def saveGenerationInfo_DE(self, x, convergence=False):
         #x = ga_result.x 
         f_best = convergence 
         idx_x = 0
@@ -422,6 +483,7 @@ class MLPOptimizer:
         alpha_expo = self.__alpha_expo
         lr_decay = self.__lr_decay
         architecture = self.__architecture
+        phi = self.__activation_function
         if self.__optimize_batch:
             batch_expo = int(x[idx_x])
             idx_x += 1 
@@ -433,14 +495,16 @@ class MLPOptimizer:
         if self.__optimize_NN:
             architecture = [int(x[idx_x])]
             idx_x += 1 
-        
-        line_to_write = ("%i,%i,%+.5e,%+.5e," % (self.__generation_number, batch_expo, alpha_expo, lr_decay))
+        if self.__optimize_phi:
+            phi = self.__activation_function_options[x[idx_x]]
+            idx_x += 1
+
+        line_to_write = ("%i,%i,%s,%+.5e,%+.5e," % (self.__generation_number, batch_expo, phi, alpha_expo, lr_decay))
         line_to_write += ",".join(("%i" % n) for n in architecture)
         line_to_write += ",%+.6e" % f_best
         line_to_write += "\n"
         with open(self.opt_history_filepath, 'a+') as fid:
             fid.write(line_to_write)
-        print("HELLO")
         self.__generation_number += 1
         return
     
@@ -500,10 +564,14 @@ class MLPOptimizer:
             architecture = [int(x[idx_x])]
             Evaluator.SetHiddenLayers(architecture)
             idx_x += 1 
+        if self.__optimize_phi:
+            phi = self.__activation_function_options[int(x[idx_x])]
+            Evaluator.SetActivationFunction(phi)
+            idx_x += 1
 
         return
 
-    def DE_fitnessFunction(self, x:np.ndarray):
+    def fitnessFunction(self, x:np.ndarray):
         if self.__n_workers > 1:
             p = current_process()
             worker_idx = p._identity[0]
@@ -538,39 +606,42 @@ class MLPOptimizer:
 
         return fitness_test_score
 
-    def fitnessFunction(self, ga_instance:pygad.GA, x:np.ndarray, x_idx:int):
-        """ Fitness function evaluated during GA routine.
-        """
+    def inv_fitnessFunction(self, x):
+        return -self.fitnessFunction(x=x)
+    
+    # def fitnessFunction(self, ga_instance:pygad.GA, x:np.ndarray, x_idx:int):
+    #     """ Fitness function evaluated during GA routine.
+    #     """
 
-        # Initate MLP evaluation class.
-        Evaluator:EvaluateArchitecture = EvaluateArchitecture_NICFD(self._Config)
+    #     # Initate MLP evaluation class.
+    #     Evaluator:EvaluateArchitecture = EvaluateArchitecture_NICFD(self._Config)
 
-        # Set CPU index.
-        Evaluator.SetTrainHardware("CPU", x_idx)
+    #     # Set CPU index.
+    #     Evaluator.SetTrainHardware("CPU", x_idx)
 
-        Evaluator.SetVerbose(0)
+    #     Evaluator.SetVerbose(0)
 
-        # Translate gene and update hyper-parameters.
-        self.__translateGene(x, Evaluator=Evaluator)
+    #     # Translate gene and update hyper-parameters.
+    #     self.__translateGene(x, Evaluator=Evaluator)
 
-        # Set output directory for MLP training callbacks.
-        Evaluator.SetSaveDir(self.save_dir)
+    #     # Set output directory for MLP training callbacks.
+    #     Evaluator.SetSaveDir(self.save_dir)
 
-        # Train for 1000 epochs direct and physics-informed.
-        Evaluator.SetNEpochs(1000)
-        Evaluator.CommenceTraining()
+    #     # Train for 1000 epochs direct and physics-informed.
+    #     Evaluator.SetNEpochs(1000)
+    #     Evaluator.CommenceTraining()
 
-        # Extract test set evaluation score.
-        Evaluator.TrainPostprocessing()
-        test_score = Evaluator.GetTestScore() 
+    #     # Extract test set evaluation score.
+    #     Evaluator.TrainPostprocessing()
+    #     test_score = Evaluator.GetTestScore() 
 
-        # Scale test set loss to fitness.
-        fitness_test_score = -np.log10(test_score)
+    #     # Scale test set loss to fitness.
+    #     fitness_test_score = -np.log10(test_score)
 
-        # Free up memory
-        del Evaluator 
+    #     # Free up memory
+    #     del Evaluator 
 
-        return fitness_test_score
+    #     return fitness_test_score
     
     def SaveOptimizer(self, file_name:str):
         """Save optimizer instance.
@@ -590,6 +661,8 @@ class PlotHPOResults:
     __optimize_learningrate:bool = True 
     __optimize_batch:bool = True 
     __optimize_architecture:bool = True 
+    __optimize_phi:bool = True 
+
     __completed_models:list[str] = []
     __C2_test_set_scores:list[float] = []
     __P_test_set_scores:list[float] = []
@@ -598,11 +671,13 @@ class PlotHPOResults:
     __lr_decay:list[float] = []
     __alpha_expo:list[float] = []
     __batch_expo:list[int] = [] 
+    __phi_idx:list[int] = []
 
     __completed_workers:list[int] = []
     __completed_models:list[int] = [] 
 
     def __init__(self, Config_in:Config):
+        
         self.__Config = Config_in 
         return 
     
@@ -634,6 +709,10 @@ class PlotHPOResults:
         self.__optimize_architecture = optimize_architecture 
         return 
     
+    def Optimize_Activation_HP(self, optimize_activation_function:bool=True):
+        self.__optimize_phi = optimize_activation_function
+        return 
+    
     def ReadArchitectures(self):
         optim_header = "Architectures_Optim"
         if self.__optimize_batch:
@@ -642,6 +721,9 @@ class PlotHPOResults:
             optim_header += "LR"
         if self.__optimize_architecture:
             optim_header += "A"
+        if self.__optimize_phi:
+            optim_header += "Phi"
+
         optim_directory = self.__Config.GetOutputDir()+"/"+optim_header
 
         population_indices = os.listdir(optim_directory)
@@ -670,11 +752,13 @@ class PlotHPOResults:
                                 alpha_expo = float(lines[5].strip().split(":")[-1])
                                 lr_decay = float(lines[6].strip().split(":")[-1])
                                 batch_expo = int(lines[7].strip().split(":")[-1])
+                                phi_idx = int(lines[9].strip().split(":")[-1])
                                 self.__alpha_expo.append(alpha_expo)
                                 self.__lr_decay.append(lr_decay)
                                 self.__batch_expo.append(batch_expo)
                                 self.__hidden_layer_neurons.append(nN)
-                        
+                                self.__phi_idx.append(phi_idx)
+
                             self.__completed_models.append(model_idx)
                             self.__completed_workers.append(worker_idx)
 
@@ -804,3 +888,39 @@ class PlotHPOResults:
             
         plt.show()
         return 
+    
+    def PlotLossPhi(self):
+        fig = plt.figure(figsize=[27, 9])
+        ax0 = fig.add_subplot(1,3,1)
+        ax0.plot(self.__T_test_set_scores, self.__phi_idx, 'ro')
+        ax0.grid()
+        ax0.set_xscale('log')
+        ax0.set_xlabel('Temperature test set evaluation loss',fontsize=20)
+        ax0.set_yticks([i for i in range(len(ActivationFunctionOptions.keys()))])
+        ax0.set_yticklabels([s for s in ActivationFunctionOptions.keys()])
+
+        ax0.set_ylabel('Number of hidden layer neurons', fontsize=20)
+        ax0.tick_params(which='both',labelsize=18)
+
+        ax1 = fig.add_subplot(1,3,2)
+        ax1.plot(self.__P_test_set_scores, self.__phi_idx, 'bo')
+        ax1.grid()
+        ax1.set_xscale('log')
+        ax1.set_yticks([i for i in range(len(ActivationFunctionOptions.keys()))])
+        ax1.set_xlabel('Pressure test set evaluation loss',fontsize=20)
+        ax1.tick_params(which='both',labelsize=18)
+
+        ax2 = fig.add_subplot(1,3,3)
+        ax2.plot(self.__C2_test_set_scores, self.__phi_idx, 'mo')
+        ax2.grid()
+        ax2.set_xscale('log')
+        ax2.set_xlabel('Speed of sound test set evaluation loss',fontsize=20)
+        ax2.set_yticks([i for i in range(len(ActivationFunctionOptions.keys()))])
+        ax2.tick_params(which='both',labelsize=18)
+
+        for nn, sT, sP, sC2, w, m in zip(self.__phi_idx, self.__T_test_set_scores, self.__P_test_set_scores, self.__C2_test_set_scores, self.__completed_workers, self.__completed_models):
+            ax0.text(sT, nn, "W"+str(w)+"M"+str(m),color='r')
+            ax1.text(sP, nn, "W"+str(w)+"M"+str(m),color='b')
+            ax2.text(sC2, nn, "W"+str(w)+"M"+str(m),color='m')
+            
+        plt.show()

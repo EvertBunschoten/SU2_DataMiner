@@ -66,18 +66,20 @@ class Train_Flamelet_Direct(TensorFlowFit):
         :N_plot: number of equivalence ratio's to plot for in each figure.
         """
         PlotFlameletData(self, self.__Config, self._train_name)
+        self.write_SU2_MLP(self._save_dir + "/Model_"+str(self._model_index)+"/MLP_"+self._train_name)
         return super().CustomCallback()
    
+    def add_additional_header_info(self, fid):
+        fid.write("Progress variable definition: " + "+".join(("%+.6e*%s" % (w, s)) for w, s in zip(self.__Config.GetProgressVariableWeights(), self.__Config.GetProgressVariableSpecies())))
+        fid.write("\n\n")
+        return super().add_additional_header_info(fid)
+    
     def SetDecaySteps(self):
         self._decay_steps=0.01157 * self._Np_train
         return 
 
     def GetTrainData(self):
         super().GetTrainData()
-        fig = plt.figure()
-        ax = plt.axes(projection='3d')
-        ax.plot3D(self._X_train_norm[:,0],self._X_train_norm[:,1],self._X_train_norm[:,2],'k.')
-        plt.show()
         return 
 class Train_Source_PINN(CustomTrainer):
     __Config:FlameletAIConfig
@@ -101,6 +103,7 @@ class Train_Source_PINN(CustomTrainer):
         self._controlling_vars = DefaultProperties.controlling_variables
         self._train_vars = self.__Config.GetMLPOutputGroup(group_idx)
         self.callback_every = 10
+        self.__boundary_data_file = self.__Config.GetOutputDir()+"/"+DefaultProperties.boundary_file_header+"_full.csv"
         
         return 
 

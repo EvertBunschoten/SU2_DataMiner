@@ -94,7 +94,12 @@ class PVOptimizer:
         
         for sp in self.__Config.GetFuelDefinition():
             self.SetSpeciesBounds(sp, ub=0.0)
-            
+        for sp in self.__Config.GetOxidizerDefinition():
+            self.SetSpeciesBounds(sp, ub=0.0)    
+
+        if not os.path.isdir(self.__Config.GetOutputDir()+"/PV_Optimization"):
+            os.mkdir(self.__Config.GetOutputDir()+"/PV_Optimization")
+        self.__output_dir = self.__Config.GetOutputDir()+"/PV_Optimization/"
         print("Loading flameletAI configuration with name " + self.__Config.GetConfigName())
         return 
     
@@ -386,15 +391,17 @@ class PVOptimizer:
 
         # Implement user-defined bounds if specified.
         for isp, sp in enumerate(self.__species_bounds_set):
-            if sp not in self.__pv_definition_optim:
-                raise Warning("Specie " + sp + " not in relevant species, custom bounds are ignored.")
-            else:
+            # if sp not in self.__pv_definition_optim:
+            #     raise Warning("Specie " + sp + " not in relevant species, custom bounds are ignored.")
+            # else:
+            try:
                 idx = self.__pv_definition_optim.index(sp)
                 lb[idx] = self.__species_custom_lb[isp]
                 ub[idx] = self.__species_custom_ub[isp]
+            except:
+                pass
 
         bounds = Bounds(lb=lb, ub=ub)
-
         # Generate convergence output file.
         self.__convergence = []
         self.__convergence_history_filename = self.__output_dir + "/" + self.__Config.GetConfigName() + "_PV_convergence_history.csv"

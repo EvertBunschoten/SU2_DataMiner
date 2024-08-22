@@ -55,6 +55,7 @@ class EntropicAIConfig(Config):
     # Fluid definition settings
     __fluid_names:list[str] = ["MM"]
     __fluid_string:str="MM"
+    __EOS_type:str=DefaultSettings_NICFD.EOS_type
     __fluid_mole_fractions:list[float] = []
     __use_PT:bool = DefaultSettings_NICFD.use_PT_grid
 
@@ -71,8 +72,6 @@ class EntropicAIConfig(Config):
     __Rho_upper:float = DefaultSettings_NICFD.Rho_max 
     __Energy_lower:float = DefaultSettings_NICFD.Energy_min
     __Energy_upper:float = DefaultSettings_NICFD.Energy_max
-    
-    # MLP training settings
     
 
     # Table Generation Settings
@@ -91,7 +90,8 @@ class EntropicAIConfig(Config):
         self.SetLRDecay(DefaultSettings_NICFD.learning_rate_decay)
         self.SetBatchExpo(DefaultSettings_NICFD.batch_size_exponent)
         self.SetHiddenLayerArchitecture(DefaultSettings_NICFD.hidden_layer_architecture)
-
+        self.SetActivationFunction(DefaultSettings_NICFD.activation_function)
+        
         """Class constructor
         """
         self._config_name = "EntropicAIConfig" # Configuration name.
@@ -142,17 +142,17 @@ class EntropicAIConfig(Config):
 
         # Check if one or multiple fluids are provided.
         if type(fluid_name) == list:
-            if len(fluid_name) > 2:
-                raise Exception("Only two fluids can be used for mixtures")
+            # if len(fluid_name) > 2:
+            #     raise Exception("Only two fluids can be used for mixtures")
             
             self.__fluid_names = []
             fluid_mixing = []
             for f in fluid_name:
                 self.__fluid_names.append(f)
-                fluid_mixing.append(CoolProp.CoolProp.get_fluid_param_string(f,"CAS"))
-            CoolProp.CoolProp.apply_simple_mixing_rule(fluid_mixing[0], fluid_mixing[1],"linear")
+            #     fluid_mixing.append(CoolProp.CoolProp.get_fluid_param_string(f,"CAS"))
+            # CoolProp.CoolProp.apply_simple_mixing_rule(fluid_mixing[0], fluid_mixing[1],"linear")
             if len(self.__fluid_mole_fractions) == 0:
-                self.__fluid_mole_fractions = [0.5, 0.5]
+                self.__fluid_mole_fractions = np.ones(len(self.__fluid_names))/len(self.__fluid_names)
 
         elif type(fluid_name) == str:
             self.__fluid_names = [fluid_name]
@@ -162,9 +162,16 @@ class EntropicAIConfig(Config):
         try:
             CoolProp.AbstractState("HEOS", fluid_string)
         except:
-            raise Exception("Specified fluid name not found.")
+            raise Exception("Specified fluid name not found or mixture is not supported.")
 
-    def SetFluidMoleFractions(self, mole_fraction_1:float=0.5, mole_fraction_2:float=0.5):
+    def SetEquationOfState(self, EOS_type_in:str=DefaultSettings_NICFD.EOS_type):
+        self.__EOS_type=EOS_type_in 
+        return
+    
+    def GetEquationOfState(self):
+        return self.__EOS_type 
+    
+    def SetFluidMoleFractions(self, mole_fractions:list[float]):
         """Set fluid mole fractions for mixture.
 
         :param mole_fraction_1: _description_, defaults to 0.5
@@ -173,16 +180,17 @@ class EntropicAIConfig(Config):
         :type mole_fraction_2: float, optional
         :raises Exception: if either mole fraction value is negative.
         """
-        if (mole_fraction_1 < 0) or (mole_fraction_2 < 0):
-            raise Exception("Mole fractions should be positive")
+        if len(mole_fractions) != len(self.__fluid_names):
+            raise Exception("Number of mole fractions should match the number of species")
         
+        m_sum = 0
+        for m in mole_fractions:
+            if m < 0:
+                raise Exception("Mole fractions should be positive.")
+            m_sum += m 
+        mole_fractions_norm = np.array(mole_fractions)/m_sum
         # Normalize molar fractions
-        self.__fluid_mole_fractions = []
-        mole_fraction_1_norm = mole_fraction_1 / (mole_fraction_1 + mole_fraction_2)
-        mole_fraction_2_norm = mole_fraction_2 / (mole_fraction_1 + mole_fraction_2)
-        
-        self.__fluid_mole_fractions.append(mole_fraction_1_norm)
-        self.__fluid_mole_fractions.append(mole_fraction_2_norm)
+        self.__fluid_mole_fractions = mole_fractions_norm
         return 
         
     def GetFluid(self):

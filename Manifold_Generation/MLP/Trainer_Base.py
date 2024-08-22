@@ -135,7 +135,7 @@ class MLPTrainer:
     history_val_loss = []
 
     _stagnation_tolerance:float = 1e-11 
-    _stagnation_patience:int = 1000 
+    _stagnation_patience:int = 200
     _verbose:int = 1
 
     callback_every:int = 20 
@@ -491,7 +491,7 @@ class MLPTrainer:
         fid = open(file_out+'.mlp', 'w+')
         fid.write("<header>\n\n")
         
-
+        self.add_additional_header_info(fid)
         # Writing number of neurons per layer
         fid.write('[number of layers]\n%i\n\n' % n_layers)
         fid.write('[neurons per layer]\n')
@@ -553,6 +553,9 @@ class MLPTrainer:
                 fid.write("\t".join("%+.16e" % float(B.numpy())) + "\n")
 
         fid.close()
+        return 
+    
+    def add_additional_header_info(self, fid):
         return 
     
     def Save_Relevant_Data(self):

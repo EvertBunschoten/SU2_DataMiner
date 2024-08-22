@@ -57,15 +57,17 @@ class DefaultSettings_NICFD(DefaultProperties):
     Energy_max:float = 5.5e5 
     
     fluid_name:str = "Air"
-
+    EOS_type:str = "HEOS"
     use_PT_grid:bool = False 
 
     controlling_variables:list[str] = ["Density", "Energy"]
     name_density:str = "Density"
     name_energy:str = "Energy"
 
-    hidden_layer_architecture:list[int] = [30]
+    hidden_layer_architecture:list[int] = [95]
 
+    init_learning_rate_expo:float = -1.64126
+    learning_rate_decay:float = 9.87211e-01
     activation_function:str = "exponential"
 
 class DefaultSettings_FGM(DefaultProperties):

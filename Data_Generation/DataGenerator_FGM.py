@@ -1123,17 +1123,17 @@ def ComputeBoundaryData(Config:FlameletAIConfig, run_parallel:bool=False, N_proc
     Np_unb_mix = Config.GetNpMix()
     Config.gas.TP=300,101325
     Config.gas.set_equivalence_ratio(1.0, Config.GetFuelString(), Config.GetOxidizerString())
-    if Config.GetMixtureStatus():
-        mix_status_stoch = Config.gas.mixture_fraction(Config.GetFuelString(), Config.GetOxidizerString())
-    else:
-        mix_status_stoch = Config.gas.equivalence_ratio(Config.GetFuelString(), Config.GetOxidizerString())
-    if mix_bounds[0] < mix_status_stoch and mix_bounds[1] > mix_status_stoch:
-        mixture_range_lean = np.linspace(mix_bounds[0], mix_status_stoch, int(Np_unb_mix/2))
-        mixture_range_rich = np.linspace(mix_status_stoch, mix_bounds[1], int(Np_unb_mix/2)+1)
-        mixture_range = np.append(mixture_range_lean, mixture_range_rich[1:])
-    else:
-        # Equivalence ratios to calculate flamelets for are system inputs
-        mixture_range = np.linspace(mix_bounds[0], mix_bounds[1], Np_unb_mix)
+    #if Config.GetMixtureStatus():
+    mix_status_stoch = Config.gas.mixture_fraction(Config.GetFuelString(), Config.GetOxidizerString())
+    # else:
+    #     mix_status_stoch = Config.gas.equivalence_ratio(Config.GetFuelString(), Config.GetOxidizerString())
+    #if mix_bounds[0] < mix_status_stoch and mix_bounds[1] > mix_status_stoch:
+    mixture_range_lean = np.linspace(0, mix_status_stoch, int(Np_unb_mix/2))
+    mixture_range_rich = np.linspace(mix_status_stoch, 1, int(Np_unb_mix/2)+1)
+    mixture_range = np.append(mixture_range_lean, mixture_range_rich[1:])
+    # else:
+    #     # Equivalence ratios to calculate flamelets for are system inputs
+    #     mixture_range = np.linspace(mix_bounds[0], mix_bounds[1], Np_unb_mix)
     
     if run_parallel:
         Parallel(n_jobs=N_processors)(delayed(ComputeEquilibriumData)(mix_status) for mix_status in mixture_range)

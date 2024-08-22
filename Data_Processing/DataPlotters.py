@@ -276,11 +276,11 @@ class DataPlotter_FGM(DataPlotter_Base):
         """
         if Sp_name == "NOx":
             RR = np.zeros(np.shape(flamelet_data)[0])
-            for s in self.__Config.gas.species_names:
+            for s in self._Config.gas.species_names:
                 if ("N" in s) and ("O" in s) and not ("C" in s) and not ("H" in s):
                     RR += flamelet_data[:, variables.index("Y_dot_net-"+s)]
         else:          
-            if Sp_name not in self.__Config.gas.species_names:
+            if Sp_name not in self._Config.gas.species_names:
                 raise Exception("Specie "+Sp_name+" not present in reaction mechanism.")
             RR = flamelet_data[:, variables.index("Y_dot_net-"+Sp_name)]
         return RR

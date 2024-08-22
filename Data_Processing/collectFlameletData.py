@@ -100,13 +100,17 @@ class FlameletConcatenator:
     __include_counterflame = False 
     __include_fuzzy = False
 
-    def __init__(self, Config:FlameletAIConfig):
+    __verbose:int=1
+
+    def __init__(self, Config:FlameletAIConfig,verbose_level:int=1):
         """Class constructor
 
         :param Config: loaded FlameletAIConfig class for the current workflow.
         :type Config: FlameletAIConfig
         """
-        print("Loading flameletAI configuration " + Config.GetConfigName())
+        self.__verbose = verbose_level
+        if self.__verbose >0:
+            print("Loading flameletAI configuration " + Config.GetConfigName())
         self.__Config = Config
         self.__SynchronizeSettings()
         # 
@@ -169,6 +173,9 @@ class FlameletConcatenator:
         self.__Np_per_flamelet = Np_per_flamelet
         self.__custom_resolution = True 
         return 
+    
+    def GetNFlameletNodes(self):
+        return self.__Np_per_flamelet
     
     def SetMixStep(self, skip_mixtures:int):
         """Skip a number of mixture status values when reading flamelet data to reduce the concatenated file size.
@@ -326,14 +333,16 @@ class FlameletConcatenator:
         else:
             folder_header = "phi_"
 
-        print("Concatenating flamelet data...")
+        if self.__verbose > 0:
+            print("Concatenating flamelet data...")
 
         # Read adiabatic flamelet data
         if self.__include_freeflames:
-            print("Reading freeflames...")
+            if self.__verbose > 0:
+                print("Reading freeflames...")
             i_freeflame_total = 0
             mixture_folders = np.sort(np.array(self.mfracs_freeflames))
-            for z in tqdm(mixture_folders[::self.__mfrac_skip]):
+            for z in mixture_folders[::self.__mfrac_skip]:
                 if self.__ignore_mixture_bounds:
                     i_freeflame_total = self.__InterpolateFlameletData(self.__flameletdata_dir + "/freeflame_data/", z, 0, i_freeflame_total)
                 else:
@@ -341,15 +350,17 @@ class FlameletConcatenator:
                         mixture_status = float(z[len(folder_header):])
                         if (mixture_status <= self.__mix_status_max) and (mixture_status >= self.__mix_status_min):
                             i_freeflame_total = self.__InterpolateFlameletData(self.__flameletdata_dir + "/freeflame_data/", z, 0, i_freeflame_total)
-            print("Done!")
+            if self.__verbose > 0:
+                print("Done!")
             i_start += i_freeflame_total
 
         # Read burner-stabilized flamelet data
         if self.__include_burnerflames:
-            print("Reading burnerflamelets...")
+            if self.__verbose > 0:
+                print("Reading burnerflamelets...")
             i_burnerflame_total = 0
             mixture_folders = np.sort(np.array(self.mfracs_burnerflames))
-            for z in tqdm(mixture_folders[::self.__mfrac_skip]):
+            for z in mixture_folders[::self.__mfrac_skip]:
                 if self.__ignore_mixture_bounds:
                     i_burnerflame_total = self.__InterpolateFlameletData(self.__flameletdata_dir + "/burnerflame_data/", z, i_start, i_burnerflame_total)
                 else:
@@ -357,15 +368,17 @@ class FlameletConcatenator:
                         mixture_status = float(z[len(folder_header):])
                         if (mixture_status <= self.__mix_status_max) and (mixture_status >= self.__mix_status_min):
                             i_burnerflame_total = self.__InterpolateFlameletData(self.__flameletdata_dir + "/burnerflame_data/", z, i_start, i_burnerflame_total)
-            print("Done!")
+            if self.__verbose > 0:
+                print("Done!")
             i_start +=  i_burnerflame_total
 
         # Read chemical equilibrium data
         if self.__include_equilibrium:
             i_equilibrium_total = 0
-            print("Reading equilibrium data...")
+            if self.__verbose>0:
+                print("Reading equilibrium data...")
             mixture_folders = np.sort(np.array(self.mfracs_equilibrium))
-            for z in tqdm(mixture_folders[::self.__mfrac_skip]):
+            for z in mixture_folders[::self.__mfrac_skip]:
                 if self.__ignore_mixture_bounds:
                     i_equilibrium_total = self.__InterpolateFlameletData(self.__flameletdata_dir + "/equilibrium_data/", z, i_start, i_equilibrium_total)
                 else:
@@ -373,7 +386,8 @@ class FlameletConcatenator:
                         mixture_status = float(z[len(folder_header):])
                         if (mixture_status <= self.__mix_status_max) and (mixture_status >= self.__mix_status_min):
                             i_equilibrium_total = self.__InterpolateFlameletData(self.__flameletdata_dir + "/equilibrium_data/", z, i_start, i_equilibrium_total)
-            print("Done!")
+            if self.__verbose > 0:
+                print("Done!")
             i_start +=  i_equilibrium_total
 
         # Read fuzzy data
@@ -381,7 +395,7 @@ class FlameletConcatenator:
             i_fuzzy_total = 0
             print("Reading fuzzy data...")
             mixture_folders = np.sort(np.array(self.mfracs_fuzzy))
-            for z in tqdm(mixture_folders[::self.__mfrac_skip]):
+            for z in mixture_folders[::self.__mfrac_skip]:
                 if z[:len(folder_header)] == folder_header:
                     mixture_status = float(z[len(folder_header):])
                     if (mixture_status <= self.__mix_status_max) and (mixture_status >= self.__mix_status_min):
@@ -397,9 +411,11 @@ class FlameletConcatenator:
             i_start += i_counterflame_total
 
         # Once all flamelet data has been read and interpolated, write output files.
-        print("Writing output data...")
+        if self.__verbose > 0:
+            print("Writing output data...")
         self.__WriteOutputFiles()
-        print("Done!")
+        if self.__verbose > 0:
+            print("Done!")
 
     def CollectBoundaryData(self):
         self.IgnoreMixtureBounds(True)
@@ -447,7 +463,8 @@ class FlameletConcatenator:
         test_data = total_data[np_train+np_val:, :]
 
         # Write full, train, validation, and test data files.
-        print("Writing output files with header " + self.__output_file_header)
+        if self.__verbose > 0:
+            print("Writing output files with header " + self.__output_file_header)
         fid = open(self.__flameletdata_dir +"/"+ self.__output_file_header + "_full.csv", "w+")
         fid.write(total_variables + "\n")
         csvwriter = csv.writer(fid)
@@ -471,7 +488,8 @@ class FlameletConcatenator:
         csvwriter = csv.writer(fid)
         csvwriter.writerows(test_data)
         fid.close()
-        print("Done!")
+        if self.__verbose > 0:
+            print("Done!")
         
     def __SizeDataArrays(self):
         """Size the output data arrays according to the number of flamelets and manifold resolution.
@@ -495,10 +513,11 @@ class FlameletConcatenator:
 
         # Count the number of adiabatic flamelets.
         if self.__include_freeflames:
-            print("Counting adabatic free-flame data...")
+            if self.__verbose > 0:
+                print("Counting adabatic free-flame data...")
             self.mfracs_freeflames = listdir(self.__flameletdata_dir + "/freeflame_data")
             mixture_folders = np.sort(np.array(self.mfracs_freeflames))
-            for z in tqdm(mixture_folders[::self.__mfrac_skip]):
+            for z in mixture_folders[::self.__mfrac_skip]:
                 if self.__ignore_mixture_bounds:
                     n_freeflames += len(listdir(self.__flameletdata_dir + "/freeflame_data/" + z))
                     for f in listdir(self.__flameletdata_dir + "/freeflame_data/" + z):
@@ -515,10 +534,11 @@ class FlameletConcatenator:
 
         # Count the number of burner-stabilized flamelets.
         if self.__include_burnerflames:
-            print("Counting burner-stabilized flame data...")
+            if self.__verbose > 0:
+                print("Counting burner-stabilized flame data...")
             self.mfracs_burnerflames = listdir(self.__flameletdata_dir + "/burnerflame_data")
             mixture_folders = np.sort(np.array(self.mfracs_burnerflames))
-            for z in tqdm(mixture_folders[::self.__mfrac_skip]):
+            for z in mixture_folders[::self.__mfrac_skip]:
                 if self.__ignore_mixture_bounds:
                     n_burnerflames += len(listdir(self.__flameletdata_dir + "/burnerflame_data/" + z))
                     for f in listdir(self.__flameletdata_dir + "/burnerflame_data/" + z):
@@ -535,10 +555,11 @@ class FlameletConcatenator:
         
         # Count the number of chemical equilibrium data files.
         if self.__include_equilibrium:
-            print("Counting chemical equilibrium data...")
+            if self.__verbose > 0:
+                print("Counting chemical equilibrium data...")
             self.mfracs_equilibrium = listdir(self.__flameletdata_dir + "/equilibrium_data")
             mixture_folders = np.sort(np.array(self.mfracs_equilibrium))
-            for z in tqdm(mixture_folders[::self.__mfrac_skip]):
+            for z in mixture_folders[::self.__mfrac_skip]:
                 if self.__ignore_mixture_bounds:
                     n_eq += len(listdir(self.__flameletdata_dir + "/equilibrium_data/" + z))
                     for f in listdir(self.__flameletdata_dir + "/equilibrium_data/" + z):
@@ -558,7 +579,7 @@ class FlameletConcatenator:
             print("Counting fuzzy flamelet data...")
             self.mfracs_fuzzy = listdir(self.__flameletdata_dir + "/fuzzy_data")
             mixture_folders = np.sort(np.array(self.mfracs_fuzzy))
-            for z in tqdm(mixture_folders[::self.__mfrac_skip]):
+            for z in mixture_folders[::self.__mfrac_skip]:
                 if z[:len(folder_header)] == folder_header:
                     mixture_status = float(z[len(folder_header):])
                     if (mixture_status <= self.__mix_status_max) and (mixture_status >= self.__mix_status_min):
@@ -572,18 +593,19 @@ class FlameletConcatenator:
             print("Counting counter-flow diffusion flame data...")
             counterflame_files = listdir(self.__flameletdata_dir + "/counterflame_data")
             n_counterflames += len(counterflame_files)
-            for f in tqdm(counterflame_files):
+            for f in counterflame_files:
                 with open(self.__flameletdata_dir + "/counterflame_data/" + f, 'r') as fid:
                     Np_tot += len(fid.readlines())-1
-
-        print("Done!")
+        if self.__verbose > 0:
+            print("Done!")
 
         # Compute the average number of data points per flamelet.
         n_flamelets_total = n_freeflames + n_burnerflames + n_eq + n_counterflames + n_fuz
         if not self.__custom_resolution:
-            self.__Np_per_flamelet = 2**self.__Config.GetBatchExpo()
-            #self.__Np_per_flamelet = int(Np_tot / n_flamelets_total)
-        print("Number of data-points per flamelet: %i " % self.__Np_per_flamelet)
+            #self.__Np_per_flamelet = 2**self.__Config.GetBatchExpo()
+            self.__Np_per_flamelet = int(Np_tot / n_flamelets_total)
+        if self.__verbose > 0:
+            print("Number of data-points per flamelet: %i " % self.__Np_per_flamelet)
 
         # Size output data arrays according to manifold resolution.
         self.__CV_flamelet_data = np.zeros([n_flamelets_total * self.__Np_per_flamelet, self.__N_control_vars])
@@ -800,7 +822,7 @@ class GroupOutputs:
         self.__vars_to_exclude = []
         for var in self.__controlling_variables:
             self.__vars_to_exclude.append(var)
-        self.__vars_to_exclude.append(["FlameletID"])
+        self.__vars_to_exclude.append("FlameletID")
         self.__FilterVariables(self.__Config.GetControllingVariables() + ["FlameletID"])
         return 
     
@@ -886,6 +908,7 @@ class GroupOutputs:
 
         self.__iVar_remove = []
         for var in vars_to_remove:
+            print(var)
             if var not in flamelet_variables:
                 raise Exception("Variable " + var + " not present in flamelet data.")
             self.__iVar_remove.append(flamelet_variables.index(var))

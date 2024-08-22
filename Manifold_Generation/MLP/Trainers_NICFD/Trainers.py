@@ -566,6 +566,19 @@ class Train_Entropic_Derivatives(PhysicsInformedTrainer):
         fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/PT_diagram."+figformat,format=figformat,bbox_inches='tight')
         plt.close(fig)
 
+        fig = plt.figure(figsize=[10,10])
+        ax = plt.axes() 
+        ax.plot(T_test, S_test, 'b.',markersize=3,markerfacecolor='none',label=r'Labeled')
+        ax.plot(T_test_pred.numpy(), S_test_pred.numpy(), 'r.',markersize=2,label=r'Predicted')
+        ax.grid()
+        ax.legend(fontsize=20)
+        ax.set_ylabel(r"Entropy $(s)[J kg^{-1}]$",fontsize=plot_fontsize)
+        ax.set_xlabel(r"Temperature $(T)[K]$",fontsize=plot_fontsize)
+        ax.set_title(r"T-S diagram",fontsize=plot_fontsize)
+        ax.tick_params(which='both',labelsize=label_fontsize)
+        fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/TS_diagram."+figformat,format=figformat,bbox_inches='tight')
+        plt.close(fig)
+
         return
     
 class Train_Entropic_PINN(PhysicsInformedTrainer):
@@ -950,11 +963,11 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         """Make nice plots of the interpolated test data.
         """
 
-        #s_test_pred, T_test_pred, P_test_pred, C2_test_pred = self.TD_Evaluation(self._X_test_norm)
-        Y_state_test_pred = self.EvaluateState(self._X_test_norm)
-        T_test_pred = tf.gather(Y_state_test_pred, indices=self.__idx_T,axis=1)
-        P_test_pred = tf.gather(Y_state_test_pred, indices=self.__idx_p,axis=1)
-        C2_test_pred = tf.gather(Y_state_test_pred, indices=self.__idx_c2,axis=1)
+        S_test_pred, T_test_pred, P_test_pred, C2_test_pred = self.TD_Evaluation(self._X_test_norm)
+        #Y_state_test_pred = self.EvaluateState(self._X_test_norm)
+        #T_test_pred = tf.gather(Y_state_test_pred, indices=self.__idx_T,axis=1)
+        #P_test_pred = tf.gather(Y_state_test_pred, indices=self.__idx_p,axis=1)
+        #C2_test_pred = tf.gather(Y_state_test_pred, indices=self.__idx_c2,axis=1)
         
         figformat = "png"
         plot_fontsize = 20
@@ -963,6 +976,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         rho_test = self._X_test[:, self.__idx_rho]#(self._X_max[self.__idx_rho] - self._X_min[self.__idx_rho])*self._X_test_norm[:, self.__idx_rho] + self._X_min[self.__idx_rho]
         e_test = self._X_test[:, self.__idx_e]#(self._X_max[self.__idx_e] - self._X_min[self.__idx_e])*self._X_test_norm[:, self.__idx_e] + self._X_min[self.__idx_e]
         
+        S_test = self._Y_test[:, 0]
         T_test = self._Y_state_test[:, self.__idx_T]
         P_test = self._Y_state_test[:, self.__idx_p]
         C2_test = self._Y_state_test[:, self.__idx_c2]
@@ -1050,6 +1064,18 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/PT_diagram."+figformat,format=figformat,bbox_inches='tight')
         plt.close(fig)
 
+        fig = plt.figure(figsize=[10,10])
+        ax = plt.axes() 
+        ax.plot(T_test, S_test, 'b.',markersize=3,markerfacecolor='none',label=r'Labeled')
+        ax.plot(T_test_pred.numpy(), S_test_pred.numpy(), 'r.',markersize=2,label=r'Predicted')
+        ax.grid()
+        ax.legend(fontsize=20)
+        ax.set_ylabel(r"Entropy $(s)[J kg^{-1}]$",fontsize=plot_fontsize)
+        ax.set_xlabel(r"Temperature $(T)[K]$",fontsize=plot_fontsize)
+        ax.set_title(r"T-S diagram",fontsize=plot_fontsize)
+        ax.tick_params(which='both',labelsize=label_fontsize)
+        fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/TS_diagram."+figformat,format=figformat,bbox_inches='tight')
+        plt.close(fig)
         return
     
 class EvaluateArchitecture_NICFD(EvaluateArchitecture):
