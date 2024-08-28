@@ -32,11 +32,12 @@ import cantera as ct
 import pickle 
 import CoolProp
 import cantera as ct 
+import copy 
 
 #---------------------------------------------------------------------------------------------#
 # Importing DataMiner classes and functions
 #---------------------------------------------------------------------------------------------#
-from Common.Properties import DefaultSettings_NICFD, DefaultSettings_FGM
+from Common.Properties import DefaultProperties, DefaultSettings_NICFD, DefaultSettings_FGM
 from Common.Config_base import Config 
 from Common.CommonMethods import *
 
@@ -545,6 +546,11 @@ class FlameletAIConfig(Config):
     __MLP_architectures:list[list[int]] = None  # Hidden layer architecture for each MLP.
     __MLP_trainparams:list[list[float]] = None  # Training parameters and activation function information for each MLP.
 
+    __alpha_expo:list[float] = [DefaultSettings_FGM.init_learning_rate_expo]
+    __lr_decay:list[float] = [DefaultSettings_FGM.learning_rate_decay]
+    __batch_expo:list[float] = [DefaultSettings_FGM.batch_size_exponent]
+    __NN:list[list[int]] = [DefaultSettings_FGM.hidden_layer_architecture]
+    __activation_function:list[str] = [DefaultSettings_FGM.activation_function]
     # Table Generation Settings
 
     __Table_base_cell_size:float = None     # Table base cell size per table level.
@@ -566,11 +572,7 @@ class FlameletAIConfig(Config):
         Config.__init__(self)
 
         self._config_name = DefaultSettings_FGM.config_name
-        self.SetAlphaExpo(DefaultSettings_FGM.init_learning_rate_expo)
-        self.SetLRDecay(DefaultSettings_FGM.learning_rate_decay)
-        self.SetBatchExpo(DefaultSettings_FGM.batch_size_exponent)
-        self.SetHiddenLayerArchitecture(DefaultSettings_FGM.hidden_layer_architecture)
-        self.SetControllingVariables(DefaultSettings_FGM.controlling_variables)
+        
 
         if load_file:
             print("Loading configuration for flamelet generation")
@@ -579,6 +581,12 @@ class FlameletAIConfig(Config):
             self.__dict__ = loaded_config.__dict__.copy()
             print("Loaded configuration file with name " + loaded_config.GetConfigName())
         else:
+            self.SetAlphaExpo(DefaultSettings_FGM.init_learning_rate_expo)
+            self.SetLRDecay(DefaultSettings_FGM.learning_rate_decay)
+            self.SetBatchExpo(DefaultSettings_FGM.batch_size_exponent)
+            self.SetHiddenLayerArchitecture(DefaultSettings_FGM.hidden_layer_architecture)
+            self.SetControllingVariables(DefaultSettings_FGM.controlling_variables)
+
             print("Generating empty flameletAI config")
         
         self.__SynchronizeSettings()
@@ -935,6 +943,11 @@ class FlameletAIConfig(Config):
         :param transport_model: transport model name, defaults to DefaultSettings_FGM.transport_model
         :type transport_model: str, optional
         """
+        if transport_model == "multicomponent" or transport_model == "mixture-averaged":
+            self.__preferential_diffusion = True 
+        elif transport_model == "unity-Lewis-number":
+            self.__preferential_diffusion = False
+
         self.__transport_model=transport_model
 
         return 
@@ -1593,9 +1606,20 @@ class FlameletAIConfig(Config):
         
         if self.__MLP_output_groups == None:
             self.__MLP_output_groups = []
+            self.__alpha_expo = []
+            self.__lr_decay = []
+            self.__batch_expo = []
+            self.__activation_function = []
+            self.__NN = []
+
         self.__MLP_output_groups.append([])
         for var in variable_names_in:
             self.__MLP_output_groups[-1].append(var)
+        self.__alpha_expo.append(DefaultSettings_FGM.init_learning_rate_expo)
+        self.__lr_decay.append(DefaultSettings_FGM.learning_rate_decay)
+        self.__batch_expo.append(DefaultSettings_FGM.batch_size_exponent)
+        self.__NN.append(DefaultSettings_FGM.hidden_layer_architecture)
+        self.__activation_function.append(DefaultSettings_FGM.activation_function)
         return 
     
     def DefineOutputGroup(self, i_group:int, variable_names_in:list[str]):
@@ -1633,7 +1657,14 @@ class FlameletAIConfig(Config):
         """Print the MLP output variables grouping arrangement.
         """
         for i_group, group in enumerate(self.__MLP_output_groups):
-            print("Group %i: " % (i_group+1) +",".join(var for var in group) )
+            print("Group %i: " % (i_group + 1))
+            print("Output variables: "+",".join(var for var in group))
+            print("Initial learning rate exponent: %+.6e" % self.__alpha_expo[i_group])
+            print("Learning rate decay: %+.6e" % self.__lr_decay[i_group])
+            print("Mini-batch exponent: %i" % self.__batch_expo[i_group])
+            print("Activation function: %s" % self.__activation_function[i_group])
+            print("Hidden layer architecture: " + ",".join(("%i" % n) for n in self.__NN[i_group]))
+            print()
         return 
     
     def GetNMLPOutputGroups(self):
@@ -1654,6 +1685,48 @@ class FlameletAIConfig(Config):
         """
         return self.__MLP_output_groups[i_group]
     
+    def SetAlphaExpo(self, alpha_expo_in: float = DefaultSettings_FGM.init_learning_rate_expo, i_group:int=0):
+        super().SetAlphaExpo(alpha_expo_in)
+        self.__alpha_expo[i_group] = alpha_expo_in
+        return 
+    
+    def GetAlphaExpo(self, i_group:int=0):
+        return self.__alpha_expo[i_group]
+    
+    def SetLRDecay(self, lr_decay_in: float = DefaultSettings_FGM.learning_rate_decay, i_group:int=0):
+        super().SetLRDecay(lr_decay_in)
+        self.__lr_decay[i_group] = lr_decay_in
+        return 
+    
+    def GetLRDecay(self, i_group:int=0):
+        return self.__lr_decay[i_group]
+    
+    def SetBatchExpo(self, batch_expo_in: int = DefaultSettings_FGM.batch_size_exponent, i_group:int=0):
+        super().SetBatchExpo(batch_expo_in)
+        self.__batch_expo[i_group] = batch_expo_in
+        return 
+    
+    def GetBatchExpo(self, i_group:int=0):
+        return self.__batch_expo[i_group]
+    
+    def SetActivationFunction(self, activation_function_in: str = DefaultSettings_FGM.activation_function, i_group:int=0):
+        super().SetActivationFunction(activation_function_in)
+        self.__activation_function[i_group] = activation_function_in
+        return 
+    
+    def GetActivationFunction(self, i_group:int=0):
+        return self.__activation_function[i_group]
+    
+    def SetHiddenLayerArchitecture(self, hidden_layer_architecture: list[int] = DefaultSettings_FGM.hidden_layer_architecture, i_group:int=0):
+        super().SetHiddenLayerArchitecture(hidden_layer_architecture)
+        self.__NN[i_group] = []
+        for N in hidden_layer_architecture:
+            self.__NN[i_group].append(N)
+        return 
+    
+    def GetHiddenLayerArchitecture(self, i_group:int=0):
+        return self.__NN[i_group]
+    
     def SaveConfig(self):
         """
         Save the current FlameletAI configuration.
@@ -1663,7 +1736,9 @@ class FlameletAIConfig(Config):
         """
         self.__SynchronizeSettings()
 
-        super().SaveConfig()
+        file = open(self._config_name+'.cfg','wb')
+        pickle.dump(self, file)
+        file.close()
         return 
     
 
