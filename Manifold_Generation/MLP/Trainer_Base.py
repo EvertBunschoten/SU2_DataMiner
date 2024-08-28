@@ -68,7 +68,7 @@ class MLPTrainer:
     _decay_steps:int = 3e5
 
     _i_activation_function:int = 0   # Activation function index.
-    _activation_function_name:str = "exponential"
+    _activation_function_name:str = DefaultProperties.activation_function
     _activation_function = None
     _restart_training:bool = False # Restart training process
 
@@ -144,24 +144,34 @@ class MLPTrainer:
         """Initiate MLP trainer object.
         """
         return    
-    
-    def SetVerbose(self, verbose_level:int=1):
-        if verbose_level < 0 or verbose_level > 2:
-            raise Exception("Verbose level should be 0, 1, or 2.")
-        self._verbose = int(verbose_level)
-        return 
-    
         
     def SetVerbose(self, verbose_level:int=1):
+        """Set the trainer output verbose level. 0 = no outputs, 1 = output per epoch, 2 = output for every batch.
+
+        :param verbose_level: output verbose level, defaults to 1
+        :type verbose_level: int, optional
+        :raises Exception: if the verbose level is not 0, 1, or 2
+        """
         if verbose_level < 0 or verbose_level > 2:
             raise Exception("Verbose level should be 0, 1, or 2.")
         self._verbose = int(verbose_level)
         return 
     
     def SetTrainFileHeader(self, train_filepathname:str):
+        """Set a custom MLP train file path header.
+
+        :param train_filepathname: MLP train data file header plus path.
+        :type train_filepathname: str
+        """
         self._filedata_train = train_filepathname
         return 
+    
     def SetMLPFileHeader(self, mlp_fileheader:str="MLP_SU2"):
+        """Set the SU2 MLP output file header.
+
+        :param mlp_fileheader: header of the .mlp output file, defaults to "MLP_SU2"
+        :type mlp_fileheader: str, optional
+        """
         self._mlp_output_file_name = mlp_fileheader
         return 
     
@@ -195,9 +205,16 @@ class MLPTrainer:
         self._n_epochs = n_input
         return 
     
-    def SetActivationFunction(self, name_function:str="exponential"):
-        self._activation_function_name = name_function 
+    def SetActivationFunction(self, name_function:str=DefaultProperties.activation_function):
+        """Define the hidden layer activation function name.
 
+        :param name_function: hidden layer activation function name, defaults to "gelu"
+        :type name_function: str, optional
+        :raises Exception: if the option is not in the list of supported activation functions.
+        """
+        if name_function not in activation_function_names_options:
+            raise Exception("Activation function not supported")
+        self._activation_function_name = name_function 
         self._i_activation_function = activation_function_names_options.index(name_function)
         self._activation_function = activation_function_options[self._i_activation_function]
         return 
@@ -309,38 +326,31 @@ class MLPTrainer:
                             does not equal the MLP input dimension ("+str(len(self._controlling_vars))+")")
         return np.zeros(1)
     
-    # Load previously trained MLP (did not try this yet!)
     def LoadWeights(self, weights_in:list[np.ndarray], biases_in:list[np.ndarray]):
-        """Load the weights from a previous run in order to restart training from a previous training result.
+        """Set custom weights and biases upon initializing the network.
+
+        :param weights_in: list with hidden layer weight matrices.
+        :type weights_in: list[np.ndarray]
+        :param biases_in: list with hidden layer bias arrays.
+        :type biases_in: list[np.ndarray]
         """
         self._weights = []
         self._biases = []
         for w, b in zip(weights_in, biases_in):
             self._weights.append(tf.Variable(w, dtype=tf.float32))
             self._biases.append(tf.Variable(b,dtype=tf.float32))
-        # for i in range(len(self._hidden_layers)+1):
-        #     loaded_W = np.load(self._save_dir + "/Model_"+str(self._model_index) + "/W_"+str(i)+".npy", allow_pickle=True)
-        #     loaded_b = np.load(self._save_dir + "/Model_"+str(self._model_index) + "/b_"+str(i)+".npy", allow_pickle=True)
-        #     self._weights.append(loaded_W)
-        #     self._biases.append(loaded_b)
         return 
     
     def SaveWeights(self):
         """Save the weights of the current network as numpy arrays.
         """
-        # self._weights = []
-        # self._biases = []
-        # for layer in self.__model.layers:
-        #     self._weights.append(layer.weights[0])
-        #     self._biases.append(layer.weights[1])
-
         for iW, w in enumerate(self._weights):
             np.save(self._save_dir + "/Model_"+str(self._model_index) + "/W_"+str(iW)+".npy", w.numpy(), allow_pickle=True)
             np.save(self._save_dir + "/Model_"+str(self._model_index) + "/b_"+str(iW)+".npy", self._biases[iW].numpy(), allow_pickle=True)
         return
     
     def SetDecaySteps(self):
-        self._decay_steps = 1e4#int(0.1*self._n_epochs * self._Np_train / (2**self._batch_expo))
+        self._decay_steps = 1e4
         return 
     
     def RestartTraining(self):
@@ -353,11 +363,6 @@ class MLPTrainer:
         """Commence network training.
         """
         return 
-    
-    # def SaveWeights(self):
-    #     """Save weight arrays as numpy arrays.
-    #     """
-    #     return 
     
     def GetCostParameter(self):
         """Retrieve MLP evaluation cost parameter.
@@ -443,13 +448,15 @@ class MLPTrainer:
 
         MLPData_filepath = self._filedata_train
         
-        print("Reading train, test, and validation data...")
+        if self._verbose > 0:
+            print("Reading train, test, and validation data...")
         X_full, Y_full = GetReferenceData(MLPData_filepath + "_full.csv", self._controlling_vars, self._train_vars)
         
         self._X_train, self._Y_train = GetReferenceData(MLPData_filepath + "_train.csv", self._controlling_vars, self._train_vars)
         self._X_test, self._Y_test = GetReferenceData(MLPData_filepath + "_test.csv", self._controlling_vars, self._train_vars)
         self._X_val, self._Y_val = GetReferenceData(MLPData_filepath + "_val.csv", self._controlling_vars, self._train_vars)
-        print("Done!")
+        if self._verbose > 0:
+            print("Done!")
 
 
         # Calculate normalization bounds of full data set
@@ -1025,6 +1032,7 @@ class CustomTrainer(MLPTrainer):
         return 
     
 class PhysicsInformedTrainer(CustomTrainer):
+
     _Y_state_full:np.ndarray 
     _Y_state_train:np.ndarray
     _Y_state_train_norm:np.ndarray 
@@ -1067,7 +1075,6 @@ class PhysicsInformedTrainer(CustomTrainer):
     def GetTrainData(self):
         super().GetTrainData()
         self.GetStateTrainData()
-
         return 
     
     def Plot_and_Save_History(self, vars=None):
@@ -1203,7 +1210,7 @@ class EvaluateArchitecture:
         self.SynchronizeTrainer()
         return 
     
-    def SetHiddenLayers(self, NN_hidden_layers:list[int]):
+    def SetHiddenLayers(self, NN_hidden_layers:list[int]=DefaultProperties.hidden_layer_architecture):
         """Define hidden layer architecture.
 
         :param NN_hidden_layers: list with neuron count for each hidden layer.
@@ -1218,7 +1225,7 @@ class EvaluateArchitecture:
         self.SynchronizeTrainer()
         return 
     
-    def SetBatchExpo(self, batch_expo_in:int):
+    def SetBatchExpo(self, batch_expo_in:int=DefaultProperties.batch_size_exponent):
         """Set the mini-batch size exponent.
 
         :param batch_expo_in: exponent of mini-batch size (base 2)
@@ -1231,7 +1238,7 @@ class EvaluateArchitecture:
         self.SynchronizeTrainer()
         return 
     
-    def SetActivationFunction(self, activation_function_name:str):
+    def SetActivationFunction(self, activation_function_name:str=DefaultProperties.activation_function):
         """Define hidden layer activation function.
 
         :param activation_function_name: activation function name.
@@ -1245,7 +1252,7 @@ class EvaluateArchitecture:
         self.SynchronizeTrainer()
         return 
     
-    def SetAlphaExpo(self, alpha_expo_in:float):
+    def SetAlphaExpo(self, alpha_expo_in:float=DefaultProperties.init_learning_rate_expo):
         """Define initial learning rate exponent.
 
         :param alpha_expo_in: initial learning rate exponent.
@@ -1258,7 +1265,7 @@ class EvaluateArchitecture:
         self.SynchronizeTrainer()
         return 
     
-    def SetLRDecay(self, lr_decay_in:float):
+    def SetLRDecay(self, lr_decay_in:float=DefaultProperties.learning_rate_decay):
         """Define learning rate decay parameter.
 
         :param lr_decay_in: learning rate decay parameter.
