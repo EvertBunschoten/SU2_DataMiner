@@ -35,8 +35,11 @@ from multiprocessing import current_process
 
 from Common.Properties import DefaultProperties, DefaultSettings_NICFD
 from Common.Config_base import Config 
+from Common.DataDrivenConfig import FlameletAIConfig, EntropicAIConfig
 from Manifold_Generation.MLP.Trainer_Base import EvaluateArchitecture
 from Manifold_Generation.MLP.Trainers_NICFD.Trainers import EvaluateArchitecture_NICFD
+from Manifold_Generation.MLP.Trainers_FGM.Trainers import EvaluateArchitecture_FGM
+
 from Common.Properties import ActivationFunctionOptions
 
 class MLPOptimizer:
@@ -45,33 +48,33 @@ class MLPOptimizer:
 
     _Config:Config = None     # EntropicAI configuration.
     __optimizer:pygad.GA = None         # PyGaD optimization instance.
-    __n_workers:int = 1                 # Number of CPU cores used for distributing the work per generation.
-
+    _n_workers:int = 1                 # Number of CPU cores used for distributing the work per generation.
+    _n_epochs:int=DefaultProperties.N_epochs
     # Hyper-parameter default settings and bounds.
 
     # Mini-batch exponent (base 2) for training.
-    __optimize_batch:bool = True 
-    __batch_expo:int = DefaultSettings_NICFD.batch_size_exponent
+    _optimizebatch:bool = True 
+    __batch_expo:int = DefaultProperties.batch_size_exponent
     __batch_expo_min:int=3
     __batch_expo_max:int=7
     
     # Optimize learning rate decay parameters.
-    __optimize_LR:bool = True 
+    _optimizeLR:bool = True 
 
     # Initial learning rate exponent (base 10).
-    __alpha_expo:float = DefaultSettings_NICFD.init_learning_rate_expo
-    __alpha_expo_min:float = -3.0
+    __alpha_expo:float = DefaultProperties.init_learning_rate_expo
+    __alpha_expo_min:float = -4.0
     __alpha_expo_max:float = -1.0
 
     # Learning rate decay parameter for exponential learning rate decay schedule.
-    __lr_decay:float=DefaultSettings_NICFD.learning_rate_decay
+    __lr_decay:float=DefaultProperties.learning_rate_decay
     __lr_decay_min:float = 0.9
     __lr_decay_max:float = 1.0 
 
     # Optimize hidden layer architecture.
-    __optimize_NN:bool = True
+    _optimizeNN:bool = True
 
-    __optimize_phi:bool = True 
+    _optimizephi:bool = True 
 
     # Number of perceptrons applied to the hidden layer of the network.
     __NN_min:int = 10
@@ -87,13 +90,21 @@ class MLPOptimizer:
     __generation_number:int = 0
 
     __x_optim:np.ndarray = None 
+    
+    _history_extenstion:str = ""
 
     def __init__(self, Config_in:Config=None, load_file:str=None):
         """Class constructor
         """
         # Store configuration
         self._Config = Config_in 
-    
+
+        self.__alpha_expo = self._Config.GetAlphaExpo()
+        self.__lr_decay = self._Config.GetLRDecay()
+        self.__batch_expo = self._Config.GetBatchExpo()
+        self.__activation_function = self._Config.GetActivationFunction()
+        self.SetArchitecture(self._Config.GetHiddenLayerArchitecture())
+
         if load_file:
             print("Loading optimizer configuration")
             with open(load_file, "rb") as fid:
@@ -101,6 +112,7 @@ class MLPOptimizer:
             print(loaded_config.__dict__)
             self.__dict__ = loaded_config.__dict__.copy()
             print("Loaded optimizer file")
+        
         return 
 
     def SetNWorkers(self, n_workers:int=1):
@@ -112,7 +124,13 @@ class MLPOptimizer:
         """
         if n_workers < 1:
             raise Exception("Number of workers should be at least one.")
-        self.__n_workers = n_workers
+        self._n_workers = n_workers
+        return 
+    
+    def SetNEpochs(self, n_epochs:int=DefaultProperties.N_epochs):
+        if n_epochs <=0:
+            raise Exception("Training should occur for at least one epoch.")
+        self._n_epochs = n_epochs
         return 
     
     def Optimize_LearningRate_HP(self, optimize_LR:bool=True):
@@ -121,7 +139,7 @@ class MLPOptimizer:
         :param optimize_LR: consider learning rate parameters(True, default), or not (False)
         :type optimize_LR: bool, optional
         """
-        self.__optimize_LR = optimize_LR
+        self._optimizeLR = optimize_LR
         return 
     
     def Optimize_ActivationFunction(self, optimize_phi:bool=True):
@@ -130,7 +148,7 @@ class MLPOptimizer:
         :param optimize_phi: consider the hidden layer activation function (True, default), or not (False)
         :type optimize_phi: bool, optional
         """
-        self.__optimize_phi = optimize_phi
+        self._optimizephi = optimize_phi
         return
     
     def SetAlpha_Expo(self, val_alpha_expo:float=DefaultSettings_NICFD.init_learning_rate_expo):
@@ -184,7 +202,7 @@ class MLPOptimizer:
         :param optimize_batch: consider mini-batch size exponent (True, default), or not (False)
         :type optimize_batch: bool, optional
         """
-        self.__optimize_batch = optimize_batch 
+        self._optimizebatch = optimize_batch 
         return 
     
     def SetBatch_Expo(self, batch_expo:int=DefaultSettings_NICFD.batch_size_exponent):
@@ -237,7 +255,7 @@ class MLPOptimizer:
         :param optimize_architecture: consider hidden layer perceptron count (True, default) or not (False)
         :type optimize_architecture: bool, optional
         """
-        self.__optimize_NN = optimize_architecture 
+        self._optimizeNN = optimize_architecture 
         return 
     
     def SetArchitecture(self, architecture:list[int]=DefaultSettings_NICFD.hidden_layer_architecture):
@@ -284,11 +302,11 @@ class MLPOptimizer:
         gene_trainparams = []
         lowerbound = []
         upperbound = []
-        if self.__optimize_batch:
+        if self._optimizebatch:
             gene_trainparams.append(int)
             lowerbound.append(self.__batch_expo_min)
             upperbound.append(self.__batch_expo_max)
-        if self.__optimize_LR:
+        if self._optimizeLR:
             gene_trainparams.append(float)
             gene_trainparams.append(float)
             
@@ -296,11 +314,11 @@ class MLPOptimizer:
             lowerbound.append(self.__lr_decay_min)
             upperbound.append(self.__alpha_expo_max)
             upperbound.append(self.__lr_decay_max)
-        if self.__optimize_NN:
+        if self._optimizeNN:
             gene_trainparams.append(int)
             lowerbound.append(self.__NN_min)
             upperbound.append(self.__NN_max)
-        if self.__optimize_phi:
+        if self._optimizephi:
             gene_trainparams.append(int)
             lowerbound.append(0)
             upperbound.append(len(self.__activation_function_options))
@@ -311,22 +329,22 @@ class MLPOptimizer:
         lowerbound = []
         upperbound = []
         integrality = []
-        if self.__optimize_batch:
+        if self._optimizebatch:
             integrality.append(True)
             lowerbound.append(self.__batch_expo_min)
             upperbound.append(self.__batch_expo_max)
-        if self.__optimize_LR:
+        if self._optimizeLR:
             integrality.append(False)
             integrality.append(False)
             lowerbound.append(self.__alpha_expo_min)
             lowerbound.append(self.__lr_decay_min)
             upperbound.append(self.__alpha_expo_max)
             upperbound.append(self.__lr_decay_max)
-        if self.__optimize_NN:
+        if self._optimizeNN:
             integrality.append(True)
             lowerbound.append(int(self.__NN_min))
             upperbound.append(int(self.__NN_max))
-        if self.__optimize_phi:
+        if self._optimizephi:
             integrality.append(True)
             lowerbound.append(0)
             upperbound.append(len(self.__activation_function_options))
@@ -335,17 +353,17 @@ class MLPOptimizer:
     
     def __setOptimizer(self):
         run_DE = False
-        if self.__optimize_batch or self.__optimize_phi or self.__optimize_NN:
+        if self._optimizebatch or self._optimizephi or self._optimizeNN:
             run_DE = True 
 
         print("Initializing hyper-parameter optimization for:")
-        if self.__optimize_batch:
+        if self._optimizebatch:
             print("- mini-batch size exponent")
-        if self.__optimize_LR:
+        if self._optimizeLR:
             print("- learning rate parameters")
-        if self.__optimize_NN:
+        if self._optimizeNN:
             print("- hidden layer neuron count")
-        if self.__optimize_phi:
+        if self._optimizephi:
             print("- hidden layer activation function")
 
         if run_DE:
@@ -362,7 +380,7 @@ class MLPOptimizer:
         N_genes = len(integrality)
         bounds = Bounds(lb=lowerbound, ub=upperbound)
         # Determine update strategy based on whether parallel processing is used.
-        if self.__n_workers > 1:
+        if self._n_workers > 1:
             update_strategy = "deferred"
         else:
             update_strategy = "immediate"
@@ -372,7 +390,7 @@ class MLPOptimizer:
                                         maxiter=10*N_genes,\
                                         popsize=10,\
                                         bounds=bounds,\
-                                        workers=self.__n_workers,\
+                                        workers=self._n_workers,\
                                         updating=update_strategy,\
                                         integrality=integrality,\
                                         strategy='best1exp',\
@@ -391,25 +409,24 @@ class MLPOptimizer:
         x0[0] = self.__alpha_expo
         x0[1] = self.__lr_decay
         bounds = Bounds(lb=lowerbound, ub=upperbound)
-        options = {"maxiter":10,\
+        options = {"maxiter":1,\
                    "disp":True}
-        res = minimize(self.inv_fitnessFunction, x0=x0, method='Nelder-Mead',bounds=bounds,options=options, callback=self.saveGenerationInfo_DE)
+        res = minimize(self.fitnessFunction, x0=x0, method='Nelder-Mead',bounds=bounds,options=options, callback=self.saveGenerationInfo_DE)
 
         self.__x_optim = res.x 
 
         return 
     
-    def __PostProcessing(self):
-        x = self.__x_optim
+    def _PostProcessing(self, x):
 
         idx_x = 0
         print("Optimized hyper-parameters:")
-        if self.__optimize_batch:
+        if self._optimizebatch:
             batch_expo = int(x[idx_x])
             self._Config.SetBatchExpo(batch_expo)
             idx_x += 1 
             print("- mini-batch exponent: %i" % batch_expo)
-        if self.__optimize_LR:
+        if self._optimizeLR:
             alpha_expo = x[idx_x]
             idx_x += 1 
             print("- initial learning rate exponent: %.5e" % (alpha_expo))
@@ -418,12 +435,12 @@ class MLPOptimizer:
             print("- learning rate decay parameter: %.5e" % lr_decay)
             self._Config.SetLRDecay(lr_decay)
             idx_x += 1 
-        if self.__optimize_NN:
+        if self._optimizeNN:
             architecture = [int(x[idx_x])]
             idx_x += 1 
             print("- hidden layer architecture: "+ " ".join(("%i" % n) for n in architecture))
             self._Config.SetHiddenLayerArchitecture(architecture)
-        if self.__optimize_phi:
+        if self._optimizephi:
             phi = self.__activation_function_options[int(x[idx_x])]
             idx_x += 1
             print("- hidden layer activation function: %s" % phi)
@@ -432,47 +449,53 @@ class MLPOptimizer:
         self._Config.SaveConfig()
         return
     
+    def PreprocessOptimization(self):
+        if not any((self._optimizebatch, self._optimizeLR, self._optimizeNN, self._optimizephi)):
+            raise Exception("At least one of the hyper-parameter options should be considered for optimization.")
+        # Prepare optimization history output file.
+        self._history_extension = ""
+        n_params = 0
+        if self._optimizebatch:
+            self._history_extension += "B"
+            n_params += 1
+        if self._optimizeLR:
+            self._history_extension += "LR"
+            n_params += 1
+        if self._optimizeNN:
+            self._history_extension += "A"
+            n_params += 1
+        if self._optimizephi:
+            self._history_extension += "Phi"
+
+        self.CreateOutputs()
+
+        return 
+    
+    def CreateOutputs(self):
+        self.opt_history_filepath = self._Config.GetOutputDir() + "/history_opt_"+self._history_extension+".csv"
+        with open(self.opt_history_filepath, "w+") as fid:
+            if self._optimizeNN:
+                fid.write("Iteration,mini-batch exp, activation function, alpha expo, lr decay, architecture,fitness,cost\n")
+            else:
+                fid.write("Iteration,mini-batch exp, activation function, alpha expo, lr decay, architecture,solution,fitness\n")
+        # Prepare optimization output directory.
+        self.save_dir = self._Config.GetOutputDir()+"/Architectures_Optim"+self._history_extension
+        if not os.path.isdir(self.save_dir):
+            os.mkdir(self.save_dir)
+        return 
+    
     def optimizeHP(self):
         """Initate hyper-parameter optimization routine.
 
         :raises Exception: if neither of the available sets of hyper-parameters are considered for optimization.
         """
-        if not any((self.__optimize_batch, self.__optimize_LR, self.__optimize_NN, self.__optimize_phi)):
-            raise Exception("At least one of the hyper-parameter options should be considered for optimization.")
-        
-        # Prepare optimization history output file.
-        history_extension = ""
-        n_params = 0
-        if self.__optimize_batch:
-            history_extension += "B"
-            n_params += 1
-        if self.__optimize_LR:
-            history_extension += "LR"
-            n_params += 1
-        if self.__optimize_NN:
-            history_extension += "A"
-            n_params += 1
-        if self.__optimize_phi:
-            history_extension += "Phi"
-            n_params += 1
-
-        self.opt_history_filepath = self._Config.GetOutputDir() + "/history_entropy_"+history_extension+".csv"
-        with open(self.opt_history_filepath, "w+") as fid:
-            if self.__optimize_NN:
-                fid.write("Iteration,mini-batch exp, activation function, alpha expo, lr decay, architecture,fitness,cost\n")
-            else:
-                fid.write("Iteration,mini-batch exp, activation function, alpha expo, lr decay, architecture,solution,fitness\n")
-        
-        # Prepare optimization output directory.
-        self.save_dir = self._Config.GetOutputDir()+"/Architectures_Optim"+history_extension
-        if not os.path.isdir(self.save_dir):
-            os.mkdir(self.save_dir)
+        self.PreprocessOptimization()
         
         # Prepare bounds and commence hyper-parameter optimization.
         self.__setOptimizer()
 
         # Extract optimized hyper-parameters and update configuration.
-        self.__PostProcessing()
+        self._PostProcessing(self.__x_optim)
         return 
     
     def saveGenerationInfo_DE(self, x, convergence=False):
@@ -484,18 +507,18 @@ class MLPOptimizer:
         lr_decay = self.__lr_decay
         architecture = self.__architecture
         phi = self.__activation_function
-        if self.__optimize_batch:
+        if self._optimizebatch:
             batch_expo = int(x[idx_x])
             idx_x += 1 
-        if self.__optimize_LR:
+        if self._optimizeLR:
             alpha_expo = x[idx_x]
             idx_x += 1 
             lr_decay = x[idx_x]
             idx_x += 1 
-        if self.__optimize_NN:
+        if self._optimizeNN:
             architecture = [int(x[idx_x])]
             idx_x += 1 
-        if self.__optimize_phi:
+        if self._optimizephi:
             phi = self.__activation_function_options[x[idx_x]]
             idx_x += 1
 
@@ -532,7 +555,7 @@ class MLPOptimizer:
 
         return 
     
-    def __translateGene(self, x:np.ndarray[float], Evaluator:EvaluateArchitecture):
+    def _translateGene(self, x:np.ndarray[float], Evaluator:EvaluateArchitecture):
         """Translate gene to hyper-parameters
 
         :param x: gene as passed from genetic algorithm.
@@ -547,24 +570,26 @@ class MLPOptimizer:
         Evaluator.SetLRDecay(self.__lr_decay)
         Evaluator.SetHiddenLayers(self.__architecture)
         Evaluator.SetActivationFunction(self.__activation_function)
+
+        print(x)
         # Set hyper-parameter according to gene.
         idx_x = 0
-        if self.__optimize_batch:
+        if self._optimizebatch:
             batch_expo = int(x[idx_x])
             Evaluator.SetBatchExpo(batch_expo)
             idx_x += 1 
-        if self.__optimize_LR:
+        if self._optimizeLR:
             alpha_expo = x[idx_x]
             Evaluator.SetAlphaExpo(alpha_expo)
             idx_x += 1 
             lr_decay = x[idx_x]
             Evaluator.SetLRDecay(lr_decay)
             idx_x += 1 
-        if self.__optimize_NN:
+        if self._optimizeNN:
             architecture = [int(x[idx_x])]
             Evaluator.SetHiddenLayers(architecture)
             idx_x += 1 
-        if self.__optimize_phi:
+        if self._optimizephi:
             phi = self.__activation_function_options[int(x[idx_x])]
             Evaluator.SetActivationFunction(phi)
             idx_x += 1
@@ -572,7 +597,7 @@ class MLPOptimizer:
         return
 
     def fitnessFunction(self, x:np.ndarray):
-        if self.__n_workers > 1:
+        if self._n_workers > 1:
             p = current_process()
             worker_idx = p._identity[0]
         else:
@@ -585,7 +610,7 @@ class MLPOptimizer:
         Evaluator.SetVerbose(0)
 
         # Translate gene and update hyper-parameters.
-        self.__translateGene(x, Evaluator=Evaluator)
+        self._translateGene(x, Evaluator=Evaluator)
 
         # Set output directory for MLP training callbacks.
         Evaluator.SetSaveDir(self.save_dir)
@@ -609,39 +634,6 @@ class MLPOptimizer:
     def inv_fitnessFunction(self, x):
         return -self.fitnessFunction(x=x)
     
-    # def fitnessFunction(self, ga_instance:pygad.GA, x:np.ndarray, x_idx:int):
-    #     """ Fitness function evaluated during GA routine.
-    #     """
-
-    #     # Initate MLP evaluation class.
-    #     Evaluator:EvaluateArchitecture = EvaluateArchitecture_NICFD(self._Config)
-
-    #     # Set CPU index.
-    #     Evaluator.SetTrainHardware("CPU", x_idx)
-
-    #     Evaluator.SetVerbose(0)
-
-    #     # Translate gene and update hyper-parameters.
-    #     self.__translateGene(x, Evaluator=Evaluator)
-
-    #     # Set output directory for MLP training callbacks.
-    #     Evaluator.SetSaveDir(self.save_dir)
-
-    #     # Train for 1000 epochs direct and physics-informed.
-    #     Evaluator.SetNEpochs(1000)
-    #     Evaluator.CommenceTraining()
-
-    #     # Extract test set evaluation score.
-    #     Evaluator.TrainPostprocessing()
-    #     test_score = Evaluator.GetTestScore() 
-
-    #     # Scale test set loss to fitness.
-    #     fitness_test_score = -np.log10(test_score)
-
-    #     # Free up memory
-    #     del Evaluator 
-
-    #     return fitness_test_score
     
     def SaveOptimizer(self, file_name:str):
         """Save optimizer instance.
@@ -656,12 +648,165 @@ class MLPOptimizer:
         return 
     
 
+class MLPOptimizer_FGM(MLPOptimizer):
+    __output_group:int = 0 
+    def __init__(self, Config_in:FlameletAIConfig):
+        MLPOptimizer.__init__(self, Config_in)
+        return
+    
+    def SetOutputGroup(self, output_group:int=0):
+        self.__output_group = output_group
+        self.SetAlpha_Expo(self._Config.GetAlphaExpo(output_group))
+        self.SetLR_Decay(self._Config.GetLRDecay(output_group))
+        return 
+    
+    def CreateOutputs(self):
+        self.opt_history_filepath = self._Config.GetOutputDir() + "/history_optim_Group"+str(self.__output_group+1)+"_"+self._history_extension+".csv"
+        with open(self.opt_history_filepath, "w+") as fid:
+            if self._optimizeNN:
+                fid.write("Iteration,mini-batch exp, activation function, alpha expo, lr decay, architecture,fitness,cost\n")
+            else:
+                fid.write("Iteration,mini-batch exp, activation function, alpha expo, lr decay, architecture,solution,fitness\n")
+        # Prepare optimization output directory.
+        self.save_dir = self._Config.GetOutputDir()+"/Architectures_Group"+str(self.__output_group+1)+"_Optim"+self._history_extension
+        if not os.path.isdir(self.save_dir):
+            os.mkdir(self.save_dir)
+        return 
+    
+    def fitnessFunction(self, x:np.ndarray):
+        if self._n_workers > 1:
+            p = current_process()
+            worker_idx = p._identity[0]
+        else:
+            worker_idx = 0
+        Evaluator:EvaluateArchitecture = EvaluateArchitecture_FGM(self._Config, self.__output_group)
+
+        # Set CPU index.
+        Evaluator.SetTrainHardware("CPU", worker_idx)
+
+        Evaluator.SetVerbose(0)
+
+        # Translate gene and update hyper-parameters.
+        self._translateGene(x, Evaluator=Evaluator)
+
+        # Set output directory for MLP training callbacks.
+        Evaluator.SetSaveDir(self.save_dir)
+
+        # Train for 1000 epochs direct and physics-informed.
+        Evaluator.SetNEpochs(self._n_epochs)
+        Evaluator.CommenceTraining()
+
+        # Extract test set evaluation score.
+        Evaluator.TrainPostprocessing()
+        test_score = Evaluator.GetTestScore() 
+
+        # Scale test set loss to fitness.
+        fitness_test_score = np.log10(test_score)
+
+        # Free up memory
+        del Evaluator 
+
+        return fitness_test_score
+    
+    def saveGenerationInfo_DE(self, x, convergence=False):
+        self._PostProcessing(x)
+        
+        return super().saveGenerationInfo_DE(x, convergence)
+
+    def _PostProcessing(self, x):
+
+        Config:FlameletAIConfig = FlameletAIConfig(self._Config.GetConfigName() + ".cfg")
+        idx_x = 0
+        print("Optimized hyper-parameters:")
+        if self._optimizebatch:
+            batch_expo = int(x[idx_x])
+            Config.SetBatchExpo(batch_expo, self.__output_group)
+            idx_x += 1 
+            print("- mini-batch exponent: %i" % batch_expo)
+        if self._optimizeLR:
+            alpha_expo = x[idx_x]
+            idx_x += 1 
+            print("- initial learning rate exponent: %.5e" % (alpha_expo))
+            Config.SetAlphaExpo(alpha_expo, self.__output_group)
+            lr_decay = x[idx_x]
+            print("- learning rate decay parameter: %.5e" % lr_decay)
+            self._Config.SetLRDecay(lr_decay, self.__output_group)
+            idx_x += 1 
+        if self._optimizeNN:
+            architecture = [int(x[idx_x])]
+            idx_x += 1 
+            print("- hidden layer architecture: "+ " ".join(("%i" % n) for n in architecture))
+            Config.SetHiddenLayerArchitecture(architecture, self.__output_group)
+        if self._optimizephi:
+            phi = self.__activation_function_options[int(x[idx_x])]
+            idx_x += 1
+            print("- hidden layer activation function: %s" % phi)
+            Config.SetActivationFunction(phi, self.__output_group)
+        
+        Config.SaveConfig()
+        return
+    
+class MLPOptimizer_NICFD(MLPOptimizer):
+
+    def __init__(self, Config_in:EntropicAIConfig):
+        MLPOptimizer.__init__(self, Config_in)
+        return
+    
+    def CreateOutputs(self):
+        self.opt_history_filepath = self._Config.GetOutputDir() + "/history_entropy_"+self._history_extension+".csv"
+        with open(self.opt_history_filepath, "w+") as fid:
+            if self._optimizeNN:
+                fid.write("Iteration,mini-batch exp, activation function, alpha expo, lr decay, architecture,fitness,cost\n")
+            else:
+                fid.write("Iteration,mini-batch exp, activation function, alpha expo, lr decay, architecture,solution,fitness\n")
+        # Prepare optimization output directory.
+        self.save_dir = self._Config.GetOutputDir()+"/Architectures_Optim"+self._history_extension
+        if not os.path.isdir(self.save_dir):
+            os.mkdir(self.save_dir)
+        return 
+    
+    def fitnessFunction(self, x:np.ndarray):
+        if self._n_workers > 1:
+            p = current_process()
+            worker_idx = p._identity[0]
+        else:
+            worker_idx = 0
+        Evaluator:EvaluateArchitecture = EvaluateArchitecture_NICFD(self._Config)
+
+        # Set CPU index.
+        Evaluator.SetTrainHardware("CPU", worker_idx)
+
+        Evaluator.SetVerbose(0)
+
+        # Translate gene and update hyper-parameters.
+        self._translateGene(x, Evaluator=Evaluator)
+
+        # Set output directory for MLP training callbacks.
+        Evaluator.SetSaveDir(self.save_dir)
+
+        # Train for 1000 epochs direct and physics-informed.
+        Evaluator.SetNEpochs(self._n_epochs)
+        Evaluator.CommenceTraining()
+
+        # Extract test set evaluation score.
+        Evaluator.TrainPostprocessing()
+        test_score = Evaluator.GetTestScore() 
+
+        # Scale test set loss to fitness.
+        fitness_test_score = np.log10(test_score)
+
+        # Free up memory
+        del Evaluator 
+
+        return fitness_test_score
+    
+    
 class PlotHPOResults:
     __Config:Config = None 
-    __optimize_learningrate:bool = True 
-    __optimize_batch:bool = True 
-    __optimize_architecture:bool = True 
-    __optimize_phi:bool = True 
+    _optimizelearningrate:bool = True 
+    _optimizebatch:bool = True 
+    _optimizearchitecture:bool = True 
+    _optimizephi:bool = True 
 
     __completed_models:list[str] = []
     __C2_test_set_scores:list[float] = []
@@ -688,7 +833,7 @@ class PlotHPOResults:
         :param optimize_LR: consider learning rate parameters(True, default), or not (False)
         :type optimize_LR: bool, optional
         """
-        self.__optimize_learningrate = optimize_LR
+        self._optimizelearningrate = optimize_LR
         return 
     
     def Optimize_Batch_HP(self, optimize_batch:bool=True):
@@ -697,7 +842,7 @@ class PlotHPOResults:
         :param optimize_batch: consider mini-batch size exponent (True, default), or not (False)
         :type optimize_batch: bool, optional
         """
-        self.__optimize_batch = optimize_batch 
+        self._optimizebatch = optimize_batch 
         return 
     
     def Optimize_Architecture_HP(self, optimize_architecture:bool=True):
@@ -706,22 +851,22 @@ class PlotHPOResults:
         :param optimize_architecture: consider hidden layer perceptron count (True, default) or not (False)
         :type optimize_architecture: bool, optional
         """
-        self.__optimize_architecture = optimize_architecture 
+        self._optimizearchitecture = optimize_architecture 
         return 
     
     def Optimize_Activation_HP(self, optimize_activation_function:bool=True):
-        self.__optimize_phi = optimize_activation_function
+        self._optimizephi = optimize_activation_function
         return 
     
     def ReadArchitectures(self):
         optim_header = "Architectures_Optim"
-        if self.__optimize_batch:
+        if self._optimizebatch:
             optim_header += "B"
-        if self.__optimize_learningrate:
+        if self._optimizelearningrate:
             optim_header += "LR"
-        if self.__optimize_architecture:
+        if self._optimizearchitecture:
             optim_header += "A"
-        if self.__optimize_phi:
+        if self._optimizephi:
             optim_header += "Phi"
 
         optim_directory = self.__Config.GetOutputDir()+"/"+optim_header
