@@ -80,7 +80,7 @@ class FlameletConcatenator:
     __Species_in_FGM = []
 
     # Passive look-up terms to include in the manifold.
-    __LookUp_vars = ["Heat_Release"]
+    __LookUp_vars = []
     __LookUp_flamelet_data:np.ndarray = None 
 
     # Progress variable source term name.
@@ -113,24 +113,7 @@ class FlameletConcatenator:
             print("Loading flameletAI configuration " + Config.GetConfigName())
         self.__Config = Config
         self.__SynchronizeSettings()
-        # 
-
-        # # Load settins from configuration:
-        # self.__include_freeflames = self.__Config.GenerateFreeFlames()
-        # self.__include_burnerflames = self.__Config.GenerateBurnerFlames()
-        # self.__include_equilibrium = self.__Config.GenerateEquilibrium()
-        # self.__include_counterflame = False#self.__Config.GenerateCounterFlames()
-
-        # self.__Np_per_flamelet = self.__Config.GetNpConcatenation()
-        # [self.__mix_status_min, self.__mix_status_max] = self.__Config.GetMixtureBounds()
-        # self.__f_train = self.__Config.GetTrainFraction()
-        # self.__f_test = self.__Config.GetTestFraction()
         
-        # self.SetAuxilarySpecies(self.__Config.GetPassiveSpecies())
-        # self.SetLookUpVars(self.__Config.GetLookUpVariables())
-
-        # self.__flameletdata_dir = self.__Config.GetOutputDir()
-        # self.__output_file_header = self.__Config.GetConcatenationFileHeader()
         return 
     
     def __SynchronizeSettings(self):
@@ -145,8 +128,8 @@ class FlameletConcatenator:
         self.__f_train = self.__Config.GetTrainFraction()
         self.__f_test = self.__Config.GetTestFraction()
         
-        #self.SetAuxilarySpecies(self.__Config.GetPassiveSpecies())
-        #self.SetLookUpVars(self.__Config.GetLookUpVariables())
+        self.SetAuxilarySpecies(self.__Config.GetPassiveSpecies())
+        self.SetLookUpVars(self.__Config.GetLookUpVariables())
 
         self.__flameletdata_dir = self.__Config.GetOutputDir()
         self.__output_file_header = self.__Config.GetConcatenationFileHeader()
@@ -448,8 +431,12 @@ class FlameletConcatenator:
         total_data = np.append(total_data, self.__LookUp_flamelet_data, axis=1)
         total_data = np.append(total_data, self.__flamelet_ID,axis=1)
 
+        # Filter unique data points.
         _, idx_unique = np.unique(self.__CV_flamelet_data, axis=0, return_index=True)
         total_data = total_data[idx_unique, :]
+
+        # Remove any empty rows.
+        total_data = total_data[~np.all(total_data == 0, axis=1)]
 
         # Shuffle flamelet data to remove bias.
         np.random.shuffle(total_data)
@@ -490,7 +477,8 @@ class FlameletConcatenator:
         fid.close()
         if self.__verbose > 0:
             print("Done!")
-        
+        return 
+    
     def __SizeDataArrays(self):
         """Size the output data arrays according to the number of flamelets and manifold resolution.
         """
@@ -631,17 +619,6 @@ class FlameletConcatenator:
             # Load flamelet data
             D = np.loadtxt(flamelet_dir + "/" + eq_file + "/" + f, delimiter=',',skiprows=1)
             
-            # Compute the progress variable and reaction rates
-
-
-            # Load the flamelet enthalpy and mixture fraction
-            # try:
-            #     enth_flamelet = D[:, variables.index('Total_Enthalpy')]
-            #     mfrac_flamelet = D[:, variables.index('Mixture_Fraction')]
-            # except:
-            #     enth_flamelet = D[:, variables.index('EnthalpyTot')]
-            #     mfrac_flamelet = D[:, variables.index('MixtureFraction')]
-
             # Set flamelet controlling variables
             CV_flamelet = np.zeros([len(D), self.__N_control_vars])
             for iCV in range(self.__N_control_vars):
@@ -652,9 +629,6 @@ class FlameletConcatenator:
                 else:
                     CV_flamelet[:, iCV] = D[:, variables.index(self.__controlling_variables[iCV])]
 
-            # CV_flamelet[:, 0] = pv_flamelet
-            # CV_flamelet[:, 1] = enth_flamelet
-            # CV_flamelet[:, 2] = mfrac_flamelet
             CV_min, CV_max = np.min(CV_flamelet, axis=0), np.max(CV_flamelet, axis=0)
             CV_norm = (CV_flamelet - CV_min)/(CV_max - CV_min + 1e-10)
 
@@ -766,17 +740,7 @@ class FlameletConcatenator:
                 self.__LookUp_flamelet_data[start:end, :] = lookup_sampled
                 self.__Sources_flamelet_data[start:end, :] = sources_sampled
                 self.__flamelet_ID[start:end, :] = i_start + i_flamelet + i_flamelet_total
-                    # for i_CV in range(3):
-                    #     self.__CV_flamelet_data[(i_start + i_flamelet + i_flamelet_total) * self.__Np_per_flamelet: (i_start + i_flamelet+1+ i_flamelet_total)*self.__Np_per_flamelet, i_CV] = np.interp(S_q, S_flamelet_norm, CV_flamelet[:, i_CV])
-                    # for iVar_TD in range(len(self.__TD_train_vars)):
-                    #     self.__TD_flamelet_data[(i_start + i_flamelet+ i_flamelet_total) * self.__Np_per_flamelet: (i_start + i_flamelet+1+ i_flamelet_total)*self.__Np_per_flamelet, iVar_TD] = np.interp(S_q, S_flamelet_norm, TD_data[:, iVar_TD])
-                    # if self.__Config.PreferentialDiffusion():
-                    #     for iVar_PD in range(len(self.__PD_train_vars)):
-                    #         self.__PD_flamelet_data[(i_start + i_flamelet+ i_flamelet_total) * self.__Np_per_flamelet: (i_start + i_flamelet+1+ i_flamelet_total)*self.__Np_per_flamelet, iVar_PD] = np.interp(S_q, S_flamelet_norm, PD_data[:, iVar_PD])
-                    # for iVar_LU in range(len(self.__LookUp_vars)):
-                    #     self.__LookUp_flamelet_data[(i_start + i_flamelet+ i_flamelet_total) * self.__Np_per_flamelet: (i_start + i_flamelet+1+ i_flamelet_total)*self.__Np_per_flamelet, iVar_LU] = np.interp(S_q, S_flamelet_norm, LookUp_data[:, iVar_LU])
-                    # for iVar_Source in range(1 + 3*len(self.__Species_in_FGM)):
-                    #     self.__Sources_flamelet_data[(i_start + i_flamelet+ i_flamelet_total) * self.__Np_per_flamelet: (i_start + i_flamelet+1+ i_flamelet_total)*self.__Np_per_flamelet, iVar_Source] = np.interp(S_q, S_flamelet_norm, Sources_data[:, iVar_Source])
+
         return len(flamelets) + i_flamelet_total
 
 class GroupOutputs:
@@ -908,7 +872,6 @@ class GroupOutputs:
 
         self.__iVar_remove = []
         for var in vars_to_remove:
-            print(var)
             if var not in flamelet_variables:
                 raise Exception("Variable " + var + " not present in flamelet data.")
             self.__iVar_remove.append(flamelet_variables.index(var))
@@ -1031,9 +994,6 @@ class GroupOutputs:
         max_group = max(self.__n_groups)
 
         unique_groups = range(min_group, max_group + 1)
-        print("Interesting combinations of grouped variables:")
-        # fig = plt.figure(figsize=[10,10])
-        # ax = plt.axes()
 
         n_network_evals = []
         interesting_groups = []
@@ -1044,20 +1004,9 @@ class GroupOutputs:
             max_affinity_in_combination = max(affinities_combinations)
             iMax_affinity = np.argmax(affinities_combinations)
             interesting_group = self.__group_variables[same_number_of_groups[iMax_affinity]]
-            print(str(j+1)+":")
-            for iGroup, g in enumerate(interesting_group):
-                print("Output group " + str(iGroup)+ ": [" + ",".join("\"" + s + "\"" for s in g) + "]")
-            print()
-            #ax.plot(self.__ComputeNumberofEvaluations(interesting_group), max_affinity_in_combination, 'o', label="Combination "+str(j+1))
             n_network_evals.append(self.__ComputeNumberofEvaluations(interesting_group))
             interesting_groups.append(interesting_group)
             self.__most_interesting_groups.append(interesting_group)
-        # ax.grid()
-        # ax.set_xlabel("Number of network evaluations[-]",fontsize=20)
-        # ax.set_ylabel("Group affinity[-]",fontsize=20)
-        # ax.tick_params(which='both',labelsize=18)
-        # ax.legend(fontsize=20)
-        # plt.show()
 
         group_fewest_evaluations = np.argmin(np.array(n_network_evals))
         print("Output combinations with fewest number of network evaluations:")
