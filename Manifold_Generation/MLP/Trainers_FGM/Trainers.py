@@ -81,7 +81,10 @@ class Train_Flamelet_Direct(TensorFlowFit):
     def GetTrainData(self):
         super().GetTrainData()
         return 
+    
 class Train_Source_PINN(CustomTrainer):
+    """Physics-informed trainer for training flamelet source terms.
+    """
     __Config:FlameletAIConfig
     __boundary_data_file:str =DefaultProperties.boundary_file_header+"_full.csv"
     __X_unb_train:np.ndarray
@@ -89,15 +92,20 @@ class Train_Source_PINN(CustomTrainer):
     __Y_unb_train:np.ndarray 
     __Y_b_train:np.ndarray 
 
-    __Np_unb:int 
-    __Np_b:int 
-
     __pv_unb_constraint_factor:float = None 
     __pv_b_constraint_factor_lean:float = None 
     __pv_b_constraint_factor_rich:float = None 
     __val_lambda:float=1.0
 
     def __init__(self, Config_in:FlameletAIConfig, group_idx:int=0):
+        """Class constructor. Initialize a source term trainer for a given MLP output group.
+
+        :param Config_in: FlameletAI configuration class.
+        :type Config_in: FlameletAIConfig
+        :param group_idx: MLP output group index, defaults to 0
+        :type group_idx: int, optional
+        """
+        
         CustomTrainer.__init__(self)
         self.__Config = Config_in 
         self._controlling_vars = DefaultProperties.controlling_variables
@@ -105,6 +113,13 @@ class Train_Source_PINN(CustomTrainer):
         self.callback_every = 10
         self.__boundary_data_file = self.__Config.GetOutputDir()+"/"+DefaultProperties.boundary_file_header+"_full.csv"
         
+        # Synchronize settings with loaded configuration
+        self._alpha_expo = self.__Config.GetAlphaExpo(group_idx)
+        self._lr_decay = self.__Config.GetLRDecay(group_idx)
+        self._batch_expo = self.__Config.GetBatchExpo(group_idx)
+        self._activation_function = self.__Config.GetActivationFunction(group_idx)
+        self.SetHiddenLayers(self.__Config.GetHiddenLayerArchitecture(group_idx))
+
         return 
 
     def SetBoundaryDataFile(self, boundary_data_file:str):
@@ -116,12 +131,16 @@ class Train_Source_PINN(CustomTrainer):
         return 
     
     def GetBoundaryData(self):
+        """Load flamelet data equilibrium boundary data.
+        """
+
+        # Load controlling and train variables from boundary data.
         X_boundary, Y_boundary = GetReferenceData(self.__boundary_data_file, x_vars=self._controlling_vars, train_variables=self._train_vars)
         mixfrac_boundary = X_boundary[:, self._controlling_vars.index(DefaultProperties.name_mixfrac)]
         pv_boundary = X_boundary[:, self._controlling_vars.index(DefaultProperties.name_pv)]
-        h_boundary = X_boundary[:, self._controlling_vars.index(DefaultProperties.name_enth)]
         is_unb = np.ones(np.shape(X_boundary)[0],dtype=bool)
 
+        # Filter reactant and product data.
         fuel_definition = self.__Config.GetFuelDefinition()
         oxidizer_definition = self.__Config.GetOxidizerDefinition()
         fuel_weights = self.__Config.GetFuelWeights()
@@ -145,6 +164,8 @@ class Train_Source_PINN(CustomTrainer):
 
         self.__X_unb_train, self.__Y_unb_train = X_unb_n, Y_unb_n 
         self.__X_b_train, self.__Y_b_train = X_b_n, Y_b_n 
+
+        # Compute progress variable derivatives w.r.t. mixture fraction for reactants and products.
 
         self.__Config.gas.TP = 300, 101325
         self.__Config.gas.set_mixture_fraction(0.0, fuel_string,oxidizer_string)
@@ -174,9 +195,11 @@ class Train_Source_PINN(CustomTrainer):
     
     def GetTrainData(self):
         super().GetTrainData()
-        print("Extracting boundary data...")
+        if self._verbose > 0:
+            print("Extracting boundary data...")
         self.GetBoundaryData()
-        print("Done")
+        if self._verbose > 0:
+            print("Done")
         return 
     
     @tf.function
@@ -190,42 +213,81 @@ class Train_Source_PINN(CustomTrainer):
 
     @tf.function
     def ComputeUnburntSourceConstraint(self, x_boundary_norm:tf.constant, y_boundary_norm:tf.constant):
-        penalty=0
+        """Compute the reactant data physics-informed source term constraint value
+
+        :param x_boundary_norm: normalized reactant controlling variable data.
+        :type x_boundary_norm: tf.constant
+        :param y_boundary_norm: normalized reactant label data.
+        :type y_boundary_norm: tf.constant
+        :return: physics-informed source term penalty value.
+        :rtype: tf.constant
+        """
+
+        penalty=0.0
+        # Loop over output variables
         for iVar in range(len(self._train_vars)):
-            Y_norm, dY_norm = self.ComputeDerivatives(x_boundary_norm)
+
+            # Get normalized MLP output Jacobian.
+            Y_norm, dY_norm = self.ComputeDerivatives(x_boundary_norm, iVar)
             dY_dpv_norm = dY_norm[:, 0]
             dY_dh_norm = dY_norm[:, 1]
             dY_dz_norm = dY_norm[:, 2]
             
+            # Dot product between reactant pv-Z plane and MLP output Jacobian.
             dY_dpvz = dY_dpv_norm * self.__pv_unb_constraint_factor + dY_dz_norm
+
+            # Penalty term for derivative terms.
             term_1 = tf.reduce_mean(tf.pow(dY_dpvz, 2))
             term_2 = tf.reduce_mean(tf.pow(dY_dh_norm, 2))
+
+            # Penalty term for predicted values.
             term_3 = tf.reduce_mean(tf.pow(Y_norm - y_boundary_norm, 2))
+
             penalty = penalty + term_1 + term_2 + term_3
 
         return penalty
     
     @tf.function
     def ComputeBurntSourceConstraint(self, x_boundary_norm:tf.constant, y_boundary_norm:tf.constant):
-        penalty = 0
+        """Compute the product data physics-informed source term constraint value
+
+        :param x_boundary_norm: normalized product controlling variable data.
+        :type x_boundary_norm: tf.constant
+        :param y_boundary_norm: normalized product label data.
+        :type y_boundary_norm: tf.constant
+        :return: physics-informed source term penalty value.
+        :rtype: tf.constant
+        """
+
+        penalty = 0.0
+        # Loop over output variables
         for iVar in range(len(self._train_vars)):
+
+            # Get normalized MLP output Jacobian.
             Y_norm, dY_norm = self.ComputeDerivatives(x_boundary_norm, idx_out=iVar)
             dY_dpv_norm = dY_norm[:, 0]
             dY_dh_norm = dY_norm[:, 1]
             dY_dz_norm = dY_norm[:, 2]
             
+            # Identify data points above and below stochiometry.
             dppv_dpv_rich = dY_dpv_norm[x_boundary_norm[:,2]>=self.__Z_st_norm]
             dppv_dz_rich = dY_dz_norm[x_boundary_norm[:,2]>=self.__Z_st_norm]
             dppv_dpv_lean = dY_dpv_norm[x_boundary_norm[:,2]<self.__Z_st_norm]
             dppv_dz_lean = dY_dz_norm[x_boundary_norm[:,2]<self.__Z_st_norm]
             
+            # Dot product between reactant pv-Z plane and MLP output Jacobian.
             dY_dpvz_lean = dppv_dpv_lean * self.__pv_b_constraint_factor_lean + dppv_dz_lean
             dY_dpvz_rich = dppv_dpv_rich * self.__pv_b_constraint_factor_rich + dppv_dz_rich
 
+            # Penalty term for derivative terms.
             term_1 = tf.reduce_mean(tf.pow(dY_dpvz_lean,2)) + tf.reduce_mean(tf.pow(dY_dpvz_rich,2))
             term_2 = tf.reduce_mean(tf.pow(dY_dh_norm,2))
+
+            # Penalty term for predicted values.
             term_3 = tf.reduce_mean(tf.pow(Y_norm - y_boundary_norm,2))
+
             penalty = penalty+ term_1 + term_2 + term_3 
+            
         return penalty 
 
     @tf.function 
@@ -253,7 +315,6 @@ class Train_Source_PINN(CustomTrainer):
         Np_boundary = tf.cast(tf.shape(x_ub_boundary)[0],tf.float32)
         Np_tot = Np_domain + Np_boundary
         total_grads = [(Np_domain*g_d + 0.01*Np_boundary*val_lambda*g_b)/Np_tot for (g_d, g_b) in zip(grads_direct, grads_ub)]
-        #total_grads = [(Np_domain*g_d + Np_boundary*val_lambda*g_b)/Np_tot for (g_d, g_b) in zip(grads_direct, grads_ub)]
         
         self._optimizer.apply_gradients(zip(total_grads, self._trainable_hyperparams))
         return grads_direct, grads_ub
@@ -268,6 +329,7 @@ class Train_Source_PINN(CustomTrainer):
     def PostProcessing(self):
         self.FinalAdjustment()
         return super().PostProcessing()
+    
     def SetTrainBatches(self):
         train_batches_domain = super().SetTrainBatches()
         domain_batches_list = [b for b in train_batches_domain]
@@ -295,7 +357,6 @@ class Train_Source_PINN(CustomTrainer):
             Y_b = XY_b[1]
             grads_domain, grads_boundary = self.Train_Step(X_domain, Y_domain, X_unb, Y_unb, X_b, Y_b,self.__val_lambda)
             self.__val_lambda = self.update_lambda(grads_domain, grads_boundary, self.__val_lambda)
-            #print(grads_boundary[0].numpy())
         return 
     
     @tf.function
@@ -317,7 +378,6 @@ class Train_Source_PINN(CustomTrainer):
         self.Plot_and_Save_History()
         PlotFlameletData(self, self.__Config, self._train_name)
         self.PlotBoundaryData()
-        self.write_SU2_MLP(self._save_dir + "/Model_"+str(self._model_index)+"/MLP_Source")
         return super().CustomCallback()
     
     def PlotBoundaryData(self):
@@ -413,8 +473,9 @@ class EvaluateArchitecture_FGM(EvaluateArchitecture):
             os.mkdir(self.main_save_dir)
         self.SynchronizeTrainer()
         return 
+    
     def SetBoundaryDataFile(self, boundary_data_file:str):
-        if self.__kind_trainer != "physicsinformed":
+        if self.__kind_trainer != "physicsinformed" and self.verbose > 0:
             print("Boundary data will be ignored.")
         else:
             self.__trainer_PINN.SetBoundaryDataFile(boundary_data_file)
@@ -430,9 +491,6 @@ def PlotFlameletData(Trainer:MLPTrainer, Config:FlameletAIConfig, train_name:str
     N_plot = 3
 
     flamelet_dir = Config.GetOutputDir()
-    include_freeflames = Config.GenerateFreeFlames()
-    include_burnerflames = Config.GenerateBurnerFlames()
-    include_eq = Config.GenerateEquilibrium()
 
     freeflame_phis = os.listdir(flamelet_dir + "/freeflame_data/")
     idx_phi_plot = np.random.randint(0, len(freeflame_phis), N_plot)
