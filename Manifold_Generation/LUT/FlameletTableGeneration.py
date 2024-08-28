@@ -29,8 +29,8 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import sys,os
 from Common.DataDrivenConfig import FlameletAIConfig, Config
-from Common.CommonMethods import GetReferenceData
-#from Common.Config_base import Config
+from Common.CommonMethods import GetReferenceData 
+from Common.Properties import DefaultSettings_FGM
 import cantera as ct
 import gmsh 
 import pickle
@@ -216,9 +216,9 @@ class SU2TableGenerator:
     _table_hullnodes = []   # Hull node indices per table level.
     __table_insert_levels:list[float] = []
 
-    _controlling_variables:list[str]=["ProgressVariable",\
-                                      "EnthalpyTot",\
-                                      "MixtureFraction"]  # FGM controlling variables
+    _controlling_variables:list[str]=[DefaultSettings_FGM.name_pv,\
+                                      DefaultSettings_FGM.name_enth,\
+                                      DefaultSettings_FGM.name_mixfrac]  # FGM controlling variables
     _lookup_tree:Invdisttree = None     # KD tree with inverse distance weighted interpolation for flamelet data interpolation.
     _flamelet_data_scaler:MinMaxScaler = None   # Scaler for flamelet data controlling variables.
     _n_near:int = 4     # Number of nearest neighbors from which to evaluate flamelet data.
@@ -368,9 +368,6 @@ class SU2TableGenerator:
         
         CV_full_scaled = self._scaler.fit_transform(CV_full)
 
-       
-        #del CV_full
-
         # Exctract train and test data
         train_data_file = self._Config.GetOutputDir()+"/"+self._Config.GetConcatenationFileHeader()+"_train.csv"
         test_data_file = self._Config.GetOutputDir()+"/"+self._Config.GetConcatenationFileHeader()+"_test.csv"
@@ -394,17 +391,17 @@ class SU2TableGenerator:
         
         print("Search for best tree parameters...")
         # Do brute-force search to get the optimum number of nearest neighbors and distance power.
-        # n_near_range = range(1, 20)
-        # p_range = range(2, 6)
-        # RMS_ppv = np.zeros([len(n_near_range), len(p_range)])
-        # for i in tqdm(range(len(n_near_range))):
-        #     for j in range(len(p_range)):
-        #         PPV_predicted = self._lookup_tree(q=CV_test_scaled, nnear=n_near_range[i], p=p_range[j])[:, self._Flamelet_Variables.index(var_to_test_for)]
-        #         rms_local = mean_squared_error(y_true=PPV_test, y_pred=PPV_predicted)
-        #         RMS_ppv[i,j] = rms_local 
-        # [imin,jmin] = divmod(RMS_ppv.argmin(), RMS_ppv.shape[1])
-        # self._n_near = n_near_range[imin]
-        # self._p_fac = p_range[jmin]
+        n_near_range = range(1, 20)
+        p_range = range(1, 6)
+        RMS_ppv = np.zeros([len(n_near_range), len(p_range)])
+        for i in tqdm(range(len(n_near_range))):
+            for j in range(len(p_range)):
+                PPV_predicted = self._lookup_tree(q=CV_test_scaled, nnear=n_near_range[i], p=p_range[j])[:, self._Flamelet_Variables.index(var_to_test_for)]
+                rms_local = mean_squared_error(y_true=PPV_test, y_pred=PPV_predicted)
+                RMS_ppv[i,j] = rms_local 
+        [imin,jmin] = divmod(RMS_ppv.argmin(), RMS_ppv.shape[1])
+        self._n_near = n_near_range[imin]
+        self._p_fac = p_range[jmin]
         print("Done!")
         print("Best found number of nearest neighbors: "+str(self._n_near))
         print("Best found distance power: "+str(self._p_fac))
@@ -412,75 +409,6 @@ class SU2TableGenerator:
         self._lookup_tree = Invdisttree(X=CV_full_scaled,z=D_full)
         print("Done!")
         
-        # fig = plt.figure()
-        # ax = plt.axes(projection='3d')
-        # ax.plot3D(CV_full[::20,0],CV_full[::20,1],CV_full[::20,2],'k.')
-        # #data_interp = self.__EvaluateFlameletInterpolator(CV_full)
-        # #ax.plot3D(data_interp[:,0],data_interp[:,1],data_interp[:,2],'r.')
-        
-
-
-        scalars = self._Config.GetUnburntScalars(0.495, 300)
-        val_z = scalars[2]
-        val_h = scalars[1]
-        val_pv = scalars[0]
-        pv_range = np.linspace(val_pv, 0.0, 200)
-        h_range = val_h*np.ones(200)
-        z_range = val_z*np.ones(200)
-        CV_unscaled = np.hstack((pv_range[:,np.newaxis],h_range[:,np.newaxis],z_range[:,np.newaxis]))
-        interp_data = self.__EvaluateFlameletInterpolator(CV_unscaled)
-        
-
-        fig = plt.figure(figsize=[10,10])
-        ax = plt.axes()
-        ax.plot(CV_full[:,0], CV_full[:,2],'k.',label='Flamelet data')
-        ax.plot(pv_range, z_range,'r',label='Query points')
-        ax.set_xlabel("Progress Variable",fontsize=20)
-        ax.set_ylabel("Mixture Fraction",fontsize=20)
-        ax.tick_params(which='both',labelsize=18)
-        ax.legend(fontsize=20)
-        ax.grid()
-        fig.savefig("/home/ecbunschoten/Downloads/PV_Z_query.png",format='png',bbox_inches='tight')
-        plt.show()
-        #pv_grid = xgrid.flatten()
-
-        flamelet_data_dir = self._Config.GetOutputDir()+"/freeflame_data/"
-        phis = os.listdir(flamelet_data_dir)
-        phi_to_check = "phi_0.500102"
-        flamelets = os.listdir(flamelet_data_dir + "/" + phi_to_check)
-        flamelets_to_check = sample(flamelets, 3)
-        fig = plt.figure(figsize=[10,10])
-        ax = plt.axes()#projection='3d')
-        for f in flamelets_to_check:
-            flamelet_filepath  = flamelet_data_dir + "/" + phi_to_check + "/" + f 
-            with open(flamelet_filepath,'r') as fid:
-                variables = fid.readline().strip().split(",")
-            D_flamelet = np.loadtxt(flamelet_filepath, delimiter=',',skiprows=1)
-            pv_flamelet = self._Config.ComputeProgressVariable(variables, D_flamelet)
-            h_flamelet = D_flamelet[:, variables.index("EnthalpyTot")]
-            z_flamelet = D_flamelet[:, variables.index("MixtureFraction")]
-            CV_flamelet = np.hstack((pv_flamelet[:,np.newaxis],h_flamelet[:,np.newaxis],z_flamelet[:,np.newaxis]))
-            CV_flamelet_norm = self._scaler.transform(CV_flamelet)
-
-            flamelet_data_interp = self.__EvaluateFlameletInterpolator(CV_flamelet)
-            _, ix = self._lookup_tree.tree.query(CV_flamelet_norm,k=self._n_near)
-            # ax.plot3D(pv_flamelet, h_flamelet, z_flamelet,'k.',label=f)
-            # ax.plot3D(self._lookup_tree.z[ix, self._Flamelet_Variables.index("ProgressVariable")],\
-            #           self._lookup_tree.z[ix, self._Flamelet_Variables.index("EnthalpyTot")],\
-            #           self._lookup_tree.z[ix, self._Flamelet_Variables.index("MixtureFraction")],'r.')
-            # ax.plot3D(flamelet_data_interp[:, self._Flamelet_Variables.index("ProgressVariable")],\
-            #           flamelet_data_interp[:, self._Flamelet_Variables.index("EnthalpyTot")],\
-            #             flamelet_data_interp[:, self._Flamelet_Variables.index("MixtureFraction")],'g.')
-            ppv_flamelet = self._Config.ComputeProgressVariable_Source(variables, D_flamelet)
-            ax.plot(pv_flamelet, pv_flamelet, 'bs-',markevery=5,markerfacecolor='none',markersize=12, linewidth=4,label="Flamelet data")
-            #ax.plot(pv_flamelet, self._lookup_tree.z[ix, self._Flamelet_Variables.index("ProdRateTot_PV")], 'k.')
-            ax.plot(pv_flamelet, flamelet_data_interp[:, self._Flamelet_Variables.index("ProgressVariable")],'ro-',markevery=5,markersize=10,label="interpolated data")
-        ax.legend(fontsize=20)
-        ax.set_xlabel("Query Progress Variable",fontsize=20)
-        ax.set_ylabel("Interpolated Progress Variable",fontsize=20)
-        ax.grid()
-        fig.savefig("/home/ecbunschoten/Downloads/PV_interp_flamelet.pdf",format='pdf',bbox_inches='tight')
-        plt.show()
 
     def __EvaluateFlameletInterpolator(self, CV_unscaled:np.ndarray):
         CV_scaled = self._scaler.transform(CV_unscaled)
