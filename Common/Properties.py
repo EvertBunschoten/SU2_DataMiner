@@ -102,7 +102,7 @@ class DefaultSettings_FGM(DefaultProperties):
     
     controlling_variables:list[str] = [name_pv, name_enth, name_mixfrac]
 
-    init_learning_rate_expo:float = -3.0
+    init_learning_rate_expo:float = -2.8
     learning_rate_decay:float =  +9.8959e-01
     batch_size_exponent:int = 6
     hidden_layer_architecture:list[int] = [16, 20, 28, 34, 30, 24, 20]
