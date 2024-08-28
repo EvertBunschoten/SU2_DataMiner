@@ -221,8 +221,8 @@ class SU2TableGenerator:
                                       DefaultSettings_FGM.name_mixfrac]  # FGM controlling variables
     _lookup_tree:Invdisttree = None     # KD tree with inverse distance weighted interpolation for flamelet data interpolation.
     _flamelet_data_scaler:MinMaxScaler = None   # Scaler for flamelet data controlling variables.
-    _n_near:int = 4     # Number of nearest neighbors from which to evaluate flamelet data.
-    _p_fac:int = 5      # Power by which to weigh distances from query point.
+    _n_near:int = 11     # Number of nearest neighbors from which to evaluate flamelet data.
+    _p_fac:int = 3      # Power by which to weigh distances from query point.
 
     def __init__(self, Config:FlameletAIConfig, load_file:str=None):
         """
@@ -715,10 +715,11 @@ class SU2TableGenerator:
         #enth_grid = Q_interp[:, self._Flamelet_Variables.index("EnthalpyTot")]
         pv_grid = xgrid.flatten()
         enth_grid = ygrid.flatten()
-        idx_out = pv_grid > pv_unb
-        pv_grid[idx_out] = Q_interp[idx_out, self._Flamelet_Variables.index("ProgressVariable")]
-        enth_grid[idx_out] = Q_interp[idx_out, self._Flamelet_Variables.index("EnthalpyTot")]
-
+        # idx_out = pv_grid > pv_unb
+        # pv_grid[idx_out] = Q_interp[idx_out, self._Flamelet_Variables.index("ProgressVariable")]
+        # enth_grid[idx_out] = Q_interp[idx_out, self._Flamelet_Variables.index("EnthalpyTot")]
+        pv_grid = Q_interp[:, self._Flamelet_Variables.index("ProgressVariable")]
+        enth_grid = Q_interp[:, self._Flamelet_Variables.index("EnthalpyTot")]
         mixfrac_grid = val_mix_frac*np.ones(np.shape(pv_grid))
 
         pv_grid, enth_grid, mixfrac_grid = self.__ClipPVEnth(pv_grid, enth_grid, val_mix_frac)
