@@ -59,10 +59,11 @@ class PVOptimizer:
     __custom_population_set:bool = False
     __population_size:int     # Genetic algorithm population size.
 
-    __consider_freeflames = None 
-    __consider_burnerflames = None 
     __convergence = None # Convergence of optimization process.
     __min_fitness = 1.0  # Current minimum fitness value.
+    __current_fitness = 1.0e32
+    __stagnation_iter:int = 0
+    __stagnation_patience:int=100
 
     __n_workers:int=1   # Number of CPUs used to compute the population merit in parallel.
 
@@ -70,10 +71,10 @@ class PVOptimizer:
     __SpeciesRangeTolerance:float = 1e-5 
     __current_generation:int = 0
 
-    __Tu_min:float = 300 
-    __Tu_max:float = 500 
+    __Tu_min:float = -1e32
+    __Tu_max:float = 1e32
     __phi_min:float = 0.0
-    __phi_max:float = 600 
+    __phi_max:float = 1e32 
 
     __species_bounds_set:list[str] = []
     __species_custom_lb:list[float] = []
@@ -88,8 +89,7 @@ class PVOptimizer:
         """
 
         self.__Config = Config 
-        self.__consider_burnerflames = self.__Config.GenerateBurnerFlames()
-        self.__consider_freeflames = self.__Config.GenerateFreeFlames()
+        print("Loading flameletAI configuration with name " + self.__Config.GetConfigName())
         self.__output_dir = self.__Config.GetOutputDir()
         
         for sp in self.__Config.GetFuelDefinition():
@@ -97,15 +97,68 @@ class PVOptimizer:
         for sp in self.__Config.GetOxidizerDefinition():
             self.SetSpeciesBounds(sp, ub=0.0)    
 
+        sp_major_product = self.GetMajorProduct()
+        self.SetSpeciesBounds(sp_major_product,lb=0)
+
+        T_u_bounds = self.__Config.GetUnbTempBounds()
+        self.__Tu_max = T_u_bounds[1]
+        self.__Tu_min = T_u_bounds[0]
+        
         if not os.path.isdir(self.__Config.GetOutputDir()+"/PV_Optimization"):
             os.mkdir(self.__Config.GetOutputDir()+"/PV_Optimization")
         self.__output_dir = self.__Config.GetOutputDir()+"/PV_Optimization/"
-        print("Loading flameletAI configuration with name " + self.__Config.GetConfigName())
+
+        self.SetAdditionalProgressVariables(['Temperature', 'MolarWeightMix', 'Conductivity', 'ViscosityDyn', 'Cp'])
         return 
     
     def SetOutputDir(self, output_dir:str):
-        self.__output_dir = output_dir 
+        """Specify custom directory where to store progress variable optimization history.
 
+        :param output_dir: output directory.
+        :type output_dir: str
+        :raises Exception: if specified directory is not present or inaccessible.
+        """
+        if not os.path.isdir(output_dir):
+            raise Exception("Specified output directory is inaccessible on current hardware.")
+        
+        self.__output_dir = output_dir 
+        return
+    
+    def SetMixtureBounds(self, phi_min:float=0.0, phi_max:float=1e32):
+        """Specify the mixture status bounds between which flamelet data is considered for progress variable optimization.
+
+        :param phi_min: lower mixture status bound, defaults to 0.0
+        :type phi_min: float, optional
+        :param phi_max: upper mixture status bound, defaults to 1e32
+        :type phi_max: float, optional
+        :raises Exception: if lower bound exceeds upper bound or negative values are provided.
+        """
+        if phi_min >= phi_max:
+            raise Exception("Minimum mixture status should not exceed maximum mixture status.")
+        if phi_min < 0 or phi_max < 0:
+            raise Exception("Mixture status should be positive.")
+        
+        self.__phi_min = phi_min
+        self.__phi_max = phi_max 
+        return 
+    
+    def SetTemperatureBounds(self, Tu_min:float=250, Tu_max:float=2000):
+        """Specify the unburnt temperature bounds between which flamelet data is considered for progress variable optimization.
+
+        :param Tu_min: unburnt temperature lower bound, defaults to 250
+        :type Tu_min: float, optional
+        :param Tu_max: unburnt temperature upper bound, defaults to 2000
+        :type Tu_max: float, optional
+        :raises Exception: if lower bound exceeds upper bound or negative values are provided.
+        """
+        if Tu_min >= Tu_max:
+            raise Exception("Minimum temperature should not exceed maximum temperature.")
+        if Tu_min < 0 or Tu_max < 0:
+            raise Exception("Temperature should be positive.")
+        self.__Tu_min = Tu_min 
+        self.__Tu_max = Tu_max
+        return
+    
     def SetNWorkers(self, n_workers:int):
         """Define the number of parallel workers to be used during the population merit and constraint computation.
 
@@ -116,7 +169,8 @@ class PVOptimizer:
         if n_workers < 1:
             raise Exception("The number of workers used during the optimization process should be at least one.")
         self.__n_workers = n_workers
-
+        return
+    
     def SetAdditionalProgressVariables(self, additional_vars:list[str]):
         """Add additional variables to the progress vector.
 
@@ -126,7 +180,8 @@ class PVOptimizer:
         self.__additional_variables = []
         for var in additional_vars:
             self.__additional_variables.append(var)
-
+        return
+    
     def SetSpeciesBounds(self, sp_name:str, lb:float=-1,ub:float=1):
         if ub <= lb:
             raise Exception("Lower bound should be higher than upper bound.")
@@ -138,7 +193,8 @@ class PVOptimizer:
             self.__species_bounds_set.append(sp_name)
             self.__species_custom_lb.append(lb)
             self.__species_custom_ub.append(ub)
-
+        return
+    
     def OptimizePV(self):
         """Run the progress variable species selection and weights optimization process."""
 
@@ -165,22 +221,8 @@ class PVOptimizer:
         print("[" + ",".join("%+.16e" % (pv) for pv in self.__pv_weights_optim) + "]")
         np.save(self.__output_dir + "/" + self.__Config.GetConfigName() + "_PV_Def_optim.npy", self.__pv_definition_optim, allow_pickle=True)
         np.save(self.__output_dir + "/" + self.__Config.GetConfigName() + "_Weights_optim.npy", self.__pv_weights_optim, allow_pickle=True)
+        return
     
-    def ConsiderFreeFlames(self, input:bool):
-        """Use adiabatic free-flamelet data set during progress variable optimization.
-
-        :param input: include adiabatic flamelets during pv optimization (True) or not (False)
-        :type input: bool
-        """
-        self.__consider_freeflames=input
-
-    def ConsiderBurnerFlames(self, input:bool):
-        """Use burner-stabilized data set during progress variable optimization.
-
-        :param input: include burner-stabilized during pv optimization (True) or not (False)
-        :type input: bool
-        """
-        self.__consider_burnerflames=input
 
     def __CollectFlameletData(self):
         """Load flamelet manifold data from storage.
@@ -194,6 +236,7 @@ class PVOptimizer:
 
         # Generate monotonic progress and mass fraction incement vectors.
         self.__FilterFlameletData()
+        return
     
     def VisualizeWeights(self, pv_weights_input:np.array, fitness_val:float):
         """Visualize progress variable weights via bar chart.
@@ -215,7 +258,8 @@ class PVOptimizer:
         ax.grid(zorder=0)
         fig.savefig(self.__output_dir + "/Weights_Visualization_"+self.__Config.GetConfigName() + ".pdf", format='pdf', bbox_inches='tight')
         plt.close(fig)
-
+        return
+    
     def PlotConvergence(self):
         """Plot the convergence trend of the progress variable optimization process.
         """
@@ -230,6 +274,7 @@ class PVOptimizer:
         ax.set_yscale('log')
         fig.savefig(self.__output_dir+"/PV_Optimization_History_"+self.__Config.GetConfigName()+".pdf", format='pdf', bbox_inches='tight')
         plt.close(fig)
+        return
     
     def PlotPV(self,x):
         """Plot the normalized progress variable alongside the normalized species mass fractions for a sample flamelet.
@@ -328,6 +373,8 @@ class PVOptimizer:
         np.save(self.__output_dir + "/" + self.__Config.GetConfigName() + "_Weights_optim.npy", self.__pv_weights_optim, allow_pickle=True)
         self.__current_generation += 1
 
+        return
+    
     def SetNGenerations(self, n_generations:int):
         """Define the number of generations for which to run the genetic algorithm.
 
@@ -426,7 +473,7 @@ class PVOptimizer:
                                         updating=update_strategy,\
                                         strategy='best1exp',\
                                         seed=1,\
-                                        tol=1e-6)
+                                        tol=1e-3)
         
         res_full = min(monotonicity_full.residual(result.x)[0])
         if res_full > 0:
@@ -437,7 +484,8 @@ class PVOptimizer:
         self.__Optimization_Callback(result.x)
         print("Progress variable definition upon completion:")
         print("".join("%+.4e %s" % (self.__pv_weights_optim[i], self.__pv_definition_optim[i]) for i in range(len(self.__pv_weights_optim))))
-
+        return
+    
     def ScalePV(self):
         """Scale progress variable weights based on stochiometric conditions.
         """
@@ -459,7 +507,20 @@ class PVOptimizer:
         scale = 1 / (pv_burnt - pv_unburnt)
         for i in range(len(self.__pv_weights_optim)):
             self.__pv_weights_optim[i] *= scale 
+        return
+    
+    def GetMajorProduct(self):
+        self.__Config.gas.set_equivalence_ratio(1.0, "H2:1","O2:1,N2:3.76")
+        self.__Config.gas.TP=300, 101325
+        self.__Config.gas.equilibrate('TP')
+        sp_to_consider = self.__Config.gas.species_names.copy()
+        sp_to_consider.remove("N2")
+        Y_to_consider = [self.__Config.gas.Y[self.__Config.gas.species_index(s)] for s in sp_to_consider]
 
+        i_sp_max = np.argmax(Y_to_consider)
+        sp_major = sp_to_consider[i_sp_max]
+        return sp_major
+    
     def GetOptimizedWeights(self):
         """Get the optimized progress variable mass fraction weights.
 
@@ -481,34 +542,23 @@ class PVOptimizer:
         flamelet_dir = self.__Config.GetOutputDir()
 
         # Only adiabatic free-flame data and burner-stabilized flame data are considered in progress variable optimization.
-        if self.__consider_freeflames:
-            freeflame_subdirs = os.listdir(flamelet_dir + "/freeflame_data/")
-        if self.__consider_burnerflames:
-            burnerflame_subdirs = os.listdir(flamelet_dir + "/burnerflame_data/")   
+        freeflame_subdirs = os.listdir(flamelet_dir + "/freeflame_data/")
 
         # First step is to size the data array containing the species mass fraction increments throughout each flamelet.
         # Only 10% of the data is considered in order to reduce computational cost.
         reaction_zone_length = 0.15
         self.__valid_filepathnames = []
         j_flamelet = 0
-        if self.__consider_freeflames:
-            for phi in freeflame_subdirs:
-                val_phi = float(phi.split('_')[1])
-                if (val_phi >= self.__phi_min) and (val_phi <= self.__phi_max):
-                    flamelets = os.listdir(flamelet_dir + "/freeflame_data/" + phi)
-                    for f in flamelets:
-                        Tu = float(f.split("_")[2][2:-4])
-                        if (Tu >= self.__Tu_min) and (Tu <= self.__Tu_max):
-                            self.__valid_filepathnames.append(flamelet_dir + "/freeflame_data/"+ phi + "/" + f)
-                            j_flamelet += 1
-        if self.__consider_burnerflames:
-            for phi in burnerflame_subdirs:
-                val_phi = float(phi.split('_')[1])
-                if (val_phi >= self.__phi_min) and (val_phi <= self.__phi_max):
-                    flamelets = os.listdir(flamelet_dir + "/burnerflame_data/" + phi)
-                    for f in flamelets:
-                        self.__valid_filepathnames.append(flamelet_dir + "/burnerflame_data/"+ phi + "/" + f)
+        for phi in freeflame_subdirs:
+            val_phi = float(phi.split('_')[1])
+            if (val_phi >= self.__phi_min) and (val_phi <= self.__phi_max):
+                flamelets = os.listdir(flamelet_dir + "/freeflame_data/" + phi)
+                for f in flamelets:
+                    Tu = float(f.split("_")[2][2:-4])
+                    if (Tu >= self.__Tu_min) and (Tu <= self.__Tu_max):
+                        self.__valid_filepathnames.append(flamelet_dir + "/freeflame_data/"+ phi + "/" + f)
                         j_flamelet += 1
+
         with open(self.__valid_filepathnames[0],'r') as fid:
             self.__flamelet_variables = fid.readline().strip().split(',')
 
@@ -676,6 +726,4 @@ if __name__ == "__main__":
     config_input_file = sys.argv[-1]
     Config = FlameletAIConfig(config_input_file)
     PVO = PVOptimizer(Config)
-    PVO.ConsiderFreeFlames(True)
-    PVO.ConsiderBurnerFlames(False)
     PVO.OptimizePV()
