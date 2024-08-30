@@ -233,7 +233,7 @@ class Config:
         :raises Exception: if the learning rate decay parameter is not within zero and one.
         """
         
-        if lr_decay_in <= 0 or lr_decay_in >= 1.0:
+        if lr_decay_in <= 0 or lr_decay_in > 1.0:
             raise Exception("Learning rate decay parameter should be between zero and one.")
         self._lr_decay = lr_decay_in
         return 
