@@ -409,7 +409,7 @@ class MLPOptimizer:
         x0[0] = self.__alpha_expo
         x0[1] = self.__lr_decay
         bounds = Bounds(lb=lowerbound, ub=upperbound)
-        options = {"maxiter":1,\
+        options = {"maxiter":10,\
                    "disp":True}
         res = minimize(self.fitnessFunction, x0=x0, method='Nelder-Mead',bounds=bounds,options=options, callback=self.saveGenerationInfo_DE)
 
@@ -730,7 +730,7 @@ class MLPOptimizer_FGM(MLPOptimizer):
             Config.SetAlphaExpo(alpha_expo, self.__output_group)
             lr_decay = x[idx_x]
             print("- learning rate decay parameter: %.5e" % lr_decay)
-            self._Config.SetLRDecay(lr_decay, self.__output_group)
+            Config.SetLRDecay(lr_decay, self.__output_group)
             idx_x += 1 
         if self._optimizeNN:
             architecture = [int(x[idx_x])]
