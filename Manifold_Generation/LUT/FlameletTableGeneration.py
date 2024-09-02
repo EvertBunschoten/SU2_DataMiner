@@ -362,7 +362,7 @@ class SU2TableGenerator:
 
         print("Loading flamelet data...")
         # Define scaler for FGM controlling variables.
-        full_data_file = self._Config.GetOutputDir()+"/LUT_data_full.csv"
+        full_data_file = self._Config.GetOutputDir()+"/"+self._Config.GetConcatenationFileHeader()+"_full.csv"
         with open(full_data_file,'r') as fid:
             self._Flamelet_Variables = fid.readline().strip().split(',')
         D_full = np.loadtxt(full_data_file,delimiter=',',skiprows=1)
@@ -546,7 +546,7 @@ class SU2TableGenerator:
         Tria, Nodes_dim, HullIdx, TableDataLevel = self.ComputeTableLevelMesh(Z_Level)
 
         print("Computed triagulation on level %i out of %i with %i nodes." % (iLevel+1, self._N_table_levels, len(Nodes_dim)))
-
+        
         return [Nodes_dim, Tria, HullIdx, TableDataLevel]
     
     
@@ -570,7 +570,7 @@ class SU2TableGenerator:
         fid.write("[Version]\n1.1.0\n\n")
         fid.write("[Progress variable definition]\n")
         fid.write("+".join(("%+.4e * %s" % (w, s)) for w, s in zip(self._Config.GetProgressVariableWeights(), self._Config.GetProgressVariableSpecies())) + "\n\n")
-        
+
         fid.write("[Number of table levels]\n%i\n\n" % self._N_table_levels)
         fid.write("[Table levels]\n")
         for z in self._mixfrac_range_table:
