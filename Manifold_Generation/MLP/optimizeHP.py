@@ -409,7 +409,7 @@ class MLPOptimizer:
         x0[0] = self.__alpha_expo
         x0[1] = self.__lr_decay
         bounds = Bounds(lb=lowerbound, ub=upperbound)
-        options = {"maxiter":10,\
+        options = {"maxiter":100,\
                    "disp":True}
         res = minimize(self.fitnessFunction, x0=x0, method='Nelder-Mead',bounds=bounds,options=options, callback=self.saveGenerationInfo_DE)
 
