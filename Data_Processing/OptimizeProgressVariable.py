@@ -399,7 +399,7 @@ class PVOptimizer:
         self.__custom_population_set = True
         self.__population_size = popsize
 
-    def SetCurveStepThreshold(self, val_tol:float):
+    def SetCurveStepThreshold(self, val_tol:float=1e-4):
         """Set the threshold value for monotonizing flamelet data.
 
         :param val_tol: threshold value below which flamelet data is ommitted.
@@ -410,7 +410,7 @@ class PVOptimizer:
             raise Exception("Curve step tolerance value should be positive.")
         self.__CurveStepTolerance = val_tol
 
-    def SetSpeciesRangeTolerance(self, val_tol:float):
+    def SetSpeciesRangeTolerance(self, val_tol:float=1e-5):
         """Specify the minimum change in species mass fraction for species to be 
         considered in progress variable optimization.
 
