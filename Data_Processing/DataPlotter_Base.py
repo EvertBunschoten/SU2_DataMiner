@@ -35,17 +35,28 @@ class DataPlotter_Base:
     __plot_vars:list[str] = None 
 
     __plot_title:str = ""
+    _x_variable:str = ""
+    _y_variable:str = ""
+    _z_variable:str = ""
+
+    _plot_label_default_x:str = ""
     __plot_label_custom_x:str = ""
     _custom_plot_label_x_set:bool = False 
+
+    _plot_label_default_y:str = ""
     __plot_label_custom_y:str = ""
     _custom_plot_label_y_set:bool = False 
-    __plot_label_custom_y:str = ""
+
+    _plot_label_default_z:str = ""
+    __plot_label_custom_z:str = ""
     _custom_plot_label_z_set:bool = False 
-    
+
     __save_images:bool = False
     __fig_format:str = "png"
     __fig_window:plt.figure = None 
     _ax:plt.axes = None
+    __nDim_plot:int = 2
+    _label_map = {}
 
     def __init__(self, Config_in:Config=None):
         if Config_in is None:
@@ -126,10 +137,27 @@ class DataPlotter_Base:
     def _FinalizePlot(self, fig_title:str):
         if self._custom_plot_label_y_set:
             self._ax.set_ylabel(self.__plot_label_custom_y, fontsize=20)
+        else:
+            try:
+                self._ax.set_ylabel(self._label_map[self._y_variable], fontsize=20)
+            except:
+                self._ax.set_ylabel(self._y_variable, fontsize=20)
+
         if self._custom_plot_label_x_set:
             self._ax.set_xlabel(self.__plot_label_custom_x, fontsize=20)
-        if self._custom_plot_label_z_set:
-            self._ax.set_zlabel(self.__plot_label_custom_z, fontsize=20)
+        else:
+            try:
+                self._ax.set_xlabel(self._label_map[self._x_variable], fontsize=20)
+            except:
+                self._ax.set_xlabel(self._plot_label_default_x, fontsize=20)
+        if self.__nDim_plot == 3:
+            if self._custom_plot_label_z_set:
+                self._ax.set_zlabel(self.__plot_label_custom_z, fontsize=20)
+            else:
+                try:
+                    self._ax.set_zlabel(self._label_map[self._z_variable], fontsize=20)
+                except:
+                    self._ax.set_zlabel(self._plot_label_default_z, fontsize=20)
         self._ax.tick_params(which='both',labelsize=18)
         self._ax.set_title(self.__plot_title, fontsize=20)
         self._ax.legend(fontsize=20,loc='upper center', bbox_to_anchor=(0.5, -0.12),
@@ -146,14 +174,23 @@ class DataPlotter_Base:
     
     
     def Plot3D(self, x_variable:str, y_variable:str, z_variable:str):
+        self._x_variable = x_variable
+        self._y_variable = y_variable
+        self._z_variable = z_variable
+
+        self.__nDim_plot = 3
         if self.__save_images:
             self._PrepareOutputDir()
         self._Initiate3DPlot()
+        
         self._PlotBody([x_variable, y_variable, z_variable])
         self._FinalizePlot("_".join((x_variable,y_variable,z_variable)) + "_3D")
         return 
 
     def Plot2D(self, x_variable:str, y_variable:str):
+        self._x_variable = x_variable
+        self._y_variable = y_variable
+        self.__nDim_plot = 2
         if self.__save_images:
             self._PrepareOutputDir()
         self._Initiate2DPlot()

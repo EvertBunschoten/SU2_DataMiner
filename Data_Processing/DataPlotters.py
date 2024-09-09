@@ -25,6 +25,25 @@ class DataPlotter_FGM(DataPlotter_Base):
     __burnerflame_displayname = r"Burner-stabilized data"
     __equilibrium_displayname = r"Chemical equilibrium data"
 
+    __mix_status:list[float] = []
+
+    _plot_label_default_x:str=r"Progress Variable $(\mathcal{Y})[-]$"
+    _plot_label_default_y:str=r"Total Enthalpy $(h)[J kg^{-1}]$"
+    _plot_label_default_z:str=r"Mixture Fraction $(Z)[-]$"
+
+    _label_map = { DefaultSettings_FGM.name_pv : r"Progress Variable $(\mathcal{Y})[-]$",\
+                   DefaultSettings_FGM.name_enth : r"Total Enthalpy $(h)[J kg^{-1}]$",\
+                   DefaultSettings_FGM.name_mixfrac : r"Mixture Fraction $(Z)[-]$",\
+                  "Temperature" : r"Temperature $(T)[K]$",\
+                  "ViscosityDyn" : r"Dynamic Viscosity $(\mu)[kg m^{-1}s^{-2}]$",\
+                  "Cp" : r"Specific heat $(c_p)[J kg^{-1} K^{-1}]$",\
+                  "MolarWeightMix" : r"Mean Molar Weight $(W_M)[kg kmol^{-1}]$",\
+                  "ProdRateTot_PV" : r"PV Source Term $(\rho\dot{\omega}_{\mathcal{Y}})[kg m^{-3}s^{-1}]$",\
+                  "Beta_ProgVar" : r"PV Preferential Diffusion Term $(\beta_\mathcal{Y})[-]$",\
+                  "Beta_Enth_Thermal" : r"Specific Heat Preferential Diffusion Term $(\beta_{h,1})[J kg^{-1} K^{-1}]$",\
+                  "Beta_Enth" : r"Enthalpy Prefertial Diffusion Term $(\beta_{h,2})[J kg^{-1}]$",\
+                  "Beta_MixFrac" : r"Mixture Fraction Preferential Diffusion Term $(\beta_Z)[-]$"}
+    
     def __init__(self, Config_in:FlameletAIConfig=None):
         DataPlotter_Base.__init__(self,Config_in)
         if Config_in is None:
@@ -108,8 +127,8 @@ class DataPlotter_FGM(DataPlotter_Base):
         return super().Plot3D(x_variable, y_variable, z_variable)
         
     def _PlotBody(self, plot_variables: list[str]):
-        if len(self.__mix_status) == 0:
-            raise Exception("No mixture status values provided.")
+        # if len(self.__mix_status) == 0:
+        #     raise Exception("No mixture status values provided.")
         self.__GetFileNames()
         plot_3D = super()._PlotBody(plot_variables)
 
@@ -157,45 +176,58 @@ class DataPlotter_FGM(DataPlotter_Base):
         if self.__plot_freeflames:
             self.freeflame_files = []
             freeflame_dir = self.__data_dir + "/freeflame_data/"
-            for i in self.__mix_status:
-                if self.__manual_select:
-                    filenames = askopenfilenames(initialdir=freeflame_dir+ header + str(round(i, 6)), title="Choose freeflame files to plot")
-                    for file in filenames:
-                        self.freeflame_files.append(file)
-                else:
-                    filenames = next(os.walk(freeflame_dir + header + str(round(i, 6))), (None, None, []))[2]
-                    filenames.sort()
-                    for file in filenames:
-                        self.freeflame_files.append(freeflame_dir + header + str(round(i, 6)) + "/" +file)
+            if self.__manual_select and len(self.__mix_status) == 0:
+                filenames = askopenfilenames(initialdir=freeflame_dir, title="Choose freeflame files to plot")
+                for file in filenames:
+                    self.freeflame_files.append(file)
+            else:
+                for i in self.__mix_status:
+                    if self.__manual_select:
+                        filenames = askopenfilenames(initialdir=freeflame_dir+ header + str(round(i, 6)), title="Choose freeflame files to plot")
+                        for file in filenames:
+                            self.freeflame_files.append(file)
+                    else:
+                        filenames = next(os.walk(freeflame_dir + header + str(round(i, 6))), (None, None, []))[2]
+                        filenames.sort()
+                        for file in filenames:
+                            self.freeflame_files.append(freeflame_dir + header + str(round(i, 6)) + "/" +file)
 
         if self.__plot_burnerflames:
             self.burnerflame_files = []
             burnerflame_dir = self.__data_dir + "/burnerflame_data/"
-
-            for i in self.__mix_status:
-                if self.__manual_select:
-                    filenames = askopenfilenames(initialdir=burnerflame_dir+ header + str(round(i, 6)), title="Choose burnerflame files to plot")
-                    for file in filenames:
-                        self.burnerflame_files.append(file)
-                else:
-                    filenames = next(os.walk(burnerflame_dir + header + str(round(i, 6))), (None, None, []))[2]
-                    filenames.sort()
-                    for file in filenames:
-                        self.burnerflame_files.append(burnerflame_dir + header + str(round(i, 6)) + "/" +file)
+            if self.__manual_select and len(self.__mix_status) == 0:
+                filenames = askopenfilenames(initialdir=burnerflame_dir, title="Choose burnerflame files to plot")
+                for file in filenames:
+                    self.burnerflame_files.append(file)
+            else:
+                for i in self.__mix_status:
+                    if self.__manual_select:
+                        filenames = askopenfilenames(initialdir=burnerflame_dir+ header + str(round(i, 6)), title="Choose burnerflame files to plot")
+                        for file in filenames:
+                            self.burnerflame_files.append(file)
+                    else:
+                        filenames = next(os.walk(burnerflame_dir + header + str(round(i, 6))), (None, None, []))[2]
+                        filenames.sort()
+                        for file in filenames:
+                            self.burnerflame_files.append(burnerflame_dir + header + str(round(i, 6)) + "/" +file)
 
         if self.__plot_equilibrium:
             self.equilibrium_files = []
             equilibrium_dir = self.__data_dir + "/equilibrium_data/"
-
-            for i in self.__mix_status:
-                if self.__manual_select:
-                    filenames = askopenfilenames(initialdir=equilibrium_dir+ header + str(round(i, 6)), title="Choose equilibrium files to plot")
-                    for file in filenames:
-                        self.equilibrium_files.append(file)
-                else:
-                    filenames = next(os.walk(equilibrium_dir + header + str(round(i, 6))), (None, None, []))[2]
-                    for file in filenames:
-                        self.equilibrium_files.append(equilibrium_dir + header + str(round(i, 6)) + "/" +file)
+            if self.__manual_select and len(self.__mix_status) == 0:
+                filenames = askopenfilenames(initialdir=equilibrium_dir, title="Choose equilibrium files to plot")
+                for file in filenames:
+                    self.equilibrium_files.append(file)
+            else:
+                for i in self.__mix_status:
+                    if self.__manual_select:
+                        filenames = askopenfilenames(initialdir=equilibrium_dir+ header + str(round(i, 6)), title="Choose equilibrium files to plot")
+                        for file in filenames:
+                            self.equilibrium_files.append(file)
+                    else:
+                        filenames = next(os.walk(equilibrium_dir + header + str(round(i, 6))), (None, None, []))[2]
+                        for file in filenames:
+                            self.equilibrium_files.append(equilibrium_dir + header + str(round(i, 6)) + "/" +file)
         return
     
     def __GeneratePlotData(self, filepathname:str, plot_variables:list[str]):
