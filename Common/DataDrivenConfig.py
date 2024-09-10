@@ -947,7 +947,9 @@ class FlameletAIConfig(Config):
             self.__preferential_diffusion = True 
         elif transport_model == "unity-Lewis-number":
             self.__preferential_diffusion = False
-
+        else:
+            raise Exception("Transport model should be \"multicomponent\", \"mixture-averaged\", or \"unity-Lewis-number\"")
+        
         self.__transport_model=transport_model
 
         return 
@@ -975,6 +977,11 @@ class FlameletAIConfig(Config):
         if (mix_lower >= mix_upper):
             raise Exception("Lower mixture status should be lower than upper mixture status.")
         else:
+            if mix_lower < 0.0:
+                raise Exception("Mixture status should be positive.")
+            if mix_upper > 1.0 and self.__run_mixture_fraction:
+                raise Exception("Mixture fraction bounds should be between 0.0 and 1.0")
+            
             self.__mix_status_lower = mix_lower
             self.__mix_status_upper = mix_upper
     
