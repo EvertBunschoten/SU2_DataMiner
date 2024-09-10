@@ -96,7 +96,7 @@ class Train_Source_PINN(CustomTrainer):
     __pv_b_constraint_factor_lean:float = None 
     __pv_b_constraint_factor_rich:float = None 
     __val_lambda:float=1.0
-
+    __current_epoch:int = 0
     def __init__(self, Config_in:FlameletAIConfig, group_idx:int=0):
         """Class constructor. Initialize a source term trainer for a given MLP output group.
 
@@ -127,7 +127,9 @@ class Train_Source_PINN(CustomTrainer):
         return 
     
     def SetDecaySteps(self):
-        self._decay_steps=0.01157 * self._Np_train
+
+        #self._decay_steps=0.01157 * self._Np_train
+        self._decay_steps = int(0.33*self._Np_train / (2**self._batch_expo))
         return 
     
     def GetBoundaryData(self):
@@ -295,8 +297,8 @@ class Train_Source_PINN(CustomTrainer):
         with tf.GradientTape() as tape:
             tape.watch(self._trainable_hyperparams)
             y_b_loss = self.ComputeUnburntSourceConstraint(x_boundary, y_boundary)
-            y_burnt_loss = self.ComputeBurntSourceConstraint(x_b_boundary, y_b_boundary)
-            y_loss_total = y_b_loss + y_burnt_loss
+            #y_burnt_loss = self.ComputeBurntSourceConstraint(x_b_boundary, y_b_boundary)
+            y_loss_total = y_b_loss# + y_burnt_loss
             grads_ub = tape.gradient(y_loss_total, self._trainable_hyperparams)
         return grads_ub 
     
@@ -311,12 +313,13 @@ class Train_Source_PINN(CustomTrainer):
     def Train_Step(self, x_domain, y_domain, x_ub_boundary, y_ub_boundary, x_b_boundary, y_b_boundary, val_lambda):
         
         grads_direct, grads_ub = self.ComputeTotalGrads(x_domain, y_domain, x_ub_boundary, y_ub_boundary, x_b_boundary, y_b_boundary)
-        Np_domain = tf.cast(tf.shape(x_domain)[0],tf.float32)
-        Np_boundary = tf.cast(tf.shape(x_ub_boundary)[0],tf.float32)
-        Np_tot = Np_domain + Np_boundary
-        total_grads = [(Np_domain*g_d + 0.01*Np_boundary*val_lambda*g_b)/Np_tot for (g_d, g_b) in zip(grads_direct, grads_ub)]
         
+        if self.__current_epoch >= 0.01*self._n_epochs:
+            total_grads = [(g_d + val_lambda*g_b) for (g_d, g_b) in zip(grads_direct, grads_ub)]
+        else:
+            total_grads = grads_direct
         self._optimizer.apply_gradients(zip(total_grads, self._trainable_hyperparams))
+
         return grads_direct, grads_ub
     
     def FinalAdjustment(self):
@@ -327,7 +330,6 @@ class Train_Source_PINN(CustomTrainer):
         return
     
     def PostProcessing(self):
-        self.FinalAdjustment()
         return super().PostProcessing()
     
     def SetTrainBatches(self):
@@ -356,7 +358,9 @@ class Train_Source_PINN(CustomTrainer):
             X_b = XY_b[0]
             Y_b = XY_b[1]
             grads_domain, grads_boundary = self.Train_Step(X_domain, Y_domain, X_unb, Y_unb, X_b, Y_b,self.__val_lambda)
-            self.__val_lambda = self.update_lambda(grads_domain, grads_boundary, self.__val_lambda)
+
+        self.__val_lambda = self.update_lambda(grads_domain, grads_boundary, self.__val_lambda)
+        self.__current_epoch += 1
         return 
     
     @tf.function
@@ -370,7 +374,7 @@ class Train_Source_PINN(CustomTrainer):
             mean_grad_ub += tf.reduce_mean(tf.abs(g_ub))
         mean_grad_ub /= len(grads_ub)
 
-        lambda_prime = max_grad_direct / (mean_grad_ub + 1e-6)
+        lambda_prime = max_grad_direct / (mean_grad_ub + 1e-32)
         val_lambda_new = 0.1 * val_lambda_old + 0.9 * lambda_prime
         return val_lambda_new
     
