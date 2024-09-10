@@ -837,7 +837,7 @@ class GroupOutputs:
             self.__vars_to_exclude.append(var)
         return 
     
-    def SetAffinityThreshold(self, val_threshold:float):
+    def SetAffinityThreshold(self, val_threshold:float=0.7):
         """Specify the threshold value for affinity below which groups are not considered.
 
         :param val_threshold: affinity threshold value. Should be between zero and one.
@@ -960,6 +960,9 @@ class GroupOutputs:
             self.__group_variables.append(group_variables)
             self.__group_affinity.append(min_affinity)
 
+        self.PostProcessGroups()
+        return 
+    
     def __ComputeNumberofEvaluations(self, group_variables:list[list[str]]):
         n_networks_eval = 0
    
@@ -1001,7 +1004,6 @@ class GroupOutputs:
         for j,i in enumerate(unique_groups):
             same_number_of_groups = np.argwhere(np.array(self.__n_groups) == i)[:,0]
             affinities_combinations = np.array(self.__group_affinity)[same_number_of_groups]
-            max_affinity_in_combination = max(affinities_combinations)
             iMax_affinity = np.argmax(affinities_combinations)
             interesting_group = self.__group_variables[same_number_of_groups[iMax_affinity]]
             n_network_evals.append(self.__ComputeNumberofEvaluations(interesting_group))
@@ -1030,13 +1032,15 @@ class GroupOutputs:
                 raise Exception("Index exceeds number of best combinations")
             return self.__most_interesting_groups[iGroup]
     
-    def PlotCorrelationMatrix(self, combination_index:int=0):
+    def PlotCorrelationMatrix(self, combination_index:int=-1):
         """Plots cross-correlation matrix between filtered flamelet data.
 
         :param combination_index: variable combination for which to plot output groups, defaults to 0
         :type combination_index: int, optional
         :raises Exception: if index exceeds number of combinations.
         """
+        if combination_index == -1:
+            combination_index = self.__best_group
         if combination_index >= len(self.__most_interesting_groups):
             raise Exception("Index exceeds number of best combinations")
         fig = plt.figure(figsize=[10,10])
@@ -1064,4 +1068,30 @@ class GroupOutputs:
         ax.tick_params(axis='x',labelrotation=90)
         ax.tick_params(which='both',labelsize=18)
         ax.legend(fontsize=20, bbox_to_anchor=(1.0, 0.5))
+        fig.savefig(self.__Config.GetOutputDir()+"/Group_correlation_matrix.pdf",format='pdf',bbox_inches='tight')
         plt.show()
+
+        return 
+    
+    def UpdateConfig(self, combination_index:int=-1):
+        """Update the output groups in the FlameletAI configuration
+
+        :param combination_index: group combination index to store in config, defaults to -1
+        :type combination_index: int, optional
+        """
+
+        # By default, select the combination with the fewest number of function 
+        # evaluations.
+        if combination_index == -1:
+            combination_index = self.__best_group
+
+        # Clear output groups present in the configuration.
+        self.__Config.ClearOutputGroups()
+
+        # Add flamelet variable groups to configuration.
+        for group in self.__most_interesting_groups[combination_index]:
+            self.__Config.AddOutputGroup(group)
+
+        # Save configuration.
+        self.__Config.SaveConfig()
+        return
