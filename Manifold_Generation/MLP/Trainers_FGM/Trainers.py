@@ -297,8 +297,8 @@ class Train_Source_PINN(CustomTrainer):
         with tf.GradientTape() as tape:
             tape.watch(self._trainable_hyperparams)
             y_b_loss = self.ComputeUnburntSourceConstraint(x_boundary, y_boundary)
-            #y_burnt_loss = self.ComputeBurntSourceConstraint(x_b_boundary, y_b_boundary)
-            y_loss_total = y_b_loss# + y_burnt_loss
+            y_burnt_loss = self.ComputeBurntSourceConstraint(x_b_boundary, y_b_boundary)
+            y_loss_total = y_b_loss + y_burnt_loss
             grads_ub = tape.gradient(y_loss_total, self._trainable_hyperparams)
         return grads_ub 
     
@@ -314,10 +314,10 @@ class Train_Source_PINN(CustomTrainer):
         
         grads_direct, grads_ub = self.ComputeTotalGrads(x_domain, y_domain, x_ub_boundary, y_ub_boundary, x_b_boundary, y_b_boundary)
         
-        if self.__current_epoch >= 0.01*self._n_epochs:
-            total_grads = [(g_d + val_lambda*g_b) for (g_d, g_b) in zip(grads_direct, grads_ub)]
-        else:
-            total_grads = grads_direct
+        #if self.__current_epoch >= 0.01*self._n_epochs:
+        total_grads = [(g_d + 0.001*val_lambda*g_b) for (g_d, g_b) in zip(grads_direct, grads_ub)]
+        # else:
+        #     total_grads = grads_direct
         self._optimizer.apply_gradients(zip(total_grads, self._trainable_hyperparams))
 
         return grads_direct, grads_ub
@@ -359,7 +359,7 @@ class Train_Source_PINN(CustomTrainer):
             Y_b = XY_b[1]
             grads_domain, grads_boundary = self.Train_Step(X_domain, Y_domain, X_unb, Y_unb, X_b, Y_b,self.__val_lambda)
 
-        self.__val_lambda = self.update_lambda(grads_domain, grads_boundary, self.__val_lambda)
+            self.__val_lambda = self.update_lambda(grads_domain, grads_boundary, self.__val_lambda)
         self.__current_epoch += 1
         return 
     
@@ -421,6 +421,82 @@ class Train_Source_PINN(CustomTrainer):
         plt.close(fig_b)
         return 
     
+
+class Train_Beta_PINN(Train_Source_PINN):
+    __beta_pv_unb_fac:float = 0 
+    __beta_z_unb_fac:float = 0         
+    def __init__(self, Config_in:FlameletAIConfig, group_idx:int=0):
+        """Class constructor. Initialize a source term trainer for a given MLP output group.
+
+        :param Config_in: FlameletAI configuration class.
+        :type Config_in: FlameletAIConfig
+        :param group_idx: MLP output group index, defaults to 0
+        :type group_idx: int, optional
+        """
+        
+        Train_Source_PINN.__init__(self, Config_in, group_idx)
+        return 
+    
+    def GetBoundaryData(self):
+        super().GetBoundaryData()
+
+        pv_species = self.__Config.GetProgressVariableSpecies()
+        pv_weights = self.__Config.GetProgressVariableWeights()
+
+        Le_species = self.__Config.GetConstSpecieLewisNumbers()
+        idx_pure_fuel = np.argwhere(self.__X_unb_train[:,2] == 1.0)
+        idx_pure_OX = np.argwhere(self.__X_unb_train[:,2] == 0.0)
+
+        eq_file_fuel = self.__Config.GetOutputDir()+"/equilibrium_data/mixfrac_1.0/equilibrium_ub_mixfrac_1.0.csv"
+        eq_file_ox = self.__Config.GetOutputDir()+"/equilibrium_data/mixfrac_1.0/equilibrium_ub_mixfrac_0.0.csv"
+        
+        with open(eq_file_fuel,'r') as fid:
+            vars = fid.readline().strip().split(',')
+        D_eq_fuel = np.loadtxt(eq_file_fuel,delimiter=',',skiprows=1)
+        D_eq_ox = np.loadtxt(eq_file_ox,delimiter=',',skiprows=1)
+
+        beta_pv_fuel, beta_h1_fuel, beta_h2_fuel, beta_z_fuel = self.__Config.ComputeBetaTerms(vars, D_eq_fuel)
+        beta_pv_ox, beta_h1_ox, beta_h2_ox, beta_z_ox = self.__Config.ComputeBetaTerms(vars, D_eq_ox)
+        self.__beta_pv_unb_fac = (beta_pv_fuel - beta_pv_ox)
+        self.__beta_z_unb_fac = (beta_z_fuel - beta_z_ox)
+        
+        return 
+    
+    @tf.function
+    def ComputeUnburntSourceConstraint(self, x_boundary_norm:tf.constant, y_boundary_norm:tf.constant):
+        """Compute the reactant data physics-informed source term constraint value
+
+        :param x_boundary_norm: normalized reactant controlling variable data.
+        :type x_boundary_norm: tf.constant
+        :param y_boundary_norm: normalized reactant label data.
+        :type y_boundary_norm: tf.constant
+        :return: physics-informed source term penalty value.
+        :rtype: tf.constant
+        """
+
+        penalty=0.0
+        # Loop over output variables
+        for iVar in range(len(self._train_vars)):
+
+            # Get normalized MLP output Jacobian.
+            Y_norm, dY_norm = self.ComputeDerivatives(x_boundary_norm, iVar)
+            dY_dpv_norm = dY_norm[:, 0]
+            dY_dh_norm = dY_norm[:, 1]
+            dY_dz_norm = dY_norm[:, 2]
+            
+            # Dot product between reactant pv-Z plane and MLP output Jacobian.
+            dY_dpvz = dY_dpv_norm * self.__pv_unb_constraint_factor + dY_dz_norm
+
+            # Penalty term for derivative terms.
+            term_1 = tf.reduce_mean(tf.pow(dY_dpvz, 2))
+            term_2 = tf.reduce_mean(tf.pow(dY_dh_norm, 2))
+
+            # Penalty term for predicted values.
+            term_3 = tf.reduce_mean(tf.pow(Y_norm - y_boundary_norm, 2))
+
+            penalty = penalty + term_1 + term_2 + term_3
+
+        return penalty
 class EvaluateArchitecture_FGM(EvaluateArchitecture):
     """Class for training MLP architectures
     """
