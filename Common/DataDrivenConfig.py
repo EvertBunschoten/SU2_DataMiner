@@ -82,6 +82,7 @@ class EntropicAIConfig(Config):
     __Table_ref_radius:float = None         # Refinement radius within which refined cell size is applied.
     __Table_curv_threshold:float = None     # Curvature threshold beyond which refinement is applied.
 
+    
 
     def __init__(self, load_file:str=None):
         Config.__init__(self)
@@ -566,6 +567,9 @@ class FlameletAIConfig(Config):
     __mixfrac_constant:float = None 
     __mixfrac_coeff_carrier:float = None 
 
+    __Le_avg_method = avg_Le_arythmic
+    __Le_const_sp:np.ndarray[float] = None 
+
     def __init__(self, load_file:str=None):
         """Class constructor
         """
@@ -609,6 +613,7 @@ class FlameletAIConfig(Config):
     def __SynchronizeSettings(self):
         self.gas = ct.Solution(self.__reaction_mechanism)
         self.__species_in_mixture = self.gas.species_names
+
         n_fuel = len(self.__fuel_species)
         n_ox = len(self.__oxidizer_species)
         self.__fuel_string = ','.join([self.__fuel_species[i] + ':'+str(self.__fuel_weights[i]) for i in range(n_fuel)])
@@ -616,6 +621,13 @@ class FlameletAIConfig(Config):
         self.ComputeMixFracConstants()
 
         return 
+    
+    def SetConstSpecieLewisNumber(self, sp_name:str, Lewis_number:float):
+        self.__Le_const_sp[self.gas.species_index(sp_name)] = Lewis_number 
+        return 
+    
+    def GetConstSpecieLewisNumbers(self):
+        return self.__Le_const_sp 
     
     def PrintBanner(self):
         """Print banner visualizing FlameletAI configuration settings."""
@@ -1371,6 +1383,16 @@ class FlameletAIConfig(Config):
         """
         return self.__preferential_diffusion
     
+    def SetAveragingMethod(self, avg_method=avg_Le_arythmic):
+        self.__Le_avg_method = avg_method 
+        return 
+    
+    def AverageLewisNumber(self, Le_sp:np.ndarray, iSp:int):
+        if self.__Le_avg_method == avg_Le_const:
+            Le_av = avg_Le_const(Le_sp, self.__Le_const_sp[iSp])
+        else:
+            Le_av = self.__Le_avg_method(Le_sp)
+        return Le_av
     def ComputeBetaTerms(self, variables:list[str], flamelet_data:np.ndarray):
         """
         Compute the differential diffusion scalars for a flamelet.
@@ -1396,7 +1418,8 @@ class FlameletAIConfig(Config):
         for iSp in range(len(self.__species_in_mixture)):
             # Get flamelet species Lewis number trend.
             Le_sp = flamelet_data[:, variables.index("Le-"+self.__species_in_mixture[iSp])]
-            Le_av = np.average(Le_sp)
+            Le_av = self.AverageLewisNumber(Le_sp, iSp)
+
             # Get species mass fraction
             Y_sp = flamelet_data[:, variables.index("Y-"+self.__species_in_mixture[iSp])]
             beta_z += (self.__mixfrac_coefficients[iSp] - self.__mixfrac_coeff_carrier) * Y_sp / Le_av
@@ -1410,7 +1433,7 @@ class FlameletAIConfig(Config):
         beta_pv = np.zeros(len(flamelet_data))
         for iPv in range(len(self.__pv_definition)):
             Le_sp = flamelet_data[:, variables.index("Le-"+self.__pv_definition[iPv])]
-            Le_av = np.average(Le_sp)
+            Le_av = self.AverageLewisNumber(Le_sp, self.gas.species_index(self.__pv_definition[iPv]))
             beta_pv += self.__pv_weights[iPv] * flamelet_data[:, variables.index("Y-"+self.__pv_definition[iPv])] / Le_av
 
         return beta_pv, beta_h1, beta_h2, beta_z
