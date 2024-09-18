@@ -194,9 +194,11 @@ def ManualFlameletConfiguration():
                 if int(mixture_definition) == 1:
                     print("Reactant mixture defined as equivalence ratio.")
                     Config_in.DefineMixtureStatus(run_as_mixture_fraction=False)
+                    correct_mixture_definition = True
                 elif int(mixture_definition) == 2:
                     print("Reactant mixture defined as mixture fraction.")
                     Config_in.DefineMixtureStatus(run_as_mixture_fraction=True)
+                    correct_mixture_definition = True
                 else:
                     printwronginput()
             else:
@@ -263,25 +265,64 @@ def ManualFlameletConfiguration():
         printhbar()
 
         # 8: Flamelet types in manifold.
-        InsertConfigOption(Config_in.RunFreeFlames, Config_in.GenerateFreeFlames(), "Compute adiabatic flamelet data (1=yes, 0=no, 1 by default): ")
-        if Config_in.GenerateFreeFlames():
-            print("Adiabatic flamelets are included in manifold.")
-        else:
-            print("Adiabatic flamelets are ommitted in manifold.")
+        use_adiabatic_flamelets = False 
+        default_setting = Config_in.GenerateFreeFlames()
+        while not use_adiabatic_flamelets:
+            user_input:str= input("Compute adiabatic flamelet data (1=yes, 0=no, 1 by default): ")
+            if not user_input == "":
+                if int(user_input) == 1:
+                    print("Adiabatic flamelets are included in manifold.")
+                    Config_in.RunFreeFlames(True)
+                    use_adiabatic_flamelets = True
+                elif int(user_input) == 0:
+                    print("Adiabatic flamelets are ommitted in manifold.")
+                    Config_in.RunFreeFlames(False)
+                    use_adiabatic_flamelets = True
+                else:
+                    printwronginput()
+            else:
+                Config_in.RunFreeFlames(default_setting)
+                use_adiabatic_flamelets = True 
         printhbar()
 
-        InsertConfigOption(Config_in.RunBurnerFlames, Config_in.GenerateBurnerFlames(), "Compute burner-stabilized flamelet data (1=yes, 0=no, 1 by default): ")
-        if Config_in.GenerateBurnerFlames():
-            print("Burner-stabilized flamelets are included in manifold.")
-        else:
-            print("Burner-stabilized flamelets are ommitted in manifold.")
+        use_burner_flamelets = False 
+        default_setting = Config_in.GenerateBurnerFlames()
+        while not use_burner_flamelets:
+            user_input:str= input("Compute burner-stabilized flamelet data (1=yes, 0=no, 1 by default): ")
+            if not user_input == "":
+                if int(user_input) == 1:
+                    print("Burner-stabilized flamelets are included in manifold.")
+                    Config_in.RunBurnerFlames(True)
+                    use_burner_flamelets = True
+                elif int(user_input) == 0:
+                    print("Burner-stabilized flamelets are ommitted in manifold.")
+                    Config_in.RunBurnerFlames(False)
+                    use_burner_flamelets = True
+                else:
+                    printwronginput()
+            else:
+                Config_in.RunBurnerFlames(default_setting)
+                use_burner_flamelets = True 
         printhbar()
 
-        InsertConfigOption(Config_in.RunEquilibrium, Config_in.GenerateEquilibrium(), "Compute chemical equilibrium data (1=yes, 0=no, 1 by default): ")
-        if Config_in.GenerateEquilibrium():
-            print("Chemical equilibrium data are included in manifold.")
-        else:
-            print("Chemical equilibrium data are ommitted in manifold.")
+        use_eq = False 
+        default_setting = Config_in.GenerateEquilibrium()
+        while not use_eq:
+            user_input:str= input("Compute chemical equilibrium data (1=yes, 0=no, 1 by default): ")
+            if not user_input == "":
+                if int(user_input) == 1:
+                    print("Chemical equilibrium data are included in manifold.")
+                    Config_in.RunEquilibrium(True)
+                    use_eq = True
+                elif int(user_input) == 0:
+                    print("Chemical equilibrium data are ommitted in manifold.")
+                    Config_in.RunEquilibrium(False)
+                    use_eq = True
+                else:
+                    printwronginput()
+            else:
+                Config_in.RunEquilibrium(default_setting)
+                use_eq = True 
         printhbar()
 
         # 9: General settings and finalize.
