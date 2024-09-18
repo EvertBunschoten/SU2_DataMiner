@@ -57,7 +57,7 @@ class EntropicAIConfig(Config):
     __fluid_names:list[str] = ["MM"]
     __fluid_string:str="MM"
     __EOS_type:str=DefaultSettings_NICFD.EOS_type
-    __fluid_mole_fractions:list[float] = []
+    __fluid_mole_fractions:list[float] = [1.0]
     __use_PT:bool = DefaultSettings_NICFD.use_PT_grid
 
 
