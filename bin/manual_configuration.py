@@ -298,8 +298,13 @@ def ManualNICFDConfiguration():
     statisfied = False 
     
     while not statisfied:
+        
+        # 0: Define CoolProp equation of state.
+        InsertConfigOption(Config_in.SetEquationOfState, DefaultSettings_NICFD.EOS_type, "Insert CoolProp equation of state (%s by default):" % DefaultSettings_NICFD.EOS_type)
+        print("CoolProp equation of state: %s" % Config_in.GetEquationOfState())
+        printhbar()
 
-        # 1: Define fluid name(s)
+        # 1: Define fluid name(s).
         correct_fluid_definition = False 
         fluid_definition_default = Config_in.GetFluidNames()
         fluid_weights_default = Config_in.GetMoleFractions()
@@ -316,6 +321,9 @@ def ManualNICFDConfiguration():
                         molar_weights = [1.0]
                     Config_in.SetFluid(fluid_species)
                     Config_in.SetFluidMoleFractions(molar_weights)
+                else:
+                    Config_in.SetFluid(fluid_definition_default)
+                    Config_in.SetFluidMoleFractions(fluid_weights_default)
                 correct_fluid_definition = True 
             except:
                 Config_in.SetFluid(fluid_definition_default)
