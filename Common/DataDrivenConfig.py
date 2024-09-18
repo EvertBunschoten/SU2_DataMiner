@@ -534,6 +534,7 @@ class FlameletAIConfig(Config):
     # Flamelet Data Concatination Settings
     __pv_definition:list[str] = DefaultSettings_FGM.pv_species # Progress variable species.
     __pv_weights:list[float] = DefaultSettings_FGM.pv_weights      # Progress variable mass fraction weights.
+    __custom_pv_set:bool = False    # User-defined progress variable 
 
     __passive_species:list[str] = [] # Passive species for which to generate source terms.
 
@@ -607,14 +608,32 @@ class FlameletAIConfig(Config):
         return
     
     def __SynchronizeSettings(self):
+
+        # Re-set cantera solution.
         self.gas = ct.Solution(self.__reaction_mechanism)
         self.__species_in_mixture = self.gas.species_names
         n_fuel = len(self.__fuel_species)
         n_ox = len(self.__oxidizer_species)
+
+        # Re-set fuel and oxidizer string.
         self.__fuel_string = ','.join([self.__fuel_species[i] + ':'+str(self.__fuel_weights[i]) for i in range(n_fuel)])
         self.__oxidizer_string = ','.join([self.__oxidizer_species[i] + ':'+str(self.__oxidizer_weights[i]) for i in range(n_ox)])
+
+        # Compute mixture fraction mass fraction weights.
         self.ComputeMixFracConstants()
 
+        # Check if current progress variable is compatible with reaction mechanism.
+        if self.__custom_pv_set:
+            # Re-set progress variable definition if any of the components is not present in the reaction mechanism.
+            if any([sp not in self.__species_in_mixture for sp in self.__pv_definition]):
+                self.ResetProgressVariableDefinition()
+                self.__custom_pv_set = False
+        else:
+            # Set default progress variable definition.
+            pv_sp_default, pv_w_default = self.SetDefaultProgressVariable()
+            self.SetProgressVariableDefinition(pv_sp_default, pv_w_default)
+            self.__custom_pv_set = False
+        #print(self.__pv_definition, self.__pv_weights)
         return 
     
     def PrintBanner(self):
@@ -873,14 +892,10 @@ class FlameletAIConfig(Config):
         
         if (len(fuel_species) != len(fuel_weights)):
             raise Exception("Number of species and weigths for fuel definition should be equal.")
-        self.__fuel_species = []
-        self.__fuel_weights = []
-        for f in fuel_species:
-            self.__fuel_species.append(f)
-        for w in fuel_weights:
-            self.__fuel_weights.append(w)
+        self.__fuel_species = fuel_species.copy()
+        self.__fuel_weights = fuel_weights.copy()
 
-        self.__SynchronizeSettings()
+        self.__SynchronizeSettings()    
         return 
     
     def SetOxidizerDefinition(self, oxidizer_species:list[str]=DefaultSettings_FGM.oxidizer_definition, \
@@ -901,12 +916,9 @@ class FlameletAIConfig(Config):
             raise Exception("Oxidizer definition should contain at least one species name.")
         if (len(oxidizer_species) != len(oxidizer_weights)):
             raise Exception("Number of species and weigths for oxidizer definition should be equal.")
-        self.__oxidizer_species = []
-        self.__oxidizer_weights = []
-        for o in oxidizer_species:
-            self.__oxidizer_species.append(o)
-        for w in oxidizer_weights:
-            self.__oxidizer_weights.append(w)
+        self.__oxidizer_species = oxidizer_species.copy()
+        self.__oxidizer_weights = oxidizer_weights.copy()
+
         self.__SynchronizeSettings()
         return 
     
@@ -1204,8 +1216,16 @@ class FlameletAIConfig(Config):
         if (len(pv_species) != len(pv_weights)):
             raise Exception("Number of species and weights of the progress variable definition should be equal.")
         else:
-            self.__pv_definition = pv_species
-            self.__pv_weights = pv_weights
+            self.__pv_definition = pv_species.copy()
+            self.__pv_weights = pv_weights.copy()
+            self.__custom_pv_set = True 
+        return 
+    
+    def ResetProgressVariableDefinition(self):
+        self.__pv_definition = []
+        self.__pv_weights = []
+        self.__custom_pv_set = False 
+        self.SetDefaultProgressVariable()
         return 
     
     def GetProgressVariableSpecies(self):
@@ -1225,6 +1245,47 @@ class FlameletAIConfig(Config):
         :rtype: list[float]
         """
         return self.__pv_weights
+    
+    def SetDefaultProgressVariable(self):
+        """Set progress variable to be weighted sum of fuel and oxidizer species (minus N2) and major product at stochiometry. 
+           Weights are set as the inverse of specie molecular weight: negative for reactants, positive for product.
+        """
+
+        # Set mixture temperature and pressure at stochiometry.
+        self.gas.TP=self.__T_unb_lower, DefaultSettings_FGM.pressure
+        self.gas.set_equivalence_ratio(1.0, self.__fuel_string, self.__oxidizer_string)
+
+        pv_species =[]
+        pv_weights = []
+
+        # Collect fuel reactant species and weights.
+        for f in self.__fuel_species:
+            if f != "N2":
+                pv_species.append(f)
+                pv_weights.append(-1.0/self.gas.molecular_weights[self.gas.species_index(f)])
+
+        # Collect oxidizer reactant species and weights.
+        for o in self.__oxidizer_species:
+            if o != "N2":
+                pv_species.append(o)
+                pv_weights.append(-1.0/self.gas.molecular_weights[self.gas.species_index(o)])
+
+        # Equilibrate at constant enthalpy and pressure.
+        self.gas.equilibrate("HP")
+
+        # Sort products.
+        ix_species_sorted = np.argsort(self.gas.Y)[::-1]
+        major_species = [self.gas.species_names[j] for j in ix_species_sorted]
+
+        # Remove N2.
+        major_species.remove("N2")
+
+        # Select major product as progress variable species.
+        major_product = major_species[0]
+        pv_species.append(major_product)
+        pv_weights.append(1.0 / self.gas.molecular_weights[self.gas.species_index(major_product)])
+
+        return pv_species, pv_weights
     
     def SetPassiveSpecies(self, passive_species:list[str]=[]):
         """
