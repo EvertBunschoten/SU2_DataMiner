@@ -60,6 +60,7 @@ class EntropicVars(Enum):
     dHdRHO_P=10
     dSdP_RHO=11
     dSdRHO_P=12
+    N_STATE_VARS=13
     
 
 EntropicVarPairing = {"T":EntropicVars.T.value,\
@@ -73,8 +74,8 @@ EntropicVarPairing = {"T":EntropicVars.T.value,\
                       "dhde_rho":EntropicVars.dHdE_RHO.value,\
                       "dhdp_rho":EntropicVars.dHdP_RHO.value,\
                       "dhdrho_p":EntropicVars.dHdRHO_P.value,\
-                      "dsdp_rho":EntropicVars.dHdP_RHO.value,\
-                      "dsdrho_p":EntropicVars.dHdRHO_P.value}
+                      "dsdp_rho":EntropicVars.dSdP_RHO.value,\
+                      "dsdrho_p":EntropicVars.dSdRHO_P.value}
 
 
 class Train_Entropic_Direct(TensorFlowFit):
@@ -645,9 +646,6 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         self.__idx_e = self._controlling_vars.index("Energy")
 
         self._state_vars = ["T","p","c2", "dTdrho_e", "dTde_rho", "dpdrho_e", "dpde_rho"]
-        # self.__idx_T = self._state_vars.index("T")
-        # self.__idx_p = self._state_vars.index("p")
-        # self.__idx_c2 = self._state_vars.index("c2")
 
         return 
     
@@ -659,16 +657,12 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         self.__rho_min, self.__rho_max = self._X_min[self.__idx_rho], self._X_max[self.__idx_rho]
         self.__e_min, self.__e_max = self._X_min[self.__idx_e], self._X_max[self.__idx_e]
         
-        # self.Temperature_min, self.Temperature_max = self._Y_state_min[self.__idx_T], self._Y_state_max[self.__idx_T]
-        # self.Pressure_min, self.Pressure_max = self._Y_state_min[self.__idx_p], self._Y_state_max[self.__idx_p]
-        # self.C2_min, self.C2_max = self._Y_state_min[self.__idx_c2], self._Y_state_max[self.__idx_c2]
         return 
     
     
     def SetDecaySteps(self):
         super().SetDecaySteps()
         self._decay_steps = 3*self._decay_steps
-        #self._decay_steps = len(self._state_vars)*int(0.33*self._Np_train / (2**self._batch_expo))
         return
     
     
@@ -763,11 +757,6 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     
     @tf.function
     def EvaluateState(self, X_norm:tf.Tensor):
-        # _, dsdrhoe, d2sdrho2e2 = self.__ComputeEntropyGradients(X_norm)
-        # rho_norm = tf.gather(X_norm, indices=self.__idx_rho, axis=1)
-        # rho = (self.__rho_max - self.__rho_min)*rho_norm + self.__rho_min 
-        # T, P, c2, dTde_rho, dTdrho_e, dPde_rho, dPdrho_e, dhdrho_e, dhde_rho, dhdrho_P, dhdP_rho, dsdrho_P, dsdP_rho = self.EntropicEOS(rho, dsdrhoe, d2sdrho2e2)
-        # Y_state_pred = tf.stack((T, P, c2),axis=1)
         return self.TD_Evaluation(X_norm)
     
     @tf.function 
@@ -777,76 +766,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
 
         return tf.reduce_mean(tf.pow(Y_state_pred_norm - Y_state_label_norm, 2), axis=0)
     
-    
-    # @tf.function
-    # def __Compute_T_error(self, T_label_norm:tf.Tensor, x_var:tf.constant):
-    #     """Compute the temperature prediction error.
-
-    #     :param T_label: reference temperature data
-    #     :type T_label: tf.Tensor
-    #     :param x_var: normalized density and energy tensor.
-    #     :type x_var: tf.Variable
-    #     :return: mean squared error between predicted and reference temperature.
-    #     :rtype: tf.Tensor
-    #     """
-
-    #     # Evaluate thermodynamic state.
-    #     _, T, _, _ = self.TD_Evaluation(x_var)
-
-    #     # Normalize reference and predicted temperature.
-    #     T_pred_norm = (T - self._Y_state_min[self.__idx_T]) / (self._Y_state_max[self.__idx_T] - self._Y_state_min[self.__idx_T])
-        
-    #     # Apply loss function.
-    #     T_error = self.mean_square_error(y_true=T_label_norm, y_pred=T_pred_norm)
-
-    #     return T_error
-    
-    # @tf.function
-    # def __Compute_P_error(self, P_label_norm:tf.Tensor,x_var:tf.constant):
-    #     """Compute the pressure prediction error.
-
-    #     :param P_label: reference pressure data
-    #     :type P_label: tf.Tensor
-    #     :param x_var: normalized density and energy tensor.
-    #     :type x_var: tf.Variable
-    #     :return: mean squared error between predicted and reference pressure.
-    #     :rtype: tf.Tensor
-    #     """
-
-    #     # Evaluate thermodynamic state.
-    #     _, _, P, _ = self.TD_Evaluation(x_var)
-
-    #     # Normalize reference and predicted pressure.
-    #     P_pred_norm = (P - self._Y_state_min[self.__idx_p]) / (self._Y_state_max[self.__idx_p] - self._Y_state_min[self.__idx_p])
-        
-    #     # Apply loss function.
-    #     P_error = self.mean_square_error(y_true=P_label_norm, y_pred=P_pred_norm)
-
-    #     return P_error 
-    
-    # @tf.function
-    # def __Compute_C2_error(self, C2_label_norm,x_var:tf.constant):
-    #     """Compute the prediction error for squared speed of sound (SoS).
-
-    #     :param C2_label: reference pressure data
-    #     :type C2_label: tf.Tensor
-    #     :param x_var: normalized density and energy tensor.
-    #     :type x_var: tf.Variable
-    #     :return: mean squared error between predicted and reference squared speed of sound.
-    #     :rtype: tf.Tensor
-    #     """
-
-    #     # Evaluate thermodynamic state.
-    #     _, _, _, C2 = self.TD_Evaluation(x_var)
-        
-    #     # Normalize reference and predicted squared SoS.
-    #     C2_pred_norm = (C2 - self._Y_state_min[self.__idx_c2]) / (self._Y_state_max[self.__idx_c2] - self._Y_state_min[self.__idx_c2])
-
-    #     # Apply loss function.
-    #     C2_error = self.mean_square_error(y_true=C2_label_norm, y_pred=C2_pred_norm)
-
-    #     return C2_error
-    
+  
     @tf.function 
     def __ComputeGradients_State_error(self, Y_state_label_norm:tf.constant, X_label_norm:tf.constant):
         with tf.GradientTape() as tape:
@@ -1081,119 +1001,6 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
             fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/"+var+"_prediction_error."+figformat,format=figformat,bbox_inches='tight')
             plt.close(fig)
 
-        # S_test_pred, T_test_pred, P_test_pred, C2_test_pred = self.TD_Evaluation(self._X_test_norm)
-        # #Y_state_test_pred = self.EvaluateState(self._X_test_norm)
-        # #T_test_pred = tf.gather(Y_state_test_pred, indices=self.__idx_T,axis=1)
-        # #P_test_pred = tf.gather(Y_state_test_pred, indices=self.__idx_p,axis=1)
-        # #C2_test_pred = tf.gather(Y_state_test_pred, indices=self.__idx_c2,axis=1)
-        
-        # figformat = "png"
-        # plot_fontsize = 20
-        # label_fontsize=18
-
-        # rho_test = self._X_test[:, self.__idx_rho]#(self._X_max[self.__idx_rho] - self._X_min[self.__idx_rho])*self._X_test_norm[:, self.__idx_rho] + self._X_min[self.__idx_rho]
-        # e_test = self._X_test[:, self.__idx_e]#(self._X_max[self.__idx_e] - self._X_min[self.__idx_e])*self._X_test_norm[:, self.__idx_e] + self._X_min[self.__idx_e]
-        
-        # S_test = self._Y_test[:, 0]
-        # T_test = self._Y_state_test[:, self.__idx_T]
-        # P_test = self._Y_state_test[:, self.__idx_p]
-        # C2_test = self._Y_state_test[:, self.__idx_c2]
-
-        # markevery=10
-        # fig = plt.figure(figsize=[10,10])
-        # ax = plt.axes(projection='3d')
-        # ax.plot3D(rho_test[::markevery], e_test[::markevery], T_test[::markevery], 'ko')
-        # ax.plot3D(rho_test[::markevery], e_test[::markevery], T_test_pred[::markevery], 'ro')
-        # ax.set_xlabel(r"Density $(\rho)[kg m^{-3}]$",fontsize=20)
-        # ax.set_ylabel(r"Static Energy $(e)[J kg^{-1}]$",fontsize=20)
-        # ax.set_zlabel(r"Temperature $(T)[K]$",fontsize=20)
-        # ax.tick_params(which='both',labelsize=18)
-        # fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/Temperature_prediction."+figformat,format=figformat,bbox_inches='tight')
-        # plt.close(fig)
-
-        # fig = plt.figure(figsize=[10,10])
-        # ax = plt.axes(projection='3d')
-        # ax.plot3D(rho_test[::markevery], e_test[::markevery], P_test[::markevery], 'ko')
-        # ax.plot3D(rho_test[::markevery], e_test[::markevery], P_test_pred[::markevery], 'ro')
-        # ax.set_xlabel(r"Density $(\rho)[kg m^{-3}]$",fontsize=20)
-        # ax.set_ylabel(r"Static Energy $(e)[J kg^{-1}]$",fontsize=20)
-        # ax.set_zlabel(r"Pressure $(p)[Pa]$",fontsize=20)
-        # ax.tick_params(which='both',labelsize=18)
-        # fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/Pressure_prediction."+figformat,format=figformat,bbox_inches='tight')
-        # plt.close(fig)
-
-        # fig = plt.figure(figsize=[10,10])
-        # ax = plt.axes(projection='3d')
-        # ax.plot3D(rho_test[::markevery], e_test[::markevery], np.sqrt(C2_test[::markevery]), 'ko')
-        # ax.plot3D(rho_test[::markevery], e_test[::markevery], np.sqrt(C2_test_pred[::markevery]), 'ro')
-        # ax.set_xlabel(r"Density $(\rho)[kg m^{-3}]$",fontsize=20)
-        # ax.set_ylabel(r"Static Energy $(e)[J kg^{-1}]$",fontsize=20)
-        # ax.set_zlabel(r"Speed of sound $(c)[m s^{-1}]$",fontsize=20)
-        # ax.tick_params(which='both',labelsize=18)
-        # fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/SoS_prediction."+figformat,format=figformat,bbox_inches='tight')
-        # plt.close(fig)
-
-        # fig = plt.figure(figsize=[10,10])
-        # ax = plt.axes() 
-        # cax = ax.scatter(rho_test, e_test, c=100*np.abs((T_test_pred.numpy() - T_test)/T_test))
-        # cbar = plt.colorbar(cax, ax=ax)
-        # #cbar.set_label(r'Temperature prediction error $(\epsilon_T)[\%]$', rotation=270, fontsize=label_fontsize)
-        # ax.set_xlabel(r"Density $(\rho)[kg m^{-3}]$",fontsize=plot_fontsize)
-        # ax.set_ylabel(r"Static energy $(e)[J kg^{-1}]$",fontsize=plot_fontsize)
-        # ax.set_title(r"Temperature prediction error",fontsize=plot_fontsize)
-        # ax.tick_params(which='both',labelsize=label_fontsize)
-        # fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/Temperature_prediction_error."+figformat,format=figformat,bbox_inches='tight')
-        # plt.close(fig)
-
-        # fig = plt.figure(figsize=[10,10])
-        # ax = plt.axes() 
-        # cax = ax.scatter(rho_test, e_test, c=100*np.abs((P_test_pred.numpy() - P_test)/P_test))
-        # cbar = plt.colorbar(cax, ax=ax)
-        # cbar.set_label(r'Pressure prediction error $(\epsilon_p)[\%]$', rotation=270, fontsize=label_fontsize)
-        # ax.set_xlabel("Normalized Density",fontsize=plot_fontsize)
-        # ax.set_ylabel("Normalized Energy",fontsize=plot_fontsize)
-        # ax.set_title("Pressure prediction error",fontsize=plot_fontsize)
-        # ax.tick_params(which='both',labelsize=label_fontsize)
-        # fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/Pressure_prediction_error."+figformat,format=figformat,bbox_inches='tight')
-        # plt.close(fig)
-
-        # fig = plt.figure(figsize=[10,10])
-        # ax = plt.axes() 
-        # cax = ax.scatter(rho_test, e_test, c=100*np.abs((C2_test_pred.numpy() - C2_test)/C2_test))
-        # cbar = plt.colorbar(cax, ax=ax)
-        # ax.set_xlabel("Normalized Density",fontsize=plot_fontsize)
-        # ax.set_ylabel("Normalized Energy",fontsize=plot_fontsize)
-        # ax.set_title("SoS prediction error",fontsize=plot_fontsize)
-        # ax.tick_params(which='both',labelsize=label_fontsize)
-        # fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/SoS_prediction_error."+figformat,format=figformat,bbox_inches='tight')
-        # plt.close(fig)
-
-        # fig = plt.figure(figsize=[10,10])
-        # ax = plt.axes() 
-        # ax.plot(P_test, T_test, 'b.',markersize=3,markerfacecolor='none',label=r'Labeled')
-        # ax.plot(P_test_pred.numpy(), T_test_pred.numpy(), 'r.',label=r'Predicted')
-        # ax.set_xscale('log')
-        # ax.grid()
-        # ax.legend(fontsize=20)
-        # ax.set_xlabel(r"Pressure $(p)[Pa]$",fontsize=plot_fontsize)
-        # ax.set_ylabel(r"Temperature $(T)[K]$",fontsize=plot_fontsize)
-        # ax.set_title(r"PT diagram",fontsize=plot_fontsize)
-        # ax.tick_params(which='both',labelsize=label_fontsize)
-        # fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/PT_diagram."+figformat,format=figformat,bbox_inches='tight')
-        # plt.close(fig)
-
-        # fig = plt.figure(figsize=[10,10])
-        # ax = plt.axes() 
-        # ax.plot(T_test, S_test, 'b.',markersize=3,markerfacecolor='none',label=r'Labeled')
-        # ax.plot(T_test_pred.numpy(), S_test_pred.numpy(), 'r.',markersize=2,label=r'Predicted')
-        # ax.grid()
-        # ax.legend(fontsize=20)
-        # ax.set_ylabel(r"Entropy $(s)[J kg^{-1}]$",fontsize=plot_fontsize)
-        # ax.set_xlabel(r"Temperature $(T)[K]$",fontsize=plot_fontsize)
-        # ax.set_title(r"T-S diagram",fontsize=plot_fontsize)
-        # ax.tick_params(which='both',labelsize=label_fontsize)
-        # fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/TS_diagram."+figformat,format=figformat,bbox_inches='tight')
-        # plt.close(fig)
         return
     
 class EvaluateArchitecture_NICFD(EvaluateArchitecture):
