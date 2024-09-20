@@ -44,6 +44,29 @@ def ComputeLewisNumber(flame:ct.Solution):
     Le_species = flame.thermal_conductivity/flame.cp_mass/flame.density_mass/(flame.mix_diff_coeffs+1e-15)
     return Le_species
 
+def avg_Le_start_end(Le_sp:np.ndarray):
+    Le_av = 0.5*(Le_sp[0] + Le_sp[-1])
+    return Le_av 
+
+def avg_Le_arythmic(Le_sp:np.ndarray):
+    Le_av = np.average(Le_sp)
+    return Le_av 
+
+def avg_Le_min_max(Le_sp:np.ndarray):
+    Le_av = 0.5*(np.min(Le_sp)+np.max(Le_sp))
+    return Le_av
+
+def avg_Le_unity(Le_sp:np.ndarray):
+    Le_av = np.ones(np.shape(Le_sp))
+    return Le_av
+
+def avg_Le_const(Le_sp:np.ndarray, Le_const:float):
+    Le_av = Le_const * np.ones(np.shape(Le_sp))
+    return Le_av 
+
+def avg_Le_local(Le_sp:np.ndarray):
+    return Le_sp
+
 
 def GetReferenceData(dataset_file, x_vars, train_variables):
     # Open data file and get variable names from the first line
