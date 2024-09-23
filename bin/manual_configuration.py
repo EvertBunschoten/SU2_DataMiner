@@ -64,6 +64,25 @@ def InsertConfigOption(Config_in_method, default_value, input_message:str):
             printwronginput()
     return 
 
+def InsertEnumerateOption(Config_in_method, values_options:list, default_value, input_message:str):
+    correct_input:bool = False 
+    while not correct_input:
+        try:
+            # Check if user input is valid.
+            val_input = default_value
+            options_string = " (" + ",".join(("%i:%s" % (i+1, str(values_options[i])) for i in range(len(values_options)))) + ")"
+            default_string = " %s by default:" % str(default_value)
+            user_input = input(input_message + options_string + default_string)
+            if not user_input == "":
+                val_input = values_options[int(user_input)-1]
+            Config_in_method(val_input)
+            correct_input = True 
+        except:
+            # Set default value when invalid input.
+            Config_in_method(default_value)
+            printwronginput()
+    return
+
 def GeneralSettings(Config_in:Config):
     """Define common configuration settings and save configuration.
 
@@ -158,7 +177,7 @@ def ManualFlameletConfiguration():
         printhbar()
 
         # 4: Define flamelet solver transport model.
-        InsertConfigOption(Config_in.SetTransportModel, Config_in.GetTransportModel(), "Insert flamelet solver transport model (mixture-averaged/multicomponent/unity-Lewis-number, %s by default): " % Config_in.GetTransportModel())
+        InsertEnumerateOption(Config_in.SetTransportModel, ["mixture-averaged","multicomponent","unity-Lewis-number"], Config_in.GetTransportModel(), "Insert flamelet solver transport model")
         print("Flamelet solution transport model: %s" % Config_in.GetTransportModel())
         printhbar()
 
@@ -187,23 +206,7 @@ def ManualFlameletConfiguration():
         printhbar()
 
         # 6: Define manifold mixture status range.
-        correct_mixture_definition = False 
-        while not correct_mixture_definition:
-            mixture_definition:str= input("Insert definition for reactant mixture (1 for equivalence ratio, 2 for mixture fraction, 1 by default): ")
-            if not mixture_definition == "":
-                if int(mixture_definition) == 1:
-                    print("Reactant mixture defined as equivalence ratio.")
-                    Config_in.DefineMixtureStatus(run_as_mixture_fraction=False)
-                    correct_mixture_definition = True
-                elif int(mixture_definition) == 2:
-                    print("Reactant mixture defined as mixture fraction.")
-                    Config_in.DefineMixtureStatus(run_as_mixture_fraction=True)
-                    correct_mixture_definition = True
-                else:
-                    printwronginput()
-            else:
-                Config_in.DefineMixtureStatus()
-                correct_mixture_definition = True 
+        InsertEnumerateOption(Config_in.DefineMixtureStatus, [False, True], Config_in.GetMixtureStatus(), "Define reactant mixture through mixture fracion")
 
         if Config_in.GetMixtureStatus():
             print("Reactant mixture status defined as mixture fraction.")
@@ -265,64 +268,26 @@ def ManualFlameletConfiguration():
         printhbar()
 
         # 8: Flamelet types in manifold.
-        use_adiabatic_flamelets = False 
-        default_setting = Config_in.GenerateFreeFlames()
-        while not use_adiabatic_flamelets:
-            user_input:str= input("Compute adiabatic flamelet data (1=yes, 0=no, 1 by default): ")
-            if not user_input == "":
-                if int(user_input) == 1:
-                    print("Adiabatic flamelets are included in manifold.")
-                    Config_in.RunFreeFlames(True)
-                    use_adiabatic_flamelets = True
-                elif int(user_input) == 0:
-                    print("Adiabatic flamelets are ommitted in manifold.")
-                    Config_in.RunFreeFlames(False)
-                    use_adiabatic_flamelets = True
-                else:
-                    printwronginput()
-            else:
-                Config_in.RunFreeFlames(default_setting)
-                use_adiabatic_flamelets = True 
+        InsertEnumerateOption(Config_in.RunFreeFlames, [True, False], Config_in.GenerateFreeFlames(), "Compute adiabatic flamelet data")
+        if Config_in.GenerateFreeFlames():
+            print("Adiabatic flamelets are included in manifold.")
+        else:
+            print("Adiabatic flamelets are ommitted in manifold.")
         printhbar()
 
-        use_burner_flamelets = False 
-        default_setting = Config_in.GenerateBurnerFlames()
-        while not use_burner_flamelets:
-            user_input:str= input("Compute burner-stabilized flamelet data (1=yes, 0=no, 1 by default): ")
-            if not user_input == "":
-                if int(user_input) == 1:
-                    print("Burner-stabilized flamelets are included in manifold.")
-                    Config_in.RunBurnerFlames(True)
-                    use_burner_flamelets = True
-                elif int(user_input) == 0:
-                    print("Burner-stabilized flamelets are ommitted in manifold.")
-                    Config_in.RunBurnerFlames(False)
-                    use_burner_flamelets = True
-                else:
-                    printwronginput()
-            else:
-                Config_in.RunBurnerFlames(default_setting)
-                use_burner_flamelets = True 
+        InsertEnumerateOption(Config_in.RunBurnerFlames, [True, False], Config_in.GenerateBurnerFlames(), "Compute burner-stabilized flamelet data")
+        if Config_in.GenerateFreeFlames():
+            print("Burner-stabilized flamelets are included in manifold.")
+        else:
+            print("Burner-stabilized flamelets are ommitted in manifold.")
         printhbar()
 
-        use_eq = False 
-        default_setting = Config_in.GenerateEquilibrium()
-        while not use_eq:
-            user_input:str= input("Compute chemical equilibrium data (1=yes, 0=no, 1 by default): ")
-            if not user_input == "":
-                if int(user_input) == 1:
-                    print("Chemical equilibrium data are included in manifold.")
-                    Config_in.RunEquilibrium(True)
-                    use_eq = True
-                elif int(user_input) == 0:
-                    print("Chemical equilibrium data are ommitted in manifold.")
-                    Config_in.RunEquilibrium(False)
-                    use_eq = True
-                else:
-                    printwronginput()
-            else:
-                Config_in.RunEquilibrium(default_setting)
-                use_eq = True 
+
+        InsertEnumerateOption(Config_in.RunEquilibrium, [True, False], Config_in.GenerateEquilibrium(), "Compute chemical equilibrium data")
+        if Config_in.GenerateFreeFlames():
+            print("Chemical equilibrium data are included in manifold.")
+        else:
+            print("Chemical equilibrium data are ommitted in manifold.")
         printhbar()
 
         # 9: General settings and finalize.
@@ -375,25 +340,26 @@ def ManualNICFDConfiguration():
         printhbar()
 
         # 2: Define fluid data controlling variable grid.
-        correct_grid_definition= False 
-        PT_grid = Config_in.GetPTGrid()
-        if PT_grid:
-            grid_string = "pressure-temperature"
-        else:
-            grid_string = "density-energy"
-        while not correct_grid_definition:
-            grid_string = input("Use density-energy based grid (0) or pressure-temperature based grid (1)? (%s by default)" % grid_string)
-            if grid_string == "":
-                Config_in.UsePTGrid(PT_grid)
-                correct_grid_definition = True 
-            elif grid_string != "0" and grid_string != "1":
-                printwronginput()
-            else:
-                if grid_string == "0":
-                    Config_in.UsePTGrid(False)
-                elif grid_string == "1":
-                    Config_in.UsePTGrid(True)
-                correct_grid_definition = True 
+        InsertEnumerateOption(Config_in.UsePTGrid, [True, False], Config_in.GetPTGrid(), "Use pressure-temperature (True) or density-energy (False) based grid")
+        # correct_grid_definition= False 
+        # PT_grid = Config_in.GetPTGrid()
+        # if PT_grid:
+        #     grid_string = "pressure-temperature"
+        # else:
+        #     grid_string = "density-energy"
+        # while not correct_grid_definition:
+        #     grid_string = input("Use density-energy based grid (0) or pressure-temperature based grid (1)? (%s by default)" % grid_string)
+        #     if grid_string == "":
+        #         Config_in.UsePTGrid(PT_grid)
+        #         correct_grid_definition = True 
+        #     elif grid_string != "0" and grid_string != "1":
+        #         printwronginput()
+        #     else:
+        #         if grid_string == "0":
+        #             Config_in.UsePTGrid(False)
+        #         elif grid_string == "1":
+        #             Config_in.UsePTGrid(True)
+        #         correct_grid_definition = True 
 
         if Config_in.GetPTGrid():
             grid_string = "pressure-temperature"

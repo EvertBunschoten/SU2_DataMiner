@@ -39,14 +39,15 @@ printhbar()
 
 correct_config_type = False
 while not correct_config_type:
-    configuration_type = input("Type of SU2 DataMiner configuration (Flamelet/NICFD): ")
-    if configuration_type != "Flamelet" and configuration_type != "NICFD":
-        print("Please insert \"Flamelet\" or \"NICFD\"")
+    configuration_type = input("Type of SU2 DataMiner configuration (1:Flamelet,2:NICFD): ")
+
+    if configuration_type != "1" and configuration_type != "2":
+        print("Please insert \"1\" or \"2\"")
     else:
         correct_config_type = True 
 
 Config_in:FlameletAIConfig = None 
-if configuration_type=="Flamelet":
+if configuration_type=="1":
     ManualFlameletConfiguration()
-elif configuration_type == "NICFD":
+elif configuration_type == "2":
     ManualNICFDConfiguration()
