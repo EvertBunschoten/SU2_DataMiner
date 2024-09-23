@@ -86,6 +86,8 @@ class EntropicAIConfig(Config):
 
     def __init__(self, load_file:str=None):
         Config.__init__(self)
+        self._config_type = DefaultSettings_NICFD.config_type
+
         self._controlling_variables = [DefaultSettings_NICFD.name_density, DefaultSettings_NICFD.name_energy]
         
         self.SetAlphaExpo(DefaultSettings_NICFD.init_learning_rate_expo)
@@ -101,6 +103,9 @@ class EntropicAIConfig(Config):
             print("Loading configuration for entropic model generation...")
             with open(load_file, "rb") as fid:
                 loaded_config = pickle.load(fid)
+            if loaded_config._config_type != self._config_type:
+                raise Exception("Improper configuration file for EntropicAI configuration.")
+            
             self.__dict__ = loaded_config.__dict__.copy()
             print("Loaded configuration file with name " + loaded_config._config_name)
         else:
@@ -577,13 +582,15 @@ class FlameletAIConfig(Config):
         """
         Config.__init__(self)
 
+        self._config_type = DefaultSettings_FGM.config_type
         self._config_name = DefaultSettings_FGM.config_name
         
-
         if load_file:
             print("Loading configuration for flamelet generation")
             with open(load_file, "rb") as fid:
                 loaded_config:FlameletAIConfig = pickle.load(fid)
+            if loaded_config._config_type != self._config_type:
+                raise Exception("Improper configuration file for FlameletAI configuration.")
             self.__dict__ = loaded_config.__dict__.copy()
             print("Loaded configuration file with name " + loaded_config.GetConfigName())
         else:

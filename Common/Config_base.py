@@ -49,6 +49,8 @@ class Config:
     _hidden_layer_architecture:list[int] = DefaultProperties.hidden_layer_architecture  # Hidden layer perceptron count.
     _activation_function:str = DefaultProperties.activation_function    # Hidden layer activation function name.
 
+    _config_type:str= None  # SU2 DataMiner configuration type.
+    
     def __init__(self):
         self._output_dir = os.getcwd()
         return 
