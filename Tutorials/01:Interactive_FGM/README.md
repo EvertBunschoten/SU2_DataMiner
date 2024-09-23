@@ -27,18 +27,18 @@ The manifold generation process starts by running the command ```GenerateConfig.
 /____/\____//____/  /_____/\__,_/\__/\__,_/_/  /_/_/_/ /_/\___/_/     
                                                                       
 
-#====================================================================================================#
+#====================================================================================================================#
 Welcome to the SU2 DataMiner interactive configuration menu.
 Generate a configuration for a data-driven fluid manifold through terminal inputs.
-#====================================================================================================#
-Type of SU2 DataMiner configuration (Flamelet/NICFD):
+#====================================================================================================================#
+Type of SU2 DataMiner configuration (1:Flamelet,2:NICFD):
 ```
 
 ### 1: Manifold type
-The first step is to choose the type of configuration: ```Flamelet``` for an FGM-based manifold, ```NICFD``` for an NICFD-based manifold. For this tutorial, the option ```Flamelet``` is used.
+The first step is to choose the type of configuration: ```1``` for an FGM-based manifold, ```2``` for an NICFD-based manifold. For this tutorial, the option ```1``` is used.
 
 ```
-Type of SU2 DataMiner configuration (Flamelet/NICFD): Flamelet
+Type of SU2 DataMiner configuration (1:Flamelet,2:NICFD): 1
 ```
 
 ### 2: Reaction mechanism
@@ -72,10 +72,10 @@ Oxidizer definition: O2:1.0,N2:3.76
 ### 4: Flamelet solver transport model
 The species transport model affects the way in which species diffusion is resolved in Cantera.  See the [Cantera documentation](https://cantera.org/documentation/docs-2.5/sphinx/html/cython/importing.html#cantera.Solution) for details. In this tutorial, the transport mechanism is set to ```mixture-averaged```.
 ```
-#====================================================================================================#
-Insert flamelet solver transport model (mixture-averaged/multicomponent/unity-Lewis-number, multicomponent by default): mixture-averaged
+#====================================================================================================================#
+Insert flamelet solver transport model (1:mixture-averaged,2:multicomponent,3:unity-Lewis-number) multicomponent by default:1
 Flamelet solution transport model: mixture-averaged
-#====================================================================================================#
+#====================================================================================================================#
 ```
 
 ### 5: Progress variable definition
@@ -97,11 +97,10 @@ Progress variable definition: (-4.960e-01)*H2+(-3.125e-02)*O2+(+5.551e-02)*H2O
 ### 6: Manifold bounds
 The flamelet data in the manifold can be generated over a range of reactant mixtures and temperatures. This ensures the manifold has sufficient ranges along the three controlling variable axes: progress variable, total enthalpy, and mixture fraction. The range in mixture fraction can be controlled by setting defining a set of mixture ratio's for which flamelet data are generated. The mixture ratio can be defined as equivalence ratio $(\phi)$ or mixture fraction $(Z)$. For this tutorial, the mixture ratio is defined as equivalence ratio.
 ```
-#====================================================================================================#
-Insert definition for reactant mixture (1 for equivalence ratio, 2 for mixture fraction, 1 by default): 1
-Reactant mixture defined as equivalence ratio.
+#====================================================================================================================#
+Define reactant mixture through mixture fracion (1:False,2:True) False by default:
 Reactant mixture status defined as equivalence ratio.
-#====================================================================================================#
+#====================================================================================================================#
 ```
 Next, the program asks for the lower and upper bounds of the mixture ratio. The lower bound value should not exceed the upper bound value and the values should be physically sound. For example, negative mixture ratio values are not supported and neither are mixture fraction values higher than one. The range in mixture ratio depends on the application of the manifold.
 For the current tutorial, the lower and upper equivalence ratio values are set to 0.3 and 0.7. 
@@ -132,16 +131,17 @@ Number of reactant temperature status divisions: 10
 ### 7: Flamelet types
 ```SU2 DataMiner``` supports multiple flamelet types which can populate the manifold. The supported options are [*adiabatic flamelets*](https://cantera.org/documentation/docs-2.5/sphinx/html/cython/onedim.html#freeflame), [*burner-stabilized flamelets*](https://cantera.org/documentation/docs-2.5/sphinx/html/cython/onedim.html#burnerflame), and *chemical equilibrium data* (pure reactants and products over the reactant temperature range). In this tutorial, only adiabatic flamelets will be used.
 ```
-#====================================================================================================#
-Compute adiabatic flamelet data (1=yes, 0=no, 1 by default): 1
+#====================================================================================================================#
+Compute adiabatic flamelet data (1:True,2:False) True by default:1
 Adiabatic flamelets are included in manifold.
-#====================================================================================================#
-Compute burner-stabilized flamelet data (1=yes, 0=no, 1 by default): 0
+#====================================================================================================================#
+Compute burner-stabilized flamelet data (1:True,2:False) True by default:2
 Burner-stabilized flamelets are ommitted in manifold.
-#====================================================================================================#
-Compute chemical equilibrium data (1=yes, 0=no, 1 by default): 0
+#====================================================================================================================#
+Compute chemical equilibrium data (1:True,2:False) True by default:2
 Chemical equilibrium data are ommitted in manifold.
-#====================================================================================================#
+#====================================================================================================================#
+
 ```
 
 ### 8: General settings
@@ -191,7 +191,8 @@ Controlling variable names: ProgressVariable, EnthalpyTot, MixtureFraction
 Progress variable definition: -4.96e-01 H2, -3.13e-02 O2, +5.55e-02 H2O
 
 Average specie Lewis numbers:
-H2:3.4532e-01, H:2.3124e-01, O:8.1336e-01, O2:1.2417e+00, OH:8.2708e-01, H2O:1.0149e+00, HO2:1.2245e+00, H2O2:1.2317e+00, AR:8.7322e-01, N2:7.6639e-01
+H2:3.4532e-01, H:2.3124e-01, O:8.1336e-01, O2:1.2417e+00, OH:8.2708e-01, H2O:1.0149e+00, HO2:1.2245e+00, H2O2:1.2317e+00, C:8.7322e-01, CH:7.6639e-01, CH2:1.1247e+00, CH2(S):1.1247e+00, CH3:1.1474e+00, CH4:9.7451e-01, CO:1.2660e+00, CO2:1.5398e+00, HCO:1.4735e+00, CH2O:1.4839e+00, CH2OH:1.5061e+00, CH3O:1.5061e+00, CH3OH:1.5117e+00, C2H:1.4708e+00, C2H2:1.4838e+00, C2H3:1.4963e+00, C2H4:1.5077e+00, C2H5:1.6339e+00, C2H6:1.6455e+00, HCCO:9.8451e-01, CH2CO:1.7199e+00, HCCOH:1.7199e+00, N:9.1441e-01, NH:7.7408e-01, NH2:7.8852e-01, NH3:1.0691e+00, NNH:1.2621e+00, NO:1.2461e+00, NO2:1.3994e+00, N2O:1.5457e+00, HNO:1.2309e+00, CN:1.2576e+00, HCN:1.4952e+00, H2CN:1.5070e+00, HCNN:9.8453e-01, HCNO:1.5400e+00, HOCN:1.5400e+00, HNCO:1.5400e+00, NCO:1.5339e+00, N2:1.4319e+00, AR:1.2518e+00, C3H7:2.0872e+00, C3H8:2.0951e+00, CH2CHO:1.7268e+00, CH3CHO:1.7334e+00
+
 
 Save configuration and exit (1) or re-run configuration set-up (2)?
 ```
@@ -202,49 +203,52 @@ Save configuration and exit (1) or re-run configuration set-up (2)?2
 Re-running configuration set-up
 Insert reaction mechanism file to use for flamelet computations (gri30.yaml by default): h2o2.yaml
 Reaction mechanism: h2o2.yaml
-#====================================================================================================#
-#====================================================================================================#
+#====================================================================================================================#
+#====================================================================================================================#
 Insert comma-separated list of fuel species (H2 by default): 
 Fuel definition: H2:1.0
-#====================================================================================================#
+#====================================================================================================================#
 Insert comma-separated list of oxidizer species (21% O2,79% N2 by default): 
 Oxidizer definition: O2:1.0,N2:3.76
-#====================================================================================================#
-Insert flamelet solver transport model (mixture-averaged/multicomponent/unity-Lewis-number, mixture-averaged by default): 
+#====================================================================================================================#
+Insert flamelet solver transport model (1:mixture-averaged,2:multicomponent,3:unity-Lewis-number) mixture-averaged by default:
 Flamelet solution transport model: mixture-averaged
-#====================================================================================================#
+#====================================================================================================================#
 Insert comma-separated list of progress variable species (H2,O2,H2O by default):
 Insert comma-separated list of progress variable weights (-0.49603174603174605,-0.03125195324707794,0.055509297807382736 by default):
 Progress variable definition: (-4.960e-01)*H2+(-3.125e-02)*O2+(+5.551e-02)*H2O
-#====================================================================================================#
-Insert definition for reactant mixture (1 for equivalence ratio, 2 for mixture fraction, 1 by default): 
+#====================================================================================================================#
+Define reactant mixture through mixture fracion (1:False,2:True) False by default:
 Reactant mixture status defined as equivalence ratio.
-#====================================================================================================#
+#====================================================================================================================#
 Insert lower reactant mixture status value (0.300 by default): 
 Insert upper reactant mixture status value (0.700 by default): 
 Insert number of divisions for the mixture status range (10 by default): 
 Lower reactant mixture status value: 0.300
 Upper reactant mixture status value: 0.700
 Number of mixture status divisions: 10
-#====================================================================================================#
+#====================================================================================================================#
 Insert lower reactant temperature value [K] (300.000 by default): 
 Insert upper reactant temperature value [K] (600.000 by default): 
 Insert number of divisions for the reactant temperature range (10 by default): 
 Lower reactant temperature value: 300.000 K
 Upper reactant temperature value: 600.000 K
 Number of reactant temperature status divisions: 10
-#====================================================================================================#
-Compute adiabatic flamelet data (1=yes, 0=no, 1 by default): 
-#====================================================================================================#
-Compute burner-stabilized flamelet data (1=yes, 0=no, 1 by default): 
-#====================================================================================================#
-Compute chemical equilibrium data (1=yes, 0=no, 1 by default): 
-#====================================================================================================#
+#====================================================================================================================#
+Compute adiabatic flamelet data (1:True,2:False) True by default:
+Adiabatic flamelets are included in manifold.
+#====================================================================================================================#
+Compute burner-stabilized flamelet data (1:True,2:False) False by default:
+Burner-stabilized flamelets are ommitted in manifold.
+#====================================================================================================================#
+Compute chemical equilibrium data (1:True,2:False) False by default:
+Chemical equilibrium data are ommitted in manifold.
+#====================================================================================================================#
 Insert data output directory (<CURRENT DIRECTORY> by default):
 Data output folder: <CURRENT DIRECTORY>
-#====================================================================================================#
+#====================================================================================================================#
 Set a name for the current SU2 DataMiner configuration (Tutorial_1 by default): 
-#====================================================================================================#
+#====================================================================================================================#
 Summary:
    _____ __  _____      ____        __        __  ____                
   / ___// / / /__ \    / __ \____ _/ /_____ _/  |/  (_)___  ___  _____
@@ -275,8 +279,6 @@ Progress variable definition: -4.96e-01 H2, -3.13e-02 O2, +5.55e-02 H2O
 
 Average specie Lewis numbers:
 H2:3.4532e-01, H:2.3124e-01, O:8.1336e-01, O2:1.2417e+00, OH:8.2708e-01, H2O:1.0149e+00, HO2:1.2245e+00, H2O2:1.2317e+00, AR:8.7322e-01, N2:7.6639e-01
-
-
 ```
 
 By pressing ```1```, the configuration will be saved and can be used for subsequent flamelet data computations and manifold set-up.
