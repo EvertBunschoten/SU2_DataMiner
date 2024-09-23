@@ -41,6 +41,7 @@ class DefaultProperties:
     output_file_header:str = "fluid_data"
     config_name:str = "DataMiner"
 
+
 class DefaultSettings_NICFD(DefaultProperties):
     T_min:float = 300
     T_max:float = 600
@@ -69,6 +70,7 @@ class DefaultSettings_NICFD(DefaultProperties):
     init_learning_rate_expo:float = -1.64126
     learning_rate_decay:float = 9.87211e-01
     activation_function:str = "exponential"
+    config_type:str = "EntropicAI"
 
 class DefaultSettings_FGM(DefaultProperties):
     config_name:str = "config_FGM"
@@ -119,7 +121,7 @@ class DefaultSettings_FGM(DefaultProperties):
     affinity_threshold:float = 0.7
     output_file_header:str = "flamelet_data"
     boundary_file_header:str = "boundary_data"
-
+    config_type:str = "FlameletAI"
 
 ActivationFunctionOptions = {"linear" : tf.keras.activations.linear,\
                              "elu" : tf.keras.activations.elu,\
