@@ -276,7 +276,7 @@ def ManualFlameletConfiguration():
         printhbar()
 
         InsertEnumerateOption(Config_in.RunBurnerFlames, [True, False], Config_in.GenerateBurnerFlames(), "Compute burner-stabilized flamelet data")
-        if Config_in.GenerateFreeFlames():
+        if Config_in.GenerateBurnerFlames():
             print("Burner-stabilized flamelets are included in manifold.")
         else:
             print("Burner-stabilized flamelets are ommitted in manifold.")
@@ -284,7 +284,7 @@ def ManualFlameletConfiguration():
 
 
         InsertEnumerateOption(Config_in.RunEquilibrium, [True, False], Config_in.GenerateEquilibrium(), "Compute chemical equilibrium data")
-        if Config_in.GenerateFreeFlames():
+        if Config_in.GenerateEquilibrium():
             print("Chemical equilibrium data are included in manifold.")
         else:
             print("Chemical equilibrium data are ommitted in manifold.")
@@ -341,25 +341,6 @@ def ManualNICFDConfiguration():
 
         # 2: Define fluid data controlling variable grid.
         InsertEnumerateOption(Config_in.UsePTGrid, [True, False], Config_in.GetPTGrid(), "Use pressure-temperature (True) or density-energy (False) based grid")
-        # correct_grid_definition= False 
-        # PT_grid = Config_in.GetPTGrid()
-        # if PT_grid:
-        #     grid_string = "pressure-temperature"
-        # else:
-        #     grid_string = "density-energy"
-        # while not correct_grid_definition:
-        #     grid_string = input("Use density-energy based grid (0) or pressure-temperature based grid (1)? (%s by default)" % grid_string)
-        #     if grid_string == "":
-        #         Config_in.UsePTGrid(PT_grid)
-        #         correct_grid_definition = True 
-        #     elif grid_string != "0" and grid_string != "1":
-        #         printwronginput()
-        #     else:
-        #         if grid_string == "0":
-        #             Config_in.UsePTGrid(False)
-        #         elif grid_string == "1":
-        #             Config_in.UsePTGrid(True)
-        #         correct_grid_definition = True 
 
         if Config_in.GetPTGrid():
             grid_string = "pressure-temperature"
