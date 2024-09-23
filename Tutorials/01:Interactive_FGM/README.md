@@ -190,6 +190,9 @@ Flamelet manifold data characteristics:
 Controlling variable names: ProgressVariable, EnthalpyTot, MixtureFraction
 Progress variable definition: -4.96e-01 H2, -3.13e-02 O2, +5.55e-02 H2O
 
+Average specie Lewis numbers:
+H2:3.4532e-01, H:2.3124e-01, O:8.1336e-01, O2:1.2417e+00, OH:8.2708e-01, H2O:1.0149e+00, HO2:1.2245e+00, H2O2:1.2317e+00, AR:8.7322e-01, N2:7.6639e-01
+
 Save configuration and exit (1) or re-run configuration set-up (2)?
 ```
 
@@ -269,6 +272,10 @@ Flamelet types included in manifold:
 Flamelet manifold data characteristics: 
 Controlling variable names: ProgressVariable, EnthalpyTot, MixtureFraction
 Progress variable definition: -4.96e-01 H2, -3.13e-02 O2, +5.55e-02 H2O
+
+Average specie Lewis numbers:
+H2:3.4532e-01, H:2.3124e-01, O:8.1336e-01, O2:1.2417e+00, OH:8.2708e-01, H2O:1.0149e+00, HO2:1.2245e+00, H2O2:1.2317e+00, AR:8.7322e-01, N2:7.6639e-01
+
 
 ```
 
