@@ -570,6 +570,7 @@ class FlameletAIConfig(Config):
 
     __Le_avg_method = avg_Le_arythmic
     __Le_const_sp:np.ndarray[float] = None 
+    __custom_Le_av_set:bool = False 
 
     def __init__(self, load_file:str=None):
         """Class constructor
@@ -639,11 +640,14 @@ class FlameletAIConfig(Config):
             self.SetProgressVariableDefinition(pv_sp_default, pv_w_default)
             self.__custom_pv_set = False
         #print(self.__pv_definition, self.__pv_weights)
+        if not self.__custom_Le_av_set:
+            self.SetAverageLewisNumbers()
+
         return 
     
-    def SetConstSpecieLewisNumber(self, sp_name:str, Lewis_number:float):
-        self.__Le_const_sp[self.gas.species_index(sp_name)] = Lewis_number 
-        return 
+    # def SetConstSpecieLewisNumber(self, sp_name:str, Lewis_number:float):
+    #     self.__Le_const_sp[self.gas.species_index(sp_name)] = Lewis_number 
+    #     return 
     
     def GetConstSpecieLewisNumbers(self):
         return self.__Le_const_sp 
@@ -686,6 +690,10 @@ class FlameletAIConfig(Config):
         if len(self.__passive_species) > 0:
             print("Passive species in manifold: " + ", ".join(s for s in self.__passive_species))
         print("")
+
+        if self.__preferential_diffusion:
+            print("Average specie Lewis numbers:")
+            print(", ".join(("%s:%.4e" % (sp, Le) for sp, Le in zip(self.__species_in_mixture, self.__Le_const_sp))))
 
         if self.__Table_level_count is not None:
             print("Table generation settings:")
@@ -975,7 +983,7 @@ class FlameletAIConfig(Config):
             raise Exception("Transport model should be \"multicomponent\", \"mixture-averaged\", or \"unity-Lewis-number\"")
         
         self.__transport_model=transport_model
-
+        self.__SynchronizeSettings()
         return 
     
     def GetTransportModel(self):
@@ -1008,7 +1016,10 @@ class FlameletAIConfig(Config):
             
             self.__mix_status_lower = mix_lower
             self.__mix_status_upper = mix_upper
-    
+
+        if not self.__custom_Le_av_set:
+            self.SetAverageLewisNumbers()
+
         return 
     
     def GetMixtureBounds(self):
@@ -1062,6 +1073,11 @@ class FlameletAIConfig(Config):
             self.__T_unb_upper = T_unb_upper
             self.__T_unb_lower = T_unb_lower
 
+        if not self.__custom_Le_av_set:
+            self.SetAverageLewisNumbers()
+
+        return 
+    
     def GetUnbTempBounds(self):
         """
         Get the reactant temperature bounds for flamelet generation.
@@ -1105,6 +1121,9 @@ class FlameletAIConfig(Config):
 
         """
         self.__run_mixture_fraction = run_as_mixture_fraction
+        if not self.__custom_Le_av_set:
+            self.SetAverageLewisNumbers()
+
         return
     
     def GetMixtureStatus(self):
@@ -1433,6 +1452,8 @@ class FlameletAIConfig(Config):
         """
 
         self.__preferential_diffusion = use_PD 
+        if not self.__custom_Le_av_set:
+            self.SetAverageLewisNumbers()
 
         return
     
@@ -1454,6 +1475,51 @@ class FlameletAIConfig(Config):
         else:
             Le_av = self.__Le_avg_method(Le_sp)
         return Le_av
+
+    def SetAverageLewisNumbers(self, mixture_status:float=None, reactant_temperature:float=None):
+        """Define the constant specie Lewis numbers for a given mixture status and reactant temperature.
+
+        :param mixture_status: equivalence ratio or mixture fraction, defaults to the average of the manifold bounds.
+        :type mixture_status: float, optional
+        :param reactant_temperature: reactant temperature, defaults to the average of the manifold bounds.
+        :type reactant_temperature: float, optional
+        :raises Exception: if negative mixture status value or temperature is provided.
+        """
+        if mixture_status != None:
+            if mixture_status < 0:
+                raise Exception("Mixture status value should be positive.")
+            if self.__run_mixture_fraction and mixture_status > 1:
+                raise Exception("Mixture fraction should be between zero and one.")
+        if reactant_temperature != None:
+            if reactant_temperature < 0:
+                raise Exception("Reactant temperature should be positive.")
+        
+        self.__Le_avg_method = avg_Le_const
+        if reactant_temperature == None:
+            T_reactants = 0.5*(self.__T_unb_lower + self.__T_unb_upper)
+        else:
+            T_reactants = reactant_temperature 
+        
+        if mixture_status == None:
+            mixture_status_gas = 0.5*(self.__mix_status_lower + self.__mix_status_upper)
+        else:
+            mixture_status_gas = mixture_status
+
+        self.gas.TP =T_reactants, DefaultSettings_FGM.pressure 
+        if self.__run_mixture_fraction:
+            self.gas.set_mixture_fraction(mixture_status_gas, self.__fuel_string, self.__oxidizer_string)
+        else:
+            self.gas.set_equivalence_ratio(mixture_status_gas, self.__fuel_string, self.__oxidizer_string)
+        
+        Le_reactants = ComputeLewisNumber(self.gas)
+        self.gas.equilibrate("HP")
+        Le_products = ComputeLewisNumber(self.gas)
+
+        self.__Le_const_sp = 0.5*(Le_reactants + Le_products)
+        self.__custom_Le_av_set = True 
+
+        return 
+    
     def ComputeBetaTerms(self, variables:list[str], flamelet_data:np.ndarray):
         """
         Compute the differential diffusion scalars for a flamelet.
