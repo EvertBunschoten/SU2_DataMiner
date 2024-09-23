@@ -44,22 +44,25 @@ Flamelet types included in manifold:
 Flamelet manifold data characteristics: 
 Controlling variable names: ProgressVariable, EnthalpyTot, MixtureFraction
 Progress variable definition: -4.96e-01 H2, -3.13e-02 O2, +5.55e-02 H2O
+
+Average specie Lewis numbers:
+H2:3.4532e-01, H:2.3124e-01, O:8.1336e-01, O2:1.2417e+00, OH:8.2708e-01, H2O:1.0149e+00, HO2:1.2245e+00, H2O2:1.2317e+00, AR:8.7322e-01, N2:7.6639e-01
 ```
 
 ## Tutorial
 
-The most basic manner in which flamelet data can be generated is through the terminal, using the ```GenerateFlameletData.py``` command. Running this command with no arguments displays the argument options.
+The most basic manner in which flamelet data can be generated is through the terminal, using the ```GenerateFluidData.py``` command. Running this command with no arguments displays the argument options.
 
 ```
->>> GenerateFlameletData.py
-usage: GenerateFlameletData.py [-h] [--c CONFIG_NAME] [--np NP] [--b]
+>>> GenerateFluidData.py
+usage: GenerateFluidData.py [-h] [--c CONFIG_NAME] [--np NP] [--b] [--t TYPE]
 
 options:
   -h, --help       show this help message and exit
-  --c CONFIG_NAME  FlameletAI configuration file name.
+  --c CONFIG_NAME  Configuration file name.
   --np NP          Number of processors to use for flamelet data generation.
-  --b              Generate chemical equilibrium boundary data over the full mixture range (0.0 <= Z
-                   <= 1.0).
+  --b              Generate chemical equilibrium boundary data over the full mixture range (0.0 <= Z <= 1.0).
+  --t TYPE         Data type to generate: (1:FGM, 2:NICFD)
 ```
 
 The main options are ```--c``` and ```--np```, which correspond to the ```SU2 DataMiner``` configuration file and number of processors respectively. The option ```--c``` accepts the configuration file path name describing the manifold. For this tutorial, the configuration from [tutorial 1](../01:Interactive_FGM/README.md) is used.
@@ -68,7 +71,7 @@ The computational cost of generating the flamelet data depends on the complexity
 
 Initiate the flamelet data computation process with the following command:
 ```
->>> GenerateFlameletData --c ../01\:Interactive_FlameletData/Tutorial_1.cfg --np 2
+>>> GenerateFluidData --c ../01\:Interactive_FlameletData/Tutorial_1.cfg --np 2 --t 1
 ```
 
 This will first print a summary of the configuration in the terminal, followed by status updates of the flamelet data generation process:
