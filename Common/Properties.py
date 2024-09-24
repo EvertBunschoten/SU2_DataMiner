@@ -71,6 +71,7 @@ class DefaultSettings_NICFD(DefaultProperties):
     learning_rate_decay:float = 9.87211e-01
     activation_function:str = "exponential"
     config_type:str = "EntropicAI"
+    supported_state_vars:list[str] = ["T","p","c2","dTdrho_e","dTde_rho","dpdrho_e","dpde_rho"]
 
 class DefaultSettings_FGM(DefaultProperties):
     config_name:str = "config_FGM"

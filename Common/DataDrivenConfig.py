@@ -32,12 +32,11 @@ import cantera as ct
 import pickle 
 import CoolProp
 import cantera as ct 
-import copy 
 
 #---------------------------------------------------------------------------------------------#
 # Importing DataMiner classes and functions
 #---------------------------------------------------------------------------------------------#
-from Common.Properties import DefaultProperties, DefaultSettings_NICFD, DefaultSettings_FGM
+from Common.Properties import DefaultSettings_NICFD, DefaultSettings_FGM
 from Common.Config_base import Config 
 from Common.CommonMethods import *
 
@@ -54,26 +53,27 @@ class EntropicAIConfig(Config):
     """
 
     # Fluid definition settings
-    __fluid_names:list[str] = ["MM"]
-    __fluid_string:str="MM"
-    __EOS_type:str=DefaultSettings_NICFD.EOS_type
-    __fluid_mole_fractions:list[float] = [1.0]
-    __use_PT:bool = DefaultSettings_NICFD.use_PT_grid
+    __fluid_names:list[str] = ["MM"]                    # List of fluid names used for data generation.
+    __fluid_string:str="MM"                             # Fluid string for defining the abstract state in CoolProp
+    __EOS_type:str=DefaultSettings_NICFD.EOS_type       # Equation of state used by CoolProp
+    __fluid_mole_fractions:list[float] = [1.0]          # Mole fractions for components in fluid mixture.
+    __use_PT:bool = DefaultSettings_NICFD.use_PT_grid   # Use a pressure-temperature based grid for fluid training data.
 
 
     __T_lower:float = DefaultSettings_NICFD.T_min   # Lower temperature bound.
     __T_upper:float = DefaultSettings_NICFD.T_max   # Upper temperature bound.
-    __Np_T:int = DefaultSettings_NICFD.Np_temp      # Number of temperature samples between bounds.
+    __Np_T:int = DefaultSettings_NICFD.Np_temp      # Number of temperature/energy samples between bounds.
 
-    __P_lower:float = DefaultSettings_NICFD.P_min
-    __P_upper:float = DefaultSettings_NICFD.P_max
-    __Np_P:int = DefaultSettings_NICFD.Np_p
+    __P_lower:float = DefaultSettings_NICFD.P_min   # Lower pressure bound.
+    __P_upper:float = DefaultSettings_NICFD.P_max   # Upper pressure bound.
+    __Np_P:int = DefaultSettings_NICFD.Np_p         # Number of pressure/density samples between bounds.
 
-    __Rho_lower:float = DefaultSettings_NICFD.Rho_min
-    __Rho_upper:float = DefaultSettings_NICFD.Rho_max 
-    __Energy_lower:float = DefaultSettings_NICFD.Energy_min
-    __Energy_upper:float = DefaultSettings_NICFD.Energy_max
+    __Rho_lower:float = DefaultSettings_NICFD.Rho_min       # Lower density bound.
+    __Rho_upper:float = DefaultSettings_NICFD.Rho_max       # Upper density bound.
+    __Energy_lower:float = DefaultSettings_NICFD.Energy_min # Lower energy bound.
+    __Energy_upper:float = DefaultSettings_NICFD.Energy_max # Upper energy bound.
     
+    _state_vars:list[str] = ["T","p","c2"]  # State variable names for which the physics-informed MLP is trained.
 
     # Table Generation Settings
 
@@ -82,23 +82,28 @@ class EntropicAIConfig(Config):
     __Table_ref_radius:float = None         # Refinement radius within which refined cell size is applied.
     __Table_curv_threshold:float = None     # Curvature threshold beyond which refinement is applied.
 
-    
 
     def __init__(self, load_file:str=None):
+        """EntropicAI SU2 DataMiner configuration class.
+
+        :param load_file: configuration file name to load, defaults to None
+        :type load_file: str, optional
+        :raises Exception: if loaded configuration is incompatible with the EntropicAIConfig class.
+        """
+
         Config.__init__(self)
         self._config_type = DefaultSettings_NICFD.config_type
 
         self._controlling_variables = [DefaultSettings_NICFD.name_density, DefaultSettings_NICFD.name_energy]
         
+        # Set default settings.
         self.SetAlphaExpo(DefaultSettings_NICFD.init_learning_rate_expo)
         self.SetLRDecay(DefaultSettings_NICFD.learning_rate_decay)
         self.SetBatchExpo(DefaultSettings_NICFD.batch_size_exponent)
         self.SetHiddenLayerArchitecture(DefaultSettings_NICFD.hidden_layer_architecture)
         self.SetActivationFunction(DefaultSettings_NICFD.activation_function)
-        
-        """Class constructor
-        """
-        self._config_name = "EntropicAIConfig" # Configuration name.
+        self._config_name = DefaultSettings_NICFD.config_name
+
         if load_file:
             print("Loading configuration for entropic model generation...")
             with open(load_file, "rb") as fid:
@@ -133,7 +138,8 @@ class EntropicAIConfig(Config):
             print("Data generation grid: pressure-based")
         else:
             print("Data generation grid: density-based")
-        
+        print("")
+        print("State variables considered during physics-informed learning: "+", ".join((v for v in self._state_vars)))
         return 
     
 
@@ -156,8 +162,6 @@ class EntropicAIConfig(Config):
             fluid_mixing = []
             for f in fluid_name:
                 self.__fluid_names.append(f)
-            #     fluid_mixing.append(CoolProp.CoolProp.get_fluid_param_string(f,"CAS"))
-            # CoolProp.CoolProp.apply_simple_mixing_rule(fluid_mixing[0], fluid_mixing[1],"linear")
             if len(self.__fluid_mole_fractions) == 0:
                 self.__fluid_mole_fractions = np.ones(len(self.__fluid_names))/len(self.__fluid_names)
 
@@ -170,7 +174,8 @@ class EntropicAIConfig(Config):
             CoolProp.AbstractState("HEOS", fluid_string)
         except:
             raise Exception("Specified fluid name not found or mixture is not supported.")
-
+        return 
+    
     def SetEquationOfState(self, EOS_type_in:str=DefaultSettings_NICFD.EOS_type):
         self.__EOS_type=EOS_type_in 
         return
@@ -210,10 +215,10 @@ class EntropicAIConfig(Config):
         return self.__fluid_string
     
     def GetFluidNames(self):
-        return self.__fluid_names 
+        return self.__fluid_names.copy()
     
     def GetMoleFractions(self):
-        return self.__fluid_mole_fractions
+        return self.__fluid_mole_fractions.copy()
     
     def UsePTGrid(self, PT_grid:bool=DefaultSettings_NICFD.use_PT_grid):
         """Define fluid data grid in the pressure-temperature space. If not, the fluid data grid is defined in the density-energy space.
@@ -487,6 +492,29 @@ class EntropicAIConfig(Config):
         return self.__Table_ref_radius, self.__Table_curv_threshold
     
         
+    def SetStateVars(self, state_vars_in:list[str]):
+        """Set the state variables for which the physics-informed neural network is trained.
+
+        :param state_vars_in: list with state variable names.
+        :type state_vars_in: list[str]
+        :raises Exception: if any of the state variables is not supported.
+        """
+
+        if any((v not in DefaultSettings_NICFD.supported_state_vars) for v in state_vars_in):
+            raise Exception("Only the following state variables are supported: "+ ",".join((v for v in DefaultSettings_NICFD.supported_state_vars)))
+        self._state_vars = state_vars_in.copy()
+
+        return 
+    
+    def GetStateVars(self):
+        """Return the list of state variable names for which the physics-informed MLP is trained.
+
+        :return: list of state variable names.
+        :rtype: list[str]
+        """
+
+        return self._state_vars
+    
     
 
 

@@ -645,7 +645,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         self.__idx_rho = self._controlling_vars.index("Density")
         self.__idx_e = self._controlling_vars.index("Energy")
 
-        self._state_vars = ["T","p","c2", "dTdrho_e", "dTde_rho", "dpdrho_e", "dpde_rho"]
+        self._state_vars = ["T","p","c2"]
 
         return 
     
@@ -659,6 +659,11 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         
         return 
     
+    def SetStateVars(self, state_vars_in:list[str]):
+        if any((v not in DefaultSettings_NICFD.supported_state_vars) for v in state_vars_in):
+            raise Exception("Only the following state variables are supported: "+ ",".join((v for v in DefaultSettings_NICFD.supported_state_vars)))
+        self._state_vars = state_vars_in.copy()
+        return 
     
     def SetDecaySteps(self):
         super().SetDecaySteps()
@@ -746,7 +751,8 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         dsdP_rho = dsde_rho / dPde_rho
         
         Y_state = tf.stack((T, P, c2, dTdrho_e, dTde_rho, dPdrho_e, dPde_rho, dhdrho_e, dhde_rho, dhdP_rho, dhdrho_P, dsdP_rho, dsdrho_P),axis=1)
-        return tf.stack(tf.tuple(Y_state[:,EntropicVarPairing[var]] for var in self._state_vars),axis=1)
+        Y_state_selected = tf.stack(tf.tuple(Y_state[:,EntropicVarPairing[var]] for var in self._state_vars),axis=1)
+        return Y_state_selected
     
     @tf.function 
     def TD_Evaluation(self, rhoe_norm:tf.Tensor):
@@ -763,8 +769,8 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     def ComputeStateError(self, Y_state_label_norm:tf.constant, X_label_norm:tf.constant):
         Y_state_pred = self.EvaluateState(X_label_norm)
         Y_state_pred_norm = (Y_state_pred - self._Y_state_min)/(self._Y_state_max - self._Y_state_min)
-
-        return tf.reduce_mean(tf.pow(Y_state_pred_norm - Y_state_label_norm, 2), axis=0)
+        pred_error = tf.reduce_mean(tf.pow(Y_state_pred_norm - Y_state_label_norm, 2), axis=0)
+        return pred_error
     
   
     @tf.function 
@@ -773,8 +779,17 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
             tape.watch(self._trainable_hyperparams)
             state_loss = self.ComputeStateError(Y_state_label_norm, X_label_norm)
 
-            grads_state = tape.gradient(tf.reduce_mean(state_loss), self._trainable_hyperparams)
+            grads_state = tape.gradient(tf.reduce_mean(state_loss, axis=0), self._trainable_hyperparams)
 
+        return state_loss, grads_state 
+    
+    @tf.function
+    def __ComputeGradient_State_error(self, Y_state_label_norm:tf.constant, X_label_norm:tf.constant, iVar:int):
+        with tf.GradientTape() as tape:
+            tape.watch(self._trainable_hyperparams)
+            state_loss = self.ComputeStateError(Y_state_label_norm, X_label_norm)[iVar]
+
+            grads_state = tape.gradient(tf.reduce_mean(state_loss), self._trainable_hyperparams)
         return state_loss, grads_state 
     
     @tf.function
@@ -840,37 +855,16 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     @tf.function
     def Train_Step(self, X_batch_norm:tf.constant, Y_batch_norm:tf.constant):
 
-        # T_batch_norm = tf.gather(Y_batch_norm,indices=self.__idx_T, axis=1)
-        # P_batch_norm = tf.gather(Y_batch_norm,indices=self.__idx_p, axis=1)
-        # C2_batch_norm = tf.gather(Y_batch_norm,indices=self.__idx_c2, axis=1)
-        
-        # # Weight update for temperature prediction.
-        # T_loss, grads_T = self.__ComputeGradients_T_error(T_batch_norm, X_batch_norm)
-        # self._optimizer.apply_gradients(zip(grads_T, self._trainable_hyperparams))
-
-        # # Weight update for pressure prediction.
-        # P_loss, grads_P = self.__ComputeGradients_P_error(P_batch_norm,X_batch_norm)
-        # self._optimizer.apply_gradients(zip(grads_P, self._trainable_hyperparams))
-
-        # # Weight update for SoS prediction.
-        # C2_loss, grads_C2 = self.__ComputeGradients_C2_error(C2_batch_norm,X_batch_norm)
-        # self._optimizer.apply_gradients(zip(grads_C2, self._trainable_hyperparams))
-  
-        # return T_loss, P_loss, C2_loss
         return self.Train_Step_state(X_batch_norm, Y_batch_norm)
     
     @tf.function 
     def Train_Step_state(self, X_batch_norm:tf.constant, Y_batch_norm:tf.constant):
 
-        # for ivar in range(len(self._state_vars)):
-        #     with tf.GradientTape() as tape:
-        #         tape.watch(self._trainable_hyperparams)
-        #         state_loss = self.ComputeStateError(Y_batch_norm, X_batch_norm)
-        #         grads_var = tape.gradient(state_loss[ivar], self._trainable_hyperparams)
-        #     self._optimizer.apply_gradients(zip(grads_var, self._trainable_hyperparams))
-        
-        state_loss, grads_state = self.__ComputeGradients_State_error(Y_batch_norm,X_batch_norm)
-        self._optimizer.apply_gradients(zip(grads_state, self._trainable_hyperparams))
+        for ivar in range(len(self._state_vars)):
+            _, grads_loss = self.__ComputeGradient_State_error(Y_batch_norm, X_batch_norm, ivar)
+            self._optimizer.apply_gradients(zip(grads_loss, self._trainable_hyperparams))
+
+        state_loss, _ = self.__ComputeGradients_State_error(Y_batch_norm,X_batch_norm)
         return state_loss
     
     def ValidationLoss(self):
@@ -879,13 +873,6 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     def PrintEpochInfo(self, i_epoch, val_loss):
         if self._verbose > 0:
             print(("Epoch %i Validation loss " % i_epoch) + ", ".join((" %s: %.4e" % (self._state_vars[iVar], val_loss[iVar])) for iVar in range(len(self._state_vars))))
-        
-        # if self._verbose > 0:
-        #     T_val_loss = val_loss[0]
-        #     P_val_loss = val_loss[1]
-        #     C2_val_loss = val_loss[2]
-        #     print("Epoch %i Validation loss Temperature: %.4e, Pressure: %.4e, Speed of sound: %.4e" % (i_epoch, T_val_loss, P_val_loss, C2_val_loss))
-
         return 
     
     def __ValidationLoss(self):
@@ -894,21 +881,11 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         for var in self._state_vars:
             self.val_loss_history[self._state_vars.index(var)].append(state_val_error[self._state_vars.index(var)])
         return state_val_error
-        # T_val_error = self.__Compute_T_error(self._Y_state_val_norm[:,self.__idx_T], rhoe_val_norm)
-        # p_val_error = self.__Compute_P_error(self._Y_state_val_norm[:,self.__idx_p], rhoe_val_norm)
-        # c2_val_error = self.__Compute_C2_error(self._Y_state_val_norm[:,self.__idx_c2], rhoe_val_norm)
-
-        # self.val_loss_history[self.__idx_T].append(T_val_error)
-        # self.val_loss_history[self.__idx_p].append(p_val_error)
-        # self.val_loss_history[self.__idx_c2].append(c2_val_error)
-
-        # return T_val_error, p_val_error, c2_val_error
     
     def TestLoss(self):
         
         rhoe_test_norm = tf.constant(self._X_test_norm, self._dt)
 
-        #state_test_pred = self.EvaluateState(rhoe_test_norm)
         state_test_loss_norm = self.ComputeStateError(self._Y_state_test_norm,rhoe_test_norm)
         self.state_test_loss = state_test_loss_norm.numpy()
         self._test_score = tf.reduce_max(state_test_loss_norm)
@@ -1007,6 +984,7 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
     """Class for training MLP architectures
     """
     __trainer_PINN:Train_Entropic_PINN      # MLP trainer object responsible for training itself.
+    _state_vars:list[str] = ["T", "p", "c2"]
 
     def __init__(self, Config_in:EntropicAIConfig):
         """Define EvaluateArchitecture instance and prepare MLP trainer with
@@ -1030,10 +1008,27 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
 
         EvaluateArchitecture.__init__(self, Config_in=Config_in)
         
+        self._state_vars = Config_in.GetStateVars().copy()
+
         self.SynchronizeTrainer()
 
         pass
 
+    def SetStateVars(self, state_vars_in:list[str]):
+        """Set the state variables for which the physics-informed neural network is trained.
+
+        :param state_vars_in: list with state variable names.
+        :type state_vars_in: list[str]
+        :raises Exception: if any of the state variables is not supported.
+        """
+
+        if any((v not in DefaultSettings_NICFD.supported_state_vars) for v in state_vars_in):
+            raise Exception("Only the following state variables are supported: "+ ",".join((v for v in DefaultSettings_NICFD.supported_state_vars)))
+        self._state_vars = state_vars_in.copy()
+        self.SynchronizeTrainer()
+        
+        return 
+    
     def SynchronizeTrainer(self):
         """Synchronize all MLP trainer settings with locally stored settings.
         """
@@ -1041,6 +1036,7 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
 
         self.__trainer_PINN.SetModelIndex(self.current_iter)
         self.__trainer_PINN.SetSaveDir(self.main_save_dir)
+        self.__trainer_PINN.SetStateVars(self._state_vars)
 
         self.__trainer_PINN.SetDeviceKind(self.device)
         self.__trainer_PINN.SetDeviceIndex(self.process_index)
@@ -1069,6 +1065,7 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
 
         weights_entropy = self._trainer_direct.GetWeights()
         biases_entropy = self._trainer_direct.GetBiases()
+
         self.__trainer_PINN.SetMLPFileHeader("MLP_PINN")
         self.__trainer_PINN.SetWeights(weights_entropy)
         self.__trainer_PINN.SetBiases(biases_entropy)
