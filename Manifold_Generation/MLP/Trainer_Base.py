@@ -792,11 +792,11 @@ class CustomTrainer(MLPTrainer):
         for i in range(len(NN)-1):
             self._weights.append(tf.Variable(tf.random.normal([NN[i], NN[i+1]],
                                             mean=0.0,
-                                            stddev=0.1,
+                                            stddev=0.5,
                                             name="weights"),self._dt))
             self._biases.append(tf.Variable(tf.random.normal([NN[i+1],],
                                     mean=0.0,
-                                    stddev=0.1,
+                                    stddev=0.5,
                                     name="bias"),self._dt))
             
         return 
