@@ -26,6 +26,7 @@
 
 import numpy as np 
 import matplotlib.pyplot as plt 
+from matplotlib import ticker
 import os 
 
 from Common.Config_base import Config 
@@ -58,6 +59,8 @@ class DataPlotter_Base:
     __nDim_plot:int = 2
     _label_map = {}
 
+    __val_pad:int = 20
+    
     def __init__(self, Config_in:Config=None):
         if Config_in is None:
             self._Config = Config()
@@ -135,6 +138,10 @@ class DataPlotter_Base:
         return 
     
     def _FinalizePlot(self, fig_title:str):
+        val_pad = self.__val_pad
+        if self.__nDim_plot == 3:
+            val_pad = int(1.5*self.__val_pad)
+
         if self._custom_plot_label_y_set:
             self._ax.set_ylabel(self.__plot_label_custom_y, fontsize=20)
         else:
@@ -150,6 +157,12 @@ class DataPlotter_Base:
                 self._ax.set_xlabel(self._label_map[self._x_variable], fontsize=20)
             except:
                 self._ax.set_xlabel(self._plot_label_default_x, fontsize=20)
+        
+        self._ax.xaxis.set_major_formatter(ticker.StrMethodFormatter("{x:+.2e}"))
+        self._ax.xaxis.labelpad=val_pad
+        self._ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:+.2e}"))
+        self._ax.yaxis.labelpad=val_pad
+
         if self.__nDim_plot == 3:
             if self._custom_plot_label_z_set:
                 self._ax.set_zlabel(self.__plot_label_custom_z, fontsize=20)
@@ -158,6 +171,8 @@ class DataPlotter_Base:
                     self._ax.set_zlabel(self._label_map[self._z_variable], fontsize=20)
                 except:
                     self._ax.set_zlabel(self._plot_label_default_z, fontsize=20)
+            self._ax.zaxis.set_major_formatter(ticker.StrMethodFormatter("{x:+.2e}"))
+            self._ax.zaxis.labelpad=val_pad
         self._ax.tick_params(which='both',labelsize=18)
         self._ax.set_title(self.__plot_title, fontsize=20)
         self._ax.legend(fontsize=20,loc='upper center', bbox_to_anchor=(0.5, -0.12),
@@ -165,6 +180,7 @@ class DataPlotter_Base:
         self._ax.grid()
         if self.__save_images:
             self.__fig_window.savefig(self._Config.GetOutputDir()+"/Plots/"+fig_title+"."+self.__fig_format, format=self.__fig_format, bbox_inches='tight')
+        plt.tight_layout()
         plt.show() 
         return 
     
