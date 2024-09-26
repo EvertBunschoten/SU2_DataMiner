@@ -67,6 +67,9 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
     __reaction_mechanism:str = DefaultSettings_FGM.reaction_mechanism   # Cantera reaction mechanism
     __transport_model:str = DefaultSettings_FGM.transport_model
 
+    __initial_grid_length:float = 1e-2  # Flamelet grid width
+    __initial_grid_Np:int = 30          # Number of initial grid nodes.
+
     __define_equivalence_ratio:bool = not DefaultSettings_FGM.run_mixture_fraction # Define unburnt mixture via the equivalence ratio
     __unb_mixture_status:list[float] = [] 
 
@@ -417,18 +420,24 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
             self.gas.set_mixture_fraction(mix_status, self.__fuel_string, self.__oxidizer_string)
 
         # Define Cantera adiabatic flame object.
-        flame:ct.FreeFlame = ct.FreeFlame(self.gas, width=1e-2)
-        flame.set_refine_criteria(ratio=3, slope=0.04, curve=0.06, prune=0.02)
+        initialgrid = np.linspace(0, self.__initial_grid_length, self.__initial_grid_Np)
+        flame:ct.FreeFlame = ct.FreeFlame(self.gas, grid=initialgrid)
+        flame.set_refine_criteria(ratio=2, slope=0.025, curve=0.025)
 
         # Multi-component diffusion for differential diffusion effects.
         flame.transport_model = self.__transport_model
 
         # Try to solve the flamelet solution. If solution diverges, move on to next flamelet.
         try:
-            flame.solve(loglevel=0, auto=True)
+            flame.solve(loglevel=0, refine_grid=True, auto=True)
             
             # Computing mass flow rate for later burner flame evaluation
             self.m_dot_free_flame = flame.velocity[0]*flame.density[0]
+            
+            # Check if mixture is burning
+            if np.max(flame.T) <= DefaultSettings_FGM.T_threshold:
+                print("Flamelet at %s %.3e, Tu %.3f is not burning" % (folder_header, mix_status, T_ub))
+                return 
             
             variables, data_calc = self.__SaveFlameletData(flame, self.gas)
 
@@ -464,7 +473,37 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
             
         except:
             print("Unsuccessfull Freeflame simulation at "+folder_header+": "+str(mix_status)+ " T_u: " +str(T_ub) + " ("+str(i_freeflame+1)+"/"+str(self.__n_flamelets)+")")
+
+    def compute_SingleBurnerFlame(self, mix_status:float, T_burner:float, m_dot:float):
+        """Compute the solution of a single burner-stabilized flamelet.
+
+        :param mix_status: mixture fraction or equivalence ratio.
+        :type mix_status: float
+        :param T_burner: burner plate temperature
+        :type T_burner: float
+        :param m_dot: mass flux [kg m/s]
+        :type m_dot: float
+        :return: converged burner flame object
+        :rtype: cantera.BurnerFlame
+        """
+        self.gas.TP = T_burner, DefaultSettings_FGM.pressure
+        if self.__define_equivalence_ratio:
+            self.gas.set_equivalence_ratio(mix_status, self.__fuel_string, self.__oxidizer_string)
+        else:
+            self.gas.set_mixture_fraction(mix_status, self.__fuel_string, self.__oxidizer_string)
         
+        # Definie initial grid.
+        initialgrid = np.linspace(0, self.__initial_grid_length, self.__initial_grid_Np)
+
+        # Initiate burner flame object.
+        burner_flame = ct.BurnerFlame(self.gas, grid=initialgrid)
+        burner_flame.burner.mdot = m_dot 
+        burner_flame.set_refine_criteria(ratio=2, slope=0.025, curve=0.025)
+        burner_flame.transport_model = self.__transport_model
+        burner_flame.solve(loglevel=0, refine_grid=True, auto=False)
+
+        return burner_flame
+    
     def ComputeBurnerFlames(self, mix_status:float, m_dot:np.ndarray[float], T_burner:float=None):
         """Generate burner-stabilized flamelet data for a specific mixture fraction or equivalence ratio and mass flux.
 
@@ -487,17 +526,14 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         else:
             self.gas.set_mixture_fraction(mix_status, self.__fuel_string, self.__oxidizer_string)
 
-        burner_flame = ct.BurnerFlame(self.gas, width=18e-3)
-        burner_flame.set_refine_criteria(ratio=3.0, slope=0.05, curve=0.1)
-        burner_flame.transport_model = self.__transport_model
-
         for i_burnerflame, m_dot_next in enumerate(m_dot):
             try:
-                burner_flame.burner.mdot = m_dot_next
-                # Attempt to solve the burner flame simulation
-                burner_flame.solve(loglevel=0, auto=True)
+                burner_flame = self.compute_SingleBurnerFlame(mix_status, self.__T_unburnt_lower, m_dot_next)
+                if np.max(burner_flame.T) <= DefaultSettings_FGM.T_threshold:
+                    print("Burnerflame at %s %.3e, mdot %.2e is not burning" % (folder_header, mix_status, m_dot_next))
+                    return 
             
-                # Computing ANN flamelet data
+                # Extracting flamelet data
                 variables, data_calc = self.__SaveFlameletData(burner_flame, self.gas)
 
                 if self.__run_fuzzy:
@@ -508,7 +544,8 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
                     mkdir(self.GetOutputDir()+'/burnerflame_data/')
                 if not path.isdir(self.GetOutputDir()+'/burnerflame_data/'+folder_header+'_'+str(round(mix_status, 6))):
                     mkdir(self.GetOutputDir()+'/burnerflame_data/'+folder_header+'_'+str(round(mix_status, 6)))
-                burnerflame_filename = "burnerflamelet_"+folder_header+str(round(mix_status,6))+"_mdot"+str(round(m_dot_next, 4))+".csv"
+                # burnerflame_filename = "burnerflamelet_"+folder_header+str(round(mix_status,6))+"_mdot"+str(round(m_dot_next, 4))+".csv"
+                burnerflame_filename = "burnerflamelet_%s%.6f_mdot%.4f.csv" % (folder_header, mix_status, m_dot_next)
                 filename_plus_folder = self.GetOutputDir()+"/burnerflame_data/"+folder_header+'_'+str(round(mix_status, 6)) + "/"+burnerflame_filename
                 fid = open(filename_plus_folder, 'w+')
                 fid.write(variables + "\n")
