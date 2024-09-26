@@ -82,6 +82,8 @@ class DefaultSettings_FGM(DefaultProperties):
     T_max:float = 800.0
     Np_temp:int = 30
 
+    T_threshold:float = 600.0
+    
     eq_ratio_min:float = 0.2
     eq_ratio_max:float = 20.0
     Np_eq:int = 30
