@@ -65,7 +65,7 @@ class MLPTrainer:
     _alpha_expo:float = DefaultProperties.init_learning_rate_expo  # Alpha training exponent parameter.
     _lr_decay:float = DefaultProperties.learning_rate_decay      # Learning rate decay parameter.
     _batch_expo:int = DefaultProperties.batch_size_exponent     # Mini-batch size exponent.
-    _decay_steps:int = 3e5
+    _decay_steps:int = 1e4
 
     _i_activation_function:int = 0   # Activation function index.
     _activation_function_name:str = DefaultProperties.activation_function
