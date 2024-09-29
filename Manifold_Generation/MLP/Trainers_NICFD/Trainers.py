@@ -39,6 +39,7 @@ tf.random.set_seed(seed_value)
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
 import matplotlib.pyplot as plt 
+from matplotlib import ticker
 from enum import Enum 
 
 from Common.DataDrivenConfig import EntropicAIConfig
@@ -77,6 +78,13 @@ EntropicVarPairing = {"T":EntropicVars.T.value,\
                       "dsdp_rho":EntropicVars.dSdP_RHO.value,\
                       "dsdrho_p":EntropicVars.dSdRHO_P.value}
 
+LabelPairing = {"T":r"Temperature $(T)[K]$",\
+                "p":r"Pressure $(p)[Pa]$",\
+                "c2":r"Squared speed of sound $(c^2)[m/s]$",\
+                "dTdrho_e":r"Temperature-density derivative $\left(\left.\frac{\partial T}{\partial \rho}\right|_e\right)$",\
+                "dTde_rho":r"Temperature-energy derivative $\left(\left.\frac{\partial T}{\partial e}\right|_\rho\right)$",\
+                "dpdrho_e":r"Pressure-density derivative $\left(\left.\frac{\partial p}{\partial \rho}\right|_e\right)$",\
+                "dpde_rho":r"Pressure-energy derivative $\left(\left.\frac{\partial p}{\partial e}\right|_\rho\right)$"}
 
 class Train_Entropic_Direct(TensorFlowFit):
 
@@ -667,7 +675,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     
     def SetDecaySteps(self):
         super().SetDecaySteps()
-        self._decay_steps = 3*self._decay_steps
+        self._decay_steps = len(self._state_vars)*self._decay_steps
         return
     
     
@@ -890,18 +898,6 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         self.state_test_loss = state_test_loss_norm.numpy()
         self._test_score = tf.reduce_max(state_test_loss_norm)
 
-        # _, T_pred_test, P_pred_test, C2_pred_test = self.TD_Evaluation(rhoe_test_norm)
-
-        # T_pred_test_norm = (T_pred_test - self.Temperature_min)/(self.Temperature_max - self.Temperature_min)
-        # P_pred_test_norm = (P_pred_test - self.Pressure_min)/(self.Pressure_max - self.Pressure_min)
-        # C2_pred_test_norm = (C2_pred_test - self.C2_min)/(self.C2_max - self.C2_min)
-
-        # self.T_test_loss = self.mean_square_error(y_true=self._Y_state_test_norm[:, self.__idx_T], y_pred=T_pred_test_norm).numpy()
-        # self.P_test_loss = self.mean_square_error(y_true=self._Y_state_test_norm[:, self.__idx_p], y_pred=P_pred_test_norm).numpy()
-        # self.C2_test_loss = self.mean_square_error(y_true=self._Y_state_test_norm[:, self.__idx_c2], y_pred=C2_pred_test_norm).numpy()
-
-        # self._test_score = max([self.T_test_loss, self.P_test_loss, self.C2_test_loss])
-
         return 
     
     def CustomCallback(self):
@@ -923,9 +919,6 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         fid.write("Training time[minutes]: %+.3e\n" % self._train_time)
         for ivar, var in enumerate(self._state_vars):
             fid.write("%s test loss: %+.16e\n" % (var, self.state_test_loss[ivar]))
-        # fid.write("Temperature test loss: %+.16e\n" % self.T_test_loss)
-        # fid.write("Pressure test loss: %+.16e\n" % self.P_test_loss)
-        # fid.write("SoS test loss: %+.16e\n" % self.C2_test_loss)
         fid.write("Total neuron count:  %i\n" % np.sum(np.array(self._hidden_layers)))
         fid.write("Evaluation time[seconds]: %+.3e\n" % (self._test_time))
         fid.write("Evaluation cost parameter: %+.3e\n" % (self._cost_parameter))
@@ -949,6 +942,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         plot_fontsize = 20
         label_fontsize=18
         markevery=10
+        val_pad = 30
 
         rho_test = self._X_test[:, self.__idx_rho]
         e_test = self._X_test[:, self.__idx_e]
@@ -962,15 +956,26 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
             ax.plot3D(rho_test[::markevery], e_test[::markevery], Y_pred[::markevery], 'ro')
             ax.set_xlabel(r"Density $(\rho)[kg m^{-3}]$",fontsize=20)
             ax.set_ylabel(r"Static Energy $(e)[J kg^{-1}]$",fontsize=20)
-            ax.set_zlabel(var,fontsize=20)
+            ax.set_zlabel(LabelPairing[var],fontsize=20)
+            ax.xaxis.set_major_formatter(ticker.StrMethodFormatter("{x:.2e}"))
+            ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:.2e}"))
+            ax.zaxis.set_major_formatter(ticker.StrMethodFormatter("{x:+.2e}"))
+            ax.xaxis.labelpad=val_pad
+            ax.yaxis.labelpad=val_pad
+            ax.zaxis.labelpad=val_pad
             ax.tick_params(which='both',labelsize=18)
+            plt.tight_layout()
             fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/"+var+"_prediction."+figformat,format=figformat,bbox_inches='tight')
             plt.close(fig)
 
+            e = 100*np.abs((Y_pred - Y_ref)/(Y_ref+1e-6))
             fig = plt.figure(figsize=[10,10])
             ax = plt.axes() 
-            cax = ax.scatter(rho_test, e_test, c=100*np.abs((Y_pred - Y_ref)/(Y_ref+1e-6)))
-            cbar = plt.colorbar(cax, ax=ax)
+            cax = ax.scatter(rho_test, e_test, c=e)
+            cbar = fig.colorbar(cax, ax=ax)
+            cbar.set_label(r'Interpolation error $(e)[\%]$', rotation=270,fontsize=label_fontsize)
+            # cbar.set_ticks([0, int(max(e))])
+            # cbar.ax.set_yticklabels([0, max(e)], fontsize=label_fontsize)
             ax.set_xlabel(r"Density $(\rho)[kg m^{-3}]$",fontsize=plot_fontsize)
             ax.set_ylabel(r"Static energy $(e)[J kg^{-1}]$",fontsize=plot_fontsize)
             ax.set_title(("%s prediction error" % var),fontsize=plot_fontsize)
@@ -1075,9 +1080,10 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
         fid = open(self.main_save_dir + "/current_iter.txt", "w+")
         fid.write(str(self.current_iter) + "\n")
         fid.close()
+        return 
+    
+    def TrainPostprocessing(self):
         self._test_score = self.__trainer_PINN.GetTestScore()
         self._cost_parameter = self.__trainer_PINN.GetCostParameter()
         self.__trainer_PINN.Save_Relevant_Data()
-
-        return 
-    
+        return           
