@@ -47,8 +47,10 @@ Config.SetNpEnergy(Np_Energy=600)
 Config.SetStateVars(["T", "p", "c2"])
 
 # Hyper-parameters for network training. These were manually selected.
-Config.SetAlphaExpo(-2.8)   # Initial learning rate exponent.
-Config.SetHiddenLayerArchitecture([48]) # Single hidden layer with 48 nodes.
+Config.SetHiddenLayerArchitecture([40])
+Config.SetAlphaExpo(-1.8261e+00)
+Config.SetLRDecay(+9.8787e-01)
+Config.SetBatchExpo(6)
 
 Config.SetOutputDir(os.getcwd())
 
