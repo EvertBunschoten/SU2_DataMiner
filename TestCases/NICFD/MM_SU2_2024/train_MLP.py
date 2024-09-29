@@ -35,15 +35,14 @@ Config = EntropicAIConfig("MM_config_SU2_2024.cfg")
 Eval = EvaluateArchitecture_NICFD(Config)
 
 # Train for 1000 epochs
-Eval.SetNEpochs(1000)
+Eval.SetNEpochs(2000)
+Eval.SetActivationFunction("exponential")
 
 # Display training progress in terminal.
 Eval.SetVerbose(1)
 
-Eval.SetHiddenLayers([39])
-
 # Train on CPU
-Eval.SetTrainHardware("CPU",1)
+Eval.SetTrainHardware("CPU",0)
 
 # Start the training process.
 Eval.CommenceTraining()
