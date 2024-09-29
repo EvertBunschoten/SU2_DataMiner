@@ -1,3 +1,11 @@
+<p style="margin-bottom:1cm;"> </p>
+<p align="center">
+        <img src="Documentation/images/SU2DataMiner_logo.png" width="200"/> 
+</p>
+<p style="margin-bottom:1cm;"> </p
+>
+
+
 # SU2 DataMiner
 This repository describes the workflow for manifold generation for data-driven fluid modeling in SU2. The workflow allows the user to generate fluid data and convert these into tables and train multi-layer perceptrons in order to retrieve thermo-chemical quantities during simulations in SU2. The applications are currently limited to non-ideal computational fluid dynamics and flamelet-generated manifold simulations for arbitrary fluids and reactants respectively. 
 
