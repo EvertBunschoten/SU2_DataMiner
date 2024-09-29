@@ -17,7 +17,7 @@
 #                                                                                             |
 #                                                                                             |
 # Description:                                                                                |
-#  Generate the SU2 DataMiner configuration class used by Evert Bunschoten during his         |
+#  Generate the SU2 DataMiner configuration class used by Evert Bunschoten for his            |
 #  contribution to the fifth annual SU2 conference in 2024.                                   |
 #                                                                                             |
 # Version: 1.0.0                                                                              |
@@ -37,10 +37,10 @@ Config.SetEquationOfState("REFPROP")
 Config.UsePTGrid(False)
 
 # Set bounds and discretization for pressure grid
-Config.SetDensityBounds(Rho_lower=0.5, Rho_upper=150.0)
+Config.SetDensityBounds(Rho_lower=0.5, Rho_upper=300.0)
 Config.SetNpDensity(Np_rho=700)
 
-Config.SetEnergyBounds(E_lower=2.5e5, E_upper=6e5)
+Config.SetEnergyBounds(E_lower=2.5e5, E_upper=5.5e5)
 Config.SetNpEnergy(Np_Energy=600)
 
 # Apply physics-informed training on temperature, pressure, and squred speed of sound.
