@@ -50,13 +50,14 @@ from Common.Properties import DefaultProperties
 from Common.CommonMethods import GetReferenceData
 
 # Activation function options
-activation_function_names_options:list[str] = ["linear","elu","relu","tanh","exponential","gelu"]
+activation_function_names_options:list[str] = ["linear","elu","relu","tanh","exponential","gelu", "swish"]
 activation_function_options = [tf.keras.activations.linear,
                             tf.keras.activations.elu,\
                             tf.keras.activations.relu,\
                             tf.keras.activations.tanh,\
                             tf.keras.activations.exponential,\
-                            tf.keras.activations.gelu]
+                            tf.keras.activations.gelu,\
+                            tf.keras.activations.swish]
 
 class MLPTrainer:
     # Base class for flamelet MLP trainer
@@ -451,10 +452,15 @@ class MLPTrainer:
         if self._verbose > 0:
             print("Reading train, test, and validation data...")
         X_full, Y_full = GetReferenceData(MLPData_filepath + "_full.csv", self._controlling_vars, self._train_vars)
-        
+        Y_full = self.TransformData(Y_full)
+
         self._X_train, self._Y_train = GetReferenceData(MLPData_filepath + "_train.csv", self._controlling_vars, self._train_vars)
         self._X_test, self._Y_test = GetReferenceData(MLPData_filepath + "_test.csv", self._controlling_vars, self._train_vars)
         self._X_val, self._Y_val = GetReferenceData(MLPData_filepath + "_val.csv", self._controlling_vars, self._train_vars)
+        self._Y_train = self.TransformData(self._Y_train)
+        self._Y_test = self.TransformData(self._Y_test)
+        self._Y_val = self.TransformData(self._Y_val)
+        
         if self._verbose > 0:
             print("Done!")
 
@@ -480,6 +486,8 @@ class MLPTrainer:
         self._Np_train = np.shape(self._X_train_norm)[0]
         return 
     
+    def TransformData(self, Y_untransformed):
+        return Y_untransformed
     
     def write_SU2_MLP(self, file_out:str):
         """Write the network to ASCII format readable by the MLPCpp module in SU2.
