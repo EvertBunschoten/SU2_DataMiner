@@ -98,8 +98,56 @@ class Train_Entropic_Direct(TensorFlowFit):
             self._hidden_layers.append(NN)
 
         self._train_vars = ["s"]
-        return                
+        return         
+           
+def transform_dsdrho(dsdrho_untransformed):
+        return np.log(-dsdrho_untransformed)
+def transform_d2sdrho2(d2sdrho2_untransformed):
+    return np.log(d2sdrho2_untransformed)
 
+class Train_Entropic_Segregated(TensorFlowFit):
+    """Class for training MLP on segregated entropy derivatives using direct training.
+    """
+
+    def __init__(self):
+        TensorFlowFit.__init__(self)
+
+        self._controlling_vars = DefaultSettings_NICFD.controlling_variables
+        self._hidden_layers = []
+        for NN in DefaultSettings_NICFD.hidden_layer_architecture:
+            self._hidden_layers.append(NN)
+
+        self._train_vars = ["s","dsdrho_e","dsde_rho","d2sdrho2","d2sdedrho","d2sde2"]
+        return 
+    
+    def SetDecaySteps(self):
+        self._decay_steps = 10000
+        return 
+    
+    def TransformData(self, Y_untransformed):
+        """Transform first and second entropy derivative w.r.t. density through logarithmic scaling.
+
+        :param Y_untransformed: raw training data array.
+        :type Y_untransformed: np.ndarray[float]
+        :return: transformed training data array.
+        :rtype: np.ndarray[float]
+        """
+        idx_dsdrho_e = self._train_vars.index("dsdrho_e")
+        idx_d2sdrho2 = self._train_vars.index("d2sdrho2")
+        dsdrho_untransformed = Y_untransformed[:,idx_dsdrho_e]
+        d2sdrho2_untransformed = Y_untransformed[:,idx_d2sdrho2]
+        dsdrho_transformed = transform_dsdrho(dsdrho_untransformed)
+        d2sdrho2_transformed = transform_d2sdrho2(d2sdrho2_untransformed)
+        Y_transformed = Y_untransformed
+        Y_transformed[:, idx_dsdrho_e] = dsdrho_transformed
+        Y_transformed[:, idx_d2sdrho2] = d2sdrho2_transformed
+
+        return Y_transformed
+    
+    def add_additional_header_info(self, fid):
+        fid.write("Inverse transform dsdrho_e: -exp(dsdrho_e)\nInverse transform d2sdrho2: exp(d2sdrho2)\n")
+        return 
+    
 class Train_Entropic_Derivatives(PhysicsInformedTrainer):
     __s_scale:float=0
     __s_min:float=0
@@ -122,8 +170,80 @@ class Train_Entropic_Derivatives(PhysicsInformedTrainer):
             self._hidden_layers.append(NN)
         return
     
+    def transform_dsdrho(dsdrho_untransformed):
+        return np.log10(dsdrho_untransformed)
+    def transform_d2sdrho2(d2sdrho2_untransformed):
+        return np.log10(d2sdrho2_untransformed)
+    
     def GetTrainData(self):
-        super().GetTrainData()
+        """
+        Read train, test, and validation data sets according to flameletAI configuration and normalize data sets
+        with a feature range of 0-1.
+        """
+
+        MLPData_filepath = self._filedata_train
+        
+        if self._verbose > 0:
+            print("Reading train, test, and validation data...")
+        X_full, Y_full = GetReferenceData(MLPData_filepath + "_full.csv", self._controlling_vars, self._train_vars)
+        idx_dsdrho_e = self._train_vars.index("dsdrho_e")
+        idx_d2sdrho2 = self._train_vars.index("d2sdrho2")
+        dsdrho_full_untransformed = Y_full[:,idx_dsdrho_e]
+        d2sdrho2_full_untransformed = Y_full[:,idx_d2sdrho2]
+        dsdrho_full_transformed = self.transform_dsdrho(dsdrho_full_untransformed)
+        d2sdrho2_full_transformed = self.transform_d2sdrho2(d2sdrho2_full_untransformed)
+        
+        Y_full[:, idx_dsdrho_e] = dsdrho_full_transformed
+        Y_full[:, idx_d2sdrho2] = d2sdrho2_full_transformed
+
+        self._X_train, self._Y_train = GetReferenceData(MLPData_filepath + "_train.csv", self._controlling_vars, self._train_vars)
+        self._X_test, self._Y_test = GetReferenceData(MLPData_filepath + "_test.csv", self._controlling_vars, self._train_vars)
+        self._X_val, self._Y_val = GetReferenceData(MLPData_filepath + "_val.csv", self._controlling_vars, self._train_vars)
+        if self._verbose > 0:
+            print("Done!")
+
+        dsdrho_train_untransformed = self._Y_train[:,idx_dsdrho_e]
+        d2sdrho2_train_untransformed = self._Y_train[:,idx_d2sdrho2]
+        dsdrho_train_transformed = self.transform_dsdrho(dsdrho_train_untransformed)
+        d2sdrho2_train_transformed = self.transform_d2sdrho2(d2sdrho2_train_untransformed)
+        self._Y_train[:, idx_dsdrho_e] = dsdrho_train_transformed
+        self._Y_train[:, idx_d2sdrho2] = d2sdrho2_train_transformed
+
+        dsdrho_test_untransformed = self._Y_test[:,idx_dsdrho_e]
+        d2sdrho2_test_untransformed = self._Y_test[:,idx_d2sdrho2]
+        dsdrho_test_transformed = self.transform_dsdrho(dsdrho_test_untransformed)
+        d2sdrho2_test_transformed = self.transform_d2sdrho2(d2sdrho2_test_untransformed)
+        self._Y_test[:, idx_dsdrho_e] = dsdrho_test_transformed
+        self._Y_test[:, idx_d2sdrho2] = d2sdrho2_test_transformed
+
+        dsdrho_val_untransformed = self._Y_val[:,idx_dsdrho_e]
+        d2sdrho2_val_untransformed = self._Y_val[:,idx_d2sdrho2]
+        dsdrho_val_transformed = self.transform_dsdrho(dsdrho_val_untransformed)
+        d2sdrho2_val_transformed = self.transform_d2sdrho2(d2sdrho2_val_untransformed)
+        self._Y_val[:, idx_dsdrho_e] = dsdrho_val_transformed
+        self._Y_val[:, idx_d2sdrho2] = d2sdrho2_val_transformed
+
+        # Calculate normalization bounds of full data set
+        self._X_min, self._X_max = np.min(X_full, 0), np.max(X_full, 0)
+        self._Y_min, self._Y_max = np.min(Y_full, 0), np.max(Y_full, 0)
+
+        # Free up memory
+        del X_full
+        del Y_full
+
+        # Normalize train, test, and validation controlling variables
+        self._X_train_norm = (self._X_train - self._X_min) / (self._X_max - self._X_min)
+        self._X_test_norm = (self._X_test - self._X_min) / (self._X_max - self._X_min)
+        self._X_val_norm = (self._X_val - self._X_min) / (self._X_max - self._X_min)
+
+        # Normalize train, test, and validation data
+        self._Y_train_norm = (self._Y_train - self._Y_min) / (self._Y_max - self._Y_min)
+        self._Y_test_norm = (self._Y_test - self._Y_min) / (self._Y_max - self._Y_min)
+        self._Y_val_norm = (self._Y_val - self._Y_min) / (self._Y_max - self._Y_min)
+
+        self._Np_train = np.shape(self._X_train_norm)[0]
+
+        
         self.__s_scale = self._Y_max[0] - self._Y_min[0]
         self.__s_min = self._Y_min[0]
         self.__s_max = self._Y_max[0]
@@ -984,6 +1104,24 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
             plt.close(fig)
 
         return
+
+class EvaluateArchitecture_NICFD_Segregated(EvaluateArchitecture):
+    """Driver class for training a segregated entropic MLP.
+    """
+    def __init__(self, Config_in:EntropicAIConfig):
+
+        # Use segregated MLP trainer
+        self._trainer_direct = Train_Entropic_Segregated()
+        self.lr_decay = DefaultSettings_NICFD.learning_rate_decay
+        self.alpha_expo = DefaultSettings_NICFD.init_learning_rate_expo
+        self.activation_function = DefaultSettings_NICFD.activation_function
+        self.architecture = []
+        for n in DefaultSettings_NICFD.hidden_layer_architecture:
+            self.architecture.append(n)
+
+        EvaluateArchitecture.__init__(self, Config_in=Config_in)
+        self.SynchronizeTrainer()
+        return 
     
 class EvaluateArchitecture_NICFD(EvaluateArchitecture):
     """Class for training MLP architectures
