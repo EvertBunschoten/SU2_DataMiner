@@ -63,10 +63,12 @@ class EntropicAIConfig(Config):
     __T_lower:float = DefaultSettings_NICFD.T_min   # Lower temperature bound.
     __T_upper:float = DefaultSettings_NICFD.T_max   # Upper temperature bound.
     __Np_T:int = DefaultSettings_NICFD.Np_temp      # Number of temperature/energy samples between bounds.
+    __Y_distribution:str = DefaultSettings_NICFD.y_distribution
 
     __P_lower:float = DefaultSettings_NICFD.P_min   # Lower pressure bound.
     __P_upper:float = DefaultSettings_NICFD.P_max   # Upper pressure bound.
     __Np_P:int = DefaultSettings_NICFD.Np_p         # Number of pressure/density samples between bounds.
+    __X_distribution:str = DefaultSettings_NICFD.x_distribution
 
     __Rho_lower:float = DefaultSettings_NICFD.Rho_min       # Lower density bound.
     __Rho_upper:float = DefaultSettings_NICFD.Rho_max       # Upper density bound.
@@ -129,11 +131,11 @@ class EntropicAIConfig(Config):
         print("Fluid name(s): " + ",".join(self.__fluid_names))
         print("")
         if self.__use_PT:
-            print("Temperature range: %.2f K -> %.2f K (%i steps)" % (self.__T_lower, self.__T_upper, self.__Np_T))
-            print("Pressure range: %.3e Pa -> %.3e Pa (%i steps)" % (self.__P_lower, self.__P_upper, self.__Np_P))
+            print("Temperature range: %.2f K -> %.2f K (%i steps, %s)" % (self.__T_lower, self.__T_upper, self.__Np_T, self.__Y_distribution))
+            print("Pressure range: %.3e Pa -> %.3e Pa (%i steps, %s)" % (self.__P_lower, self.__P_upper, self.__Np_P, self.__X_distribution))
         else:
-            print("Energy range: %.2e J/kg -> %.2e J/kg (%i steps)" % (self.__Energy_lower, self.__Energy_upper, self.__Np_T))
-            print("Density range: %.2f kg/m3 -> %.2f kg/m3 (%i steps)" % (self.__Rho_lower, self.__Rho_upper, self.__Np_P))
+            print("Energy range: %.2e J/kg -> %.2e J/kg (%i steps, %s)" % (self.__Energy_lower, self.__Energy_upper, self.__Np_T, self.__Y_distribution))
+            print("Density range: %.2f kg/m3 -> %.2f kg/m3 (%i steps, %s)" % (self.__Rho_lower, self.__Rho_upper, self.__Np_P, self.__X_distribution))
         if self.__use_PT:
             print("Data generation grid: pressure-based")
         else:
@@ -237,6 +239,23 @@ class EntropicAIConfig(Config):
         """
 
         return self.__use_PT 
+    
+    def SetXDistribution(self, dist_option:str=DefaultSettings_NICFD.x_distribution):
+        if dist_option not in DefaultSettings_NICFD.distributions_options:
+            raise Exception("Fluid data x-grid distribution shall be one of the following: " + ",".join(s for s in DefaultSettings_NICFD.distributions_options))
+        self.__X_distribution = dist_option
+        return 
+    
+    def SetYDistribution(self, dist_option:str=DefaultSettings_NICFD.y_distribution):
+        if dist_option not in DefaultSettings_NICFD.distributions_options:
+            raise Exception("Fluid data y-grid distribution shall be one of the following: " + ",".join(s for s in DefaultSettings_NICFD.distributions_options))
+        self.__Y_distribution = dist_option
+        return 
+    
+    def GetXDistribution(self):
+        return self.__X_distribution 
+    def GetYDistribution(self):
+        return self.__Y_distribution 
     
     def SetTemperatureBounds(self, T_lower:float=DefaultSettings_NICFD.T_min, T_upper:float=DefaultSettings_NICFD.T_max):
         """Set the upper and lower temperature limits for the fluid data grid.

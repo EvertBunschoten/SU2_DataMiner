@@ -73,6 +73,10 @@ class DefaultSettings_NICFD(DefaultProperties):
     config_type:str = "EntropicAI"
     supported_state_vars:list[str] = ["T","p","c2","dTdrho_e","dTde_rho","dpdrho_e","dpde_rho"]
 
+    x_distribution:str = "cosine"
+    y_distribution:str = "linear"
+    distributions_options:list[str] = ["cosine", "linear"]
+    
 class DefaultSettings_FGM(DefaultProperties):
     config_name:str = "config_FGM"
 
@@ -132,4 +136,5 @@ ActivationFunctionOptions = {"linear" : tf.keras.activations.linear,\
                              "tanh" : tf.keras.activations.tanh,\
                              "exponential" : tf.keras.activations.exponential,\
                              "gelu" : tf.keras.activations.gelu,\
-                             "sigmoid" : tf.keras.activations.sigmoid}
+                             "sigmoid" : tf.keras.activations.sigmoid,\
+                             "swish" : tf.keras.activations.swish}

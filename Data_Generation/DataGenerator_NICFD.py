@@ -51,10 +51,12 @@ class DataGenerator_CoolProp(DataGenerator_Base):
     __T_min:float = DefaultSettings_NICFD.T_min
     __T_max:float = DefaultSettings_NICFD.T_max
     __Np_Y:int = DefaultSettings_NICFD.Np_temp
+    __Y_distribution:str = DefaultSettings_NICFD.y_distribution
 
     __P_min:float = DefaultSettings_NICFD.P_min
     __P_max:float = DefaultSettings_NICFD.P_max
     __Np_X:int = DefaultSettings_NICFD.Np_p
+    __X_distribution:str = DefaultSettings_NICFD.x_distribution
 
     # Density and static energy limits
     __rho_min:float = DefaultSettings_NICFD.Rho_min
@@ -124,12 +126,18 @@ class DataGenerator_CoolProp(DataGenerator_Base):
             self.__P_min, self.__P_max = P_bounds[0], P_bounds[1]
             self.__rho_min, self.__rho_max = rho_bounds[0], rho_bounds[1]
             self.__Np_X = self._Config.GetNpPressure()
+            self.__X_distribution = self._Config.GetXDistribution()
 
             self.__T_min, self.__T_max = T_bounds[0], T_bounds[1]
             self.__e_min, self.__e_max = e_bounds[0], e_bounds[1]
             self.__Np_Y = self._Config.GetNpTemp()
-
+            self.__Y_distribution = self._Config.GetYDistribution()
         return 
+    
+    def MakeLinearDistribution(self, z_min, z_max, Np):
+        return np.linspace(z_min, z_max, Np)
+    def MakeCosineDistribution(self, z_min, z_max, Np):
+        return (z_min - z_max) * np.cos(np.linspace(0, 0.5*np.pi, Np)) + z_max 
     
     def PreprocessData(self):
         """Generate density and static energy grid at which to evaluate fluid properties.
@@ -146,8 +154,16 @@ class DataGenerator_CoolProp(DataGenerator_Base):
             Y_min = self.__e_min
             Y_max = self.__e_max 
         
-        X_range = (X_min - X_max) * np.cos(np.linspace(0, 0.5*np.pi, self.__Np_X)) + X_max
-        Y_range = np.linspace(Y_min, Y_max, self.__Np_Y)
+        if self.__X_distribution == "linear":
+            X_range = self.MakeLinearDistribution(X_min, X_max, self.__Np_X)
+        elif self.__X_distribution == "cosine":
+            X_range = self.MakeCosineDistribution(X_min, X_max, self.__Np_X)
+        
+        if self.__Y_distribution == "linear":
+            Y_range = self.MakeLinearDistribution(Y_min, Y_max, self.__Np_Y)
+        elif self.__Y_distribution == "cosine":
+            Y_range = self.MakeCosineDistribution(Y_min, Y_max, self.__Np_Y)
+  
         self.__X_grid, self.__Y_grid = np.meshgrid(X_range, Y_range)
         return 
     
