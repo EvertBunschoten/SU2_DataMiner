@@ -137,7 +137,7 @@ class DataPlotter_Base:
         self._ax = plt.axes(projection='3d')
         return 
     
-    def _FinalizePlot(self, fig_title:str):
+    def _FinalizePlot(self, fig_title:str, show:bool=True):
         val_pad = self.__val_pad
         if self.__nDim_plot == 3:
             val_pad = int(1.5*self.__val_pad)
@@ -180,8 +180,11 @@ class DataPlotter_Base:
         self._ax.grid()
         if self.__save_images:
             self.__fig_window.savefig(self._Config.GetOutputDir()+"/Plots/"+fig_title+"."+self.__fig_format, format=self.__fig_format, bbox_inches='tight')
-        plt.tight_layout()
-        plt.show() 
+        if show:
+            plt.tight_layout()
+            plt.show() 
+        else:
+            plt.close(self.__fig_window)
         return 
     
     def _PlotBody(self, plot_variables:list[str]):
@@ -189,7 +192,7 @@ class DataPlotter_Base:
         return plot_3D
     
     
-    def Plot3D(self, x_variable:str, y_variable:str, z_variable:str):
+    def Plot3D(self, x_variable:str, y_variable:str, z_variable:str, show:bool=True):
         self._x_variable = x_variable
         self._y_variable = y_variable
         self._z_variable = z_variable
@@ -199,17 +202,17 @@ class DataPlotter_Base:
             self._PrepareOutputDir()
         self._Initiate3DPlot()
         
-        self._PlotBody([x_variable, y_variable, z_variable])
-        self._FinalizePlot("_".join((x_variable,y_variable,z_variable)) + "_3D")
-        return 
+        plot_data = self._PlotBody([x_variable, y_variable, z_variable])
+        self._FinalizePlot("_".join((x_variable,y_variable,z_variable)) + "_3D", show)
+        return plot_data
 
-    def Plot2D(self, x_variable:str, y_variable:str):
+    def Plot2D(self, x_variable:str, y_variable:str, show:bool=True):
         self._x_variable = x_variable
         self._y_variable = y_variable
         self.__nDim_plot = 2
         if self.__save_images:
             self._PrepareOutputDir()
         self._Initiate2DPlot()
-        self._PlotBody([x_variable, y_variable])
-        self._FinalizePlot("_".join((x_variable,y_variable)) + "_2D")
-        return
+        plot_data = self._PlotBody([x_variable, y_variable])
+        self._FinalizePlot("_".join((x_variable,y_variable)) + "_2D", show)
+        return plot_data
