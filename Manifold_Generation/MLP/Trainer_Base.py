@@ -1167,9 +1167,9 @@ class EvaluateArchitecture:
     def SynchronizeTrainer(self):
         """Synchronize all MLP trainer settings with locally stored settings.
         """
-        
+        self.worker_dir = self.main_save_dir + ("/Worker_%i/" % self.process_index)
         self._trainer_direct.SetModelIndex(self.current_iter)
-        self._trainer_direct.SetSaveDir(self.main_save_dir)
+        self._trainer_direct.SetSaveDir(self.worker_dir)
 
         self._trainer_direct.SetDeviceKind(self.device)
         self._trainer_direct.SetDeviceIndex(self.process_index)
@@ -1315,7 +1315,6 @@ class EvaluateArchitecture:
                 self.current_iter = int(line.strip()) + 1
             except:
                 self.current_iter = 0
-        self.main_save_dir += "/Worker_"+str(worker_idx) + "/"
         self.SynchronizeTrainer()
         return 
     
@@ -1326,7 +1325,7 @@ class EvaluateArchitecture:
         self._trainer_direct.Train_MLP()
         self.TrainPostprocessing()
 
-        fid = open(self.main_save_dir + "/current_iter.txt", "w+")
+        fid = open(self.worker_dir + "/current_iter.txt", "w+")
         fid.write(str(self.current_iter) + "\n")
         fid.close()
 
