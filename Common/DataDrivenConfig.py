@@ -1842,7 +1842,7 @@ class FlameletAIConfig(Config):
         return
     
     def ClearOutputGroups(self):
-        self.__MLP_output_groups = []
+        self.__MLP_output_groups = None
         return 
     
     def DisplayOutputGroups(self):
