@@ -693,23 +693,16 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     
     @tf.function
     def __ComputeEntropyGradients(self, rhoe_norm:tf.Tensor):
-        with tf.GradientTape(watch_accessed_variables=False) as tape_2:
+        with tf.GradientTape(watch_accessed_variables=False, persistent=True) as tape_2:
             tape_2.watch(rhoe_norm)
             with tf.GradientTape(watch_accessed_variables=False) as tape_1:
                 tape_1.watch(rhoe_norm)
                 s_norm = self._MLP_Evaluation(rhoe_norm)
-                ds_norm = tape_1.gradient(s_norm, rhoe_norm)
-                ds_norm_rho = tf.gather(ds_norm, indices=self.__idx_rho,axis=1)
-                d2s_norm_rho = tape_2.gradient(ds_norm_rho, rhoe_norm)
-        
-        with tf.GradientTape(watch_accessed_variables=False) as tape_2:
-            tape_2.watch(rhoe_norm)
-            with tf.GradientTape(watch_accessed_variables=False) as tape_1:
-                tape_1.watch(rhoe_norm)
-                s_norm = self._MLP_Evaluation(rhoe_norm)
-                ds_norm = tape_1.gradient(s_norm, rhoe_norm)
-                ds_norm_e = tf.gather(ds_norm, indices=self.__idx_e,axis=1)
-                d2s_norm_e = tape_2.gradient(ds_norm_e, rhoe_norm)
+            ds_norm = tape_1.gradient(s_norm, rhoe_norm)
+            ds_norm_rho = tf.gather(ds_norm, indices=0,axis=1)
+            ds_norm_e = tf.gather(ds_norm, indices=1,axis=1)
+        d2s_norm_rho = tape_2.gradient(ds_norm_rho, rhoe_norm)
+        d2s_norm_e = tape_2.gradient(ds_norm_e, rhoe_norm)
 
         dsdrho_e_norm = tf.gather(ds_norm, indices=self.__idx_rho,axis=1)
         dsde_rho_norm = tf.gather(ds_norm, indices=self.__idx_e,axis=1)
@@ -1063,7 +1056,7 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
         self.PrepareOutputDir()
         self._trainer_direct.SetMLPFileHeader("MLP_direct")
         self._trainer_direct.Train_MLP()
-        self.TrainPostprocessing()
+        super().TrainPostprocessing()
         
         self._trainer_direct.Save_Relevant_Data()
         self._trainer_direct.Plot_and_Save_History()
