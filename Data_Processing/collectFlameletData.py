@@ -363,12 +363,12 @@ class FlameletConcatenator:
             mixture_folders = np.sort(np.array(self.mfracs_equilibrium))
             for z in mixture_folders[::self.__mfrac_skip]:
                 if self.__ignore_mixture_bounds:
-                    i_equilibrium_total = self.__InterpolateFlameletData(self.__flameletdata_dir + "/equilibrium_data/", z, i_start, i_equilibrium_total)
+                    i_equilibrium_total = self.__InterpolateFlameletData(self.__flameletdata_dir + "/equilibrium_data/", z, i_start, i_equilibrium_total, is_equilibrium=True)
                 else:
                     if z[:len(folder_header)] == folder_header:
                         mixture_status = float(z[len(folder_header):])
                         if (mixture_status <= self.__mix_status_max) and (mixture_status >= self.__mix_status_min):
-                            i_equilibrium_total = self.__InterpolateFlameletData(self.__flameletdata_dir + "/equilibrium_data/", z, i_start, i_equilibrium_total)
+                            i_equilibrium_total = self.__InterpolateFlameletData(self.__flameletdata_dir + "/equilibrium_data/", z, i_start, i_equilibrium_total, is_equilibrium=True)
             if self.__verbose > 0:
                 print("Done!")
             i_start +=  i_equilibrium_total
@@ -606,10 +606,11 @@ class FlameletConcatenator:
         return 
     
     
-    def __InterpolateFlameletData(self, flamelet_dir:str, eq_file:str, i_start:int, i_flamelet_total:int, is_fuzzy:bool=False):
+    def __InterpolateFlameletData(self, flamelet_dir:str, eq_file:str, i_start:int, i_flamelet_total:int, is_fuzzy:bool=False, is_equilibrium:bool=False):
 
         flamelets = listdir(flamelet_dir + "/" + eq_file)
         for i_flamelet, f in enumerate(flamelets):
+            BurningFlamelet:bool = True 
 
             # Get flamelet variables
             fid = open(flamelet_dir + "/" + eq_file + "/" + f, 'r')
@@ -617,8 +618,11 @@ class FlameletConcatenator:
             fid.close()
 
             # Load flamelet data
-            D = np.loadtxt(flamelet_dir + "/" + eq_file + "/" + f, delimiter=',',skiprows=1)
-            
+            if is_equilibrium & BurningFlamelet:
+                D = np.loadtxt(flamelet_dir + "/" + eq_file + "/" + f, delimiter=',',skiprows=1,max_rows=1)[np.newaxis, :]
+            else:
+                D = np.loadtxt(flamelet_dir + "/" + eq_file + "/" + f, delimiter=',',skiprows=1)
+
             # Set flamelet controlling variables
             CV_flamelet = np.zeros([len(D), self.__N_control_vars])
             for iCV in range(self.__N_control_vars):
@@ -637,61 +641,75 @@ class FlameletConcatenator:
             S_flamelet = np.append(np.array([0]), np.cumsum(dS))
             is_valid_flamelet = True 
 
-            if max(S_flamelet) == 0:
+            if (max(S_flamelet) == 0) and not is_equilibrium:
                 print("Dodgy flamelet data file: " + flamelet_dir + "/" + eq_file + "/" + f)
                 is_valid_flamelet = False
 
             if is_valid_flamelet:
                 S_flamelet_norm = S_flamelet / (max(S_flamelet))
 
+                T_flamelet = D[:, variables.index("Temperature")]
+                if np.max(T_flamelet) < DefaultSettings_FGM.T_threshold:
+                    BurningFlamelet = False 
+
+                sourceterm_zero_line_numbers = [0, -1]
+
                 # Load flamelet thermophysical property data
                 TD_data = np.zeros([len(D), len(self.__TD_train_vars)])
-                for iVar_TD, TD_var in enumerate(self.__TD_train_vars):
-                    if TD_var == "DiffusionCoefficient":
-                        idx_cp = variables.index("Cp")
-                        idx_cond = variables.index("Conductivity")
-                        idx_density = variables.index("Density")
-                        TD_data[:, iVar_TD] = D[:, idx_cond] / (D[:, idx_cp] * D[:, idx_density])
-                    else:
-                        idx_var_flamelet = variables.index(TD_var)
-                        TD_data[:, iVar_TD] = D[:, idx_var_flamelet]
+                if BurningFlamelet:
+
+                    for iVar_TD, TD_var in enumerate(self.__TD_train_vars):
+                        if TD_var == "DiffusionCoefficient":
+                            idx_cp = variables.index("Cp")
+                            idx_cond = variables.index("Conductivity")
+                            idx_density = variables.index("Density")
+                            TD_data[:, iVar_TD] = D[:, idx_cond] / (D[:, idx_cp] * D[:, idx_density])
+                        else:
+                            idx_var_flamelet = variables.index(TD_var)
+                            TD_data[:, iVar_TD] = D[:, idx_var_flamelet]
 
                 # Load flamelet look-up variable data
                 LookUp_data = np.zeros([len(D), len(self.__LookUp_vars)])
-                for iVar_LookUp, LookUp_var in enumerate(self.__LookUp_vars):
-                    idx_var_flamelet = variables.index(LookUp_var)
-                    LookUp_data[:, iVar_LookUp] = D[:, idx_var_flamelet]
-        
+                if BurningFlamelet:
+                    for iVar_LookUp, LookUp_var in enumerate(self.__LookUp_vars):
+                        idx_var_flamelet = variables.index(LookUp_var)
+                        LookUp_data[:, iVar_LookUp] = D[:, idx_var_flamelet]
+                        if LookUp_var == "Heat_Release":
+                            LookUp_data[sourceterm_zero_line_numbers, iVar_LookUp] = 0.0
                 
                 # Load species sources data
                 species_production_rate = np.zeros([len(D), len(self.__Species_in_FGM)])
                 species_destruction_rate = np.zeros([len(D), len(self.__Species_in_FGM)])
                 species_net_rate = np.zeros([len(D), len(self.__Species_in_FGM)])
-                for iSp, Sp in enumerate(self.__Species_in_FGM):
-                    if Sp == "NOx":
-                        species_production_rate[:, iSp] = np.zeros(len(D))
-                        species_destruction_rate[:, iSp] = np.zeros(len(D))
-                        species_net_rate[:, iSp] = np.zeros(len(D))
-                        for NOsp in ["NO2","NO","N2O"]:
-                            species_production_rate[:, iSp] += D[:, variables.index("Y_dot_pos-"+NOsp)]
-                            species_destruction_rate[:, iSp] += D[:, variables.index("Y_dot_neg-"+NOsp)]
-                            species_net_rate[:, iSp] += D[:, variables.index("Y_dot_net-"+NOsp)]
-                    else:
-                        species_production_rate[:, iSp] = D[:, variables.index("Y_dot_pos-"+Sp)]
-                        species_destruction_rate[:, iSp] = D[:, variables.index("Y_dot_neg-"+Sp)]
-                        species_net_rate[:, iSp] = D[:, variables.index("Y_dot_net-"+Sp)]
+                if BurningFlamelet:
+                    for iSp, Sp in enumerate(self.__Species_in_FGM):
+                        if Sp == "NOx":
+                            species_production_rate[:, iSp] = np.zeros(len(D))
+                            species_destruction_rate[:, iSp] = np.zeros(len(D))
+                            species_net_rate[:, iSp] = np.zeros(len(D))
+                            for NOsp in ["NO2","NO","N2O"]:
+                                species_production_rate[:, iSp] += D[:, variables.index("Y_dot_pos-"+NOsp)]
+                                species_destruction_rate[:, iSp] += D[:, variables.index("Y_dot_neg-"+NOsp)]
+                                species_net_rate[:, iSp] += D[:, variables.index("Y_dot_net-"+NOsp)]
+                        else:
+                            species_production_rate[:, iSp] = D[:, variables.index("Y_dot_pos-"+Sp)]
+                            species_destruction_rate[:, iSp] = D[:, variables.index("Y_dot_neg-"+Sp)]
+                            species_net_rate[:, iSp] = D[:, variables.index("Y_dot_net-"+Sp)]
 
                 Sources_data = np.zeros([len(D), 1 + 3 * len(self.__Species_in_FGM)])
-                ppv_flamelet = self.__Config.ComputeProgressVariable_Source(variables, D)
-                Sources_data[:, 0] = ppv_flamelet
+                if BurningFlamelet:
+                    ppv_flamelet = self.__Config.ComputeProgressVariable_Source(variables, D)
+                    Sources_data[:, 0] = ppv_flamelet
 
-                for iSp in range(len(self.__Species_in_FGM)):
-                    Sources_data[:, 1 + 3*iSp] = species_production_rate[:, iSp]
-                    Sources_data[:, 1 + 3*iSp + 1] = species_destruction_rate[:, iSp]
-                    Sources_data[:, 1 + 3*iSp + 2] = species_net_rate[:, iSp]
+                    for iSp in range(len(self.__Species_in_FGM)):
+                        Sources_data[:, 1 + 3*iSp] = species_production_rate[:, iSp]
+                        Sources_data[:, 1 + 3*iSp + 1] = species_destruction_rate[:, iSp]
+                        Sources_data[:, 1 + 3*iSp + 2] = species_net_rate[:, iSp]
+
+                    Sources_data[sourceterm_zero_line_numbers, :] = 0.0
 
                 # Compute preferential diffusion scalars
-                if self.__Config.PreferentialDiffusion():
+                if self.__Config.PreferentialDiffusion() and BurningFlamelet:
                     beta_pv_flamelet, beta_h1_flamelet, beta_h2_flamelet, beta_z_flamelet = self.__Config.ComputeBetaTerms(variables, D)
                     PD_data = np.zeros([len(D), len(self.__PD_train_vars)])
                     PD_data[:, 0] = beta_pv_flamelet
