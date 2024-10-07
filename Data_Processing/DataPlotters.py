@@ -120,11 +120,11 @@ class DataPlotter_FGM(DataPlotter_Base):
         self._Config.SetProgressVariableDefinition(pv_species, pv_weights)
         return 
     
-    def Plot2D(self, y_variable: str, x_variable: str=DefaultSettings_FGM.name_pv):
-        return super().Plot2D(x_variable, y_variable)
+    def Plot2D(self, y_variable: str, x_variable: str=DefaultSettings_FGM.name_pv, show:bool=True):
+        return super().Plot2D(x_variable, y_variable, show)
     
-    def Plot3D(self, z_variable:str, y_variable: str=DefaultSettings_FGM.name_enth, x_variable: str=DefaultSettings_FGM.name_pv):
-        return super().Plot3D(x_variable, y_variable, z_variable)
+    def Plot3D(self, z_variable:str, y_variable: str=DefaultSettings_FGM.name_enth, x_variable: str=DefaultSettings_FGM.name_pv, show:bool=True):
+        return super().Plot3D(x_variable, y_variable, z_variable, show)
         
     def _PlotBody(self, plot_variables: list[str]):
         # if len(self.__mix_status) == 0:
@@ -132,6 +132,7 @@ class DataPlotter_FGM(DataPlotter_Base):
         self.__GetFileNames()
         plot_3D = super()._PlotBody(plot_variables)
 
+        plot_data_freeflame = []
         if self.__plot_freeflames:
             plot_label=self.__freeflame_displayname
             for f in self.freeflame_files:
@@ -141,7 +142,9 @@ class DataPlotter_FGM(DataPlotter_Base):
                 else:
                     self._ax.plot(plot_data[:,0],plot_data[:,1],color=self.__color_freeflames, label=plot_label, linewidth=2)
                 plot_label=""
-
+                plot_data_freeflame.append(plot_data)
+        
+        plot_data_burnerflame = []
         if self.__plot_burnerflames:
             plot_label=self.__burnerflame_displayname
             for f in self.burnerflame_files:
@@ -151,7 +154,9 @@ class DataPlotter_FGM(DataPlotter_Base):
                 else:
                     self._ax.plot(plot_data[:,0],plot_data[:,1],color=self.__color_burnerflames, label=plot_label, linewidth=2)
                 plot_label=""
-
+                plot_data_burnerflame.append(plot_data)
+        
+        plot_data_eq = []
         if self.__plot_equilibrium:
             plot_label=self.__equilibrium_displayname
             for f in self.equilibrium_files:
@@ -161,7 +166,9 @@ class DataPlotter_FGM(DataPlotter_Base):
                 else:
                     self._ax.plot(plot_data[:,0],plot_data[:,1],color=self.__color_equilibrium, label=plot_label, linewidth=2)
                 plot_label=""
-        return 
+                plot_data_eq.append(plot_data)
+
+        return [plot_data_freeflame, plot_data_burnerflame, plot_data_eq]
     
     
     def __GetFileNames(self):
