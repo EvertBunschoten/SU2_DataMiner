@@ -603,6 +603,8 @@ class FlameletConcatenator:
         self.__Sources_flamelet_data = np.zeros([n_flamelets_total * self.__Np_per_flamelet, 1 + 3 * len(self.__Species_in_FGM)])
         self.__LookUp_flamelet_data = np.zeros([n_flamelets_total * self.__Np_per_flamelet, len(self.__LookUp_vars)])
         self.__flamelet_ID = np.zeros([n_flamelets_total * self.__Np_per_flamelet, len(self.__flamelet_ID_vars)],dtype=int)
+
+        self.__N_p_total = n_flamelets_total * self.__Np_per_flamelet
         return 
     
     
@@ -618,7 +620,7 @@ class FlameletConcatenator:
             fid.close()
 
             # Load flamelet data
-            if is_equilibrium & BurningFlamelet:
+            if is_equilibrium:
                 D = np.loadtxt(flamelet_dir + "/" + eq_file + "/" + f, delimiter=',',skiprows=1,max_rows=1)[np.newaxis, :]
             else:
                 D = np.loadtxt(flamelet_dir + "/" + eq_file + "/" + f, delimiter=',',skiprows=1)
@@ -635,7 +637,6 @@ class FlameletConcatenator:
 
             CV_min, CV_max = np.min(CV_flamelet, axis=0), np.max(CV_flamelet, axis=0)
             CV_norm = (CV_flamelet - CV_min)/(CV_max - CV_min + 1e-10)
-
             delta_CV = CV_norm[1:] - CV_norm[:-1]
             dS = np.sqrt(np.sum(np.power(delta_CV, 2), axis=1))
             S_flamelet = np.append(np.array([0]), np.cumsum(dS))
@@ -717,47 +718,49 @@ class FlameletConcatenator:
                     PD_data[:, 2] = beta_h2_flamelet
                     PD_data[:, 3] = beta_z_flamelet
 
-                if is_fuzzy:
-                    if self.__Np_per_flamelet > len(D):
-                        samples = [k for k in range(len(D))] + [0]*(self.__Np_per_flamelet - len(D))
+                if BurningFlamelet:
+                    if is_fuzzy:
+                        if self.__Np_per_flamelet > len(D):
+                            samples = [k for k in range(len(D))] + [0]*(self.__Np_per_flamelet - len(D))
+                        else:
+                            samples = sample(range(len(D)), self.__Np_per_flamelet)
+                        CV_sampled = CV_flamelet[samples, :]
+                        TD_sampled = TD_data[samples, :]
+                        if self.__Config.PreferentialDiffusion():
+                            PD_sampled = PD_data[samples, :]
+                        lookup_sampled = LookUp_data[samples, :]
+                        sources_sampled = Sources_data[samples, :]
                     else:
-                        samples = sample(range(len(D)), self.__Np_per_flamelet)
-                    CV_sampled = CV_flamelet[samples, :]
-                    TD_sampled = TD_data[samples, :]
-                    if self.__Config.PreferentialDiffusion():
-                        PD_sampled = PD_data[samples, :]
-                    lookup_sampled = LookUp_data[samples, :]
-                    sources_sampled = Sources_data[samples, :]
-                else:
-                    # Define query controlling variable range
-                    S_q = 0.5 - 0.5*np.cos(np.linspace(0, np.pi, self.__Np_per_flamelet))
-                    CV_sampled = np.zeros([self.__Np_per_flamelet, np.shape(CV_flamelet)[1]])
-                    TD_sampled = np.zeros([self.__Np_per_flamelet, np.shape(TD_data)[1]])
-                    if self.__Config.PreferentialDiffusion():
-                        PD_sampled = np.zeros([self.__Np_per_flamelet, np.shape(PD_data)[1]])
-                    lookup_sampled = np.zeros([self.__Np_per_flamelet, np.shape(LookUp_data)[1]])
-                    sources_sampled = np.zeros([self.__Np_per_flamelet, 1 + 3*len(self.__Species_in_FGM)])
-                    for i_CV in range(self.__N_control_vars):
-                        CV_sampled[:, i_CV] = np.interp(S_q, S_flamelet_norm, CV_flamelet[:, i_CV])
-                    for iVar_TD in range(len(self.__TD_train_vars)):
-                        TD_sampled[:, iVar_TD] = np.interp(S_q, S_flamelet_norm, TD_data[:, iVar_TD])
-                    if self.__Config.PreferentialDiffusion():
-                        for iVar_PD in range(len(self.__PD_train_vars)):
-                            PD_sampled[:, iVar_PD] = np.interp(S_q, S_flamelet_norm, PD_data[:, iVar_PD])
-                    for iVar_LU in range(len(self.__LookUp_vars)):
-                        lookup_sampled[:, iVar_LU] = np.interp(S_q, S_flamelet_norm, LookUp_data[:, iVar_LU])
-                    for iVar_Source in range(1 + 3*len(self.__Species_in_FGM)):
-                        sources_sampled[:, iVar_Source] = np.interp(S_q, S_flamelet_norm, Sources_data[:, iVar_Source])
+                        # Define query controlling variable range
+                        S_q = 0.5 - 0.5*np.cos(np.linspace(0, np.pi, self.__Np_per_flamelet))
+                        CV_sampled = np.zeros([self.__Np_per_flamelet, np.shape(CV_flamelet)[1]])
+                        TD_sampled = np.zeros([self.__Np_per_flamelet, np.shape(TD_data)[1]])
+                        if self.__Config.PreferentialDiffusion():
+                            PD_sampled = np.zeros([self.__Np_per_flamelet, np.shape(PD_data)[1]])
+                        lookup_sampled = np.zeros([self.__Np_per_flamelet, np.shape(LookUp_data)[1]])
+                        sources_sampled = np.zeros([self.__Np_per_flamelet, 1 + 3*len(self.__Species_in_FGM)])
+                        for i_CV in range(self.__N_control_vars):
+                            CV_sampled[:, i_CV] = np.interp(S_q, S_flamelet_norm, CV_flamelet[:, i_CV])
+                        for iVar_TD in range(len(self.__TD_train_vars)):
+                            TD_sampled[:, iVar_TD] = np.interp(S_q, S_flamelet_norm, TD_data[:, iVar_TD])
+                        if self.__Config.PreferentialDiffusion():
+                            for iVar_PD in range(len(self.__PD_train_vars)):
+                                PD_sampled[:, iVar_PD] = np.interp(S_q, S_flamelet_norm, PD_data[:, iVar_PD])
 
-                start = (i_start + i_flamelet + i_flamelet_total) * self.__Np_per_flamelet
-                end = (i_start + i_flamelet+1+ i_flamelet_total)*self.__Np_per_flamelet
-                self.__CV_flamelet_data[start:end, :] = CV_sampled
-                self.__TD_flamelet_data[start:end, :] = TD_sampled
-                if self.__Config.PreferentialDiffusion():
-                    self.__PD_flamelet_data[start:end, :] = PD_sampled 
-                self.__LookUp_flamelet_data[start:end, :] = lookup_sampled
-                self.__Sources_flamelet_data[start:end, :] = sources_sampled
-                self.__flamelet_ID[start:end, :] = i_start + i_flamelet + i_flamelet_total
+                        for iVar_LU in range(len(self.__LookUp_vars)):
+                            lookup_sampled[:, iVar_LU] = np.interp(S_q, S_flamelet_norm, LookUp_data[:, iVar_LU])
+                        for iVar_Source in range(1 + 3*len(self.__Species_in_FGM)):
+                            sources_sampled[:, iVar_Source] = np.interp(S_q, S_flamelet_norm, Sources_data[:, iVar_Source])
+
+                    start = (i_start + i_flamelet + i_flamelet_total) * self.__Np_per_flamelet
+                    end = (i_start + i_flamelet+1+ i_flamelet_total)*self.__Np_per_flamelet
+                    self.__CV_flamelet_data[start:end, :] = CV_sampled
+                    self.__TD_flamelet_data[start:end, :] = TD_sampled
+                    if self.__Config.PreferentialDiffusion():
+                        self.__PD_flamelet_data[start:end, :] = PD_sampled 
+                    self.__LookUp_flamelet_data[start:end, :] = lookup_sampled
+                    self.__Sources_flamelet_data[start:end, :] = sources_sampled
+                    self.__flamelet_ID[start:end, :] = i_start + i_flamelet + i_flamelet_total
 
         return len(flamelets) + i_flamelet_total
 
@@ -1087,6 +1090,7 @@ class GroupOutputs:
         ax.tick_params(which='both',labelsize=18)
         ax.legend(fontsize=20, bbox_to_anchor=(1.0, 0.5))
         fig.savefig(self.__Config.GetOutputDir()+"/Group_correlation_matrix.pdf",format='pdf',bbox_inches='tight')
+        plt.tight_layout()
         plt.show()
 
         return 
