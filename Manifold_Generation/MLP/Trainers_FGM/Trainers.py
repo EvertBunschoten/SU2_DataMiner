@@ -39,11 +39,13 @@ tf.random.set_seed(seed_value)
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
 import matplotlib.pyplot as plt 
+import cantera as ct 
 
 from Common.DataDrivenConfig import FlameletAIConfig
 from Manifold_Generation.MLP.Trainer_Base import MLPTrainer, TensorFlowFit,PhysicsInformedTrainer,EvaluateArchitecture, CustomTrainer
 from Common.CommonMethods import GetReferenceData
 from Common.Properties import DefaultSettings_FGM as DefaultProperties
+
 
 class Train_Flamelet_Direct(TensorFlowFit):
     __Config:FlameletAIConfig
@@ -95,7 +97,7 @@ class Train_Source_PINN(CustomTrainer):
     __pv_unb_constraint_factor:float = None 
     __pv_b_constraint_factor_lean:float = None 
     __pv_b_constraint_factor_rich:float = None 
-    __val_lambda:float=1.0
+    __val_lambda:float=0.0
     __current_epoch:int = 0
     def __init__(self, Config_in:FlameletAIConfig, group_idx:int=0):
         """Class constructor. Initialize a source term trainer for a given MLP output group.
@@ -158,8 +160,8 @@ class Train_Source_PINN(CustomTrainer):
             if pv_boundary[iz] > pv_unb+1e-3:
                 is_unb[iz] = False 
         
-        X_boundary_norm = (X_boundary - self._X_min)/(self._X_max-self._X_min)
-        Y_boundary_norm = (Y_boundary - self._Y_min)/(self._Y_max-self._Y_min)
+        X_boundary_norm = self.scaler_function_x.transform(X_boundary)#(X_boundary - self._X_min)/(self._X_max-self._X_min)
+        Y_boundary_norm = self.scaler_function_y.transform(Y_boundary)#(Y_boundary - self._Y_min)/(self._Y_max-self._Y_min)
 
         X_unb_n, Y_unb_n = X_boundary_norm[is_unb, :], Y_boundary_norm[is_unb, :]
         X_b_n, Y_b_n = X_boundary_norm[np.invert(is_unb), :], Y_boundary_norm[np.invert(is_unb), :]
@@ -181,17 +183,18 @@ class Train_Source_PINN(CustomTrainer):
         Y_b_st = self.__Config.gas.Y 
         pv_st = self.__Config.ComputeProgressVariable(variables=None, flamelet_data=None, Y_flamelet=Y_b_st[:,np.newaxis])
         Z_st = self.__Config.gas.mixture_fraction( fuel_string,oxidizer_string)
-
-        Z_st_norm = (Z_st - self._X_min[2])/(self._X_max[2] - self._X_min[2])
+        h_st = self.__Config.gas.enthalpy_mass
+        X_st_norm = self.scaler_function_x.transform(np.array([pv_st, h_st, Z_st]))
+        Z_st_norm = X_st_norm[2]#(Z_st - self._X_min[2])/(self._X_max[2] - self._X_min[2])
         self.__Z_st_norm = Z_st_norm
 
         dpv_dz_unb = pv_f - pv_ox 
 
         dpv_dz_b_rich = (pv_f - pv_st) / (1 - Z_st)
         dpv_dz_b_lean = (pv_st - pv_ox) / (Z_st)
-        self.__pv_unb_constraint_factor = dpv_dz_unb / (self._X_max[0] - self._X_min[0])
-        self.__pv_b_constraint_factor_lean = dpv_dz_b_lean / (self._X_max[0] - self._X_min[0])
-        self.__pv_b_constraint_factor_rich = dpv_dz_b_rich / (self._X_max[0] - self._X_min[0])
+        self.__pv_unb_constraint_factor = dpv_dz_unb / self._X_scale
+        self.__pv_b_constraint_factor_lean = dpv_dz_b_lean / self._X_scale#(self._X_max[0] - self._X_min[0])
+        self.__pv_b_constraint_factor_rich = dpv_dz_b_rich / self._X_scale#(self._X_max[0] - self._X_min[0])
 
         return 
     
@@ -349,19 +352,19 @@ class Train_Source_PINN(CustomTrainer):
         b_batches_list_resized = [b_batches_list[i % Nb_b] for i in range(len(domain_batches_list))]
         return (domain_batches_list, unb_batches_list_resized, b_batches_list_resized)
     
-    def LoopBatches(self, train_batches):
-        for XY_domain, XY_unb, XY_b in zip(train_batches[0],train_batches[1],train_batches[2]):
-            X_domain = XY_domain[0]
-            Y_domain = XY_domain[1]
-            X_unb = XY_unb[0]
-            Y_unb = XY_unb[1]
-            X_b = XY_b[0]
-            Y_b = XY_b[1]
-            grads_domain, grads_boundary = self.Train_Step(X_domain, Y_domain, X_unb, Y_unb, X_b, Y_b,self.__val_lambda)
+    # def LoopBatches(self, train_batches):
+    #     for XY_domain, XY_unb, XY_b in zip(train_batches[0],train_batches[1],train_batches[2]):
+    #         X_domain = XY_domain[0]
+    #         Y_domain = XY_domain[1]
+    #         X_unb = XY_unb[0]
+    #         Y_unb = XY_unb[1]
+    #         X_b = XY_b[0]
+    #         Y_b = XY_b[1]
+    #         grads_domain, grads_boundary = self.Train_Step(X_domain, Y_domain, X_unb, Y_unb, X_b, Y_b,self.__val_lambda)
 
-            self.__val_lambda = self.update_lambda(grads_domain, grads_boundary, self.__val_lambda)
-        self.__current_epoch += 1
-        return 
+    #         self.__val_lambda = self.update_lambda(grads_domain, grads_boundary, self.__val_lambda)
+    #     self.__current_epoch += 1
+    #     return 
     
     @tf.function
     def update_lambda(self, grads_direct, grads_ub, val_lambda_old):
@@ -392,10 +395,10 @@ class Train_Source_PINN(CustomTrainer):
         fig, axs = plt.subplots(nrows=1, ncols=len(self._train_vars),figsize=[6*len(self._train_vars), 6])
         fig_b, axs_b = plt.subplots(nrows=1, ncols=len(self._train_vars),figsize=[6*len(self._train_vars), 6])
        
-        Y_unb_pred = (self._Y_max - self._Y_min)*Y_unb_pred_norm + self._Y_min
-        Y_b_pred = (self._Y_max - self._Y_min)*Y_b_pred_norm + self._Y_min
-        X_unb = (self._X_max - self._X_min)*self.__X_unb_train + self._X_min
-        X_b = (self._X_max - self._X_min)*self.__X_b_train + self._X_min
+        Y_unb_pred = self.scaler_function_y.inverse_transform(Y_unb_pred_norm)#(self._Y_max - self._Y_min)*Y_unb_pred_norm + self._Y_min
+        Y_b_pred = self.scaler_function_y.inverse_transform(Y_b_pred_norm)#(self._Y_max - self._Y_min)*Y_b_pred_norm + self._Y_min
+        X_unb = self.scaler_function_x.inverse_transform(self.__X_unb_train)#(self._X_max - self._X_min)*self.__X_unb_train + self._X_min
+        X_b = self.scaler_function_x.inverse_transform(self.__X_b_train)#(self._X_max - self._X_min)*self.__X_b_train + self._X_min
         for iVar in range(len(self._train_vars)):
             if len(self._train_vars) == 1:
                 ax_unb = axs 
@@ -497,6 +500,553 @@ class Train_Beta_PINN(Train_Source_PINN):
             penalty = penalty + term_1 + term_2 + term_3
 
         return penalty
+
+class Train_FGM_PINN(PhysicsInformedTrainer):
+
+    __Config:FlameletAIConfig = None 
+
+    update_lambda_per_batch:bool = True
+    update_lambda_every_iter:int = 1000
+    lambda_history:list[list[float]] = []
+    eta = 1e-3 
+    j_gradient_update:int = 0
+    def __init__(self, Config_in:FlameletAIConfig, group_idx:int=0):
+        """Class constructor. Initialize a physics-informed trainer object for a given output group.
+
+        :param Config_in: FlameletAI configuration class.
+        :type Config_in: FlameletAIConfig
+        :param group_idx: MLP output group index, defaults to 0
+        :type group_idx: int, optional
+        """
+
+        # Initiate parent class.
+        PhysicsInformedTrainer.__init__(self)
+        self.__Config = Config_in 
+        self._controlling_vars = DefaultProperties.controlling_variables
+        self._train_vars = self.__Config.GetMLPOutputGroup(group_idx)
+        self.callback_every = 10
+        self.__boundary_data_file = self.__Config.GetOutputDir()+"/"+DefaultProperties.boundary_file_header+"_full.csv"
+        
+        # Synchronize settings with loaded configuration
+        self._alpha_expo = self.__Config.GetAlphaExpo(group_idx)
+        self._lr_decay = self.__Config.GetLRDecay(group_idx)
+        self._batch_expo = self.__Config.GetBatchExpo(group_idx)
+        self._activation_function = self.__Config.GetActivationFunction(group_idx)
+        self.SetHiddenLayers(self.__Config.GetHiddenLayerArchitecture(group_idx))
+        self._train_name = "Group"+str(group_idx+1)
+
+        return 
+    
+    def SetDecaySteps(self):
+        self._decay_steps=0.01157 * self._Np_train
+        return 
+    
+    def GetTrainData(self):
+        """Read domain and boundary training data and pre-process reactant-product matrices for visualization.
+        """
+        super().GetTrainData()
+        self.GetBoundaryData()
+        self.CollectPIVars()
+        self.GenerateBoundaryMatrices()
+
+        return 
+    
+    def SetTrainVariables(self, train_vars: list[str]):
+        self._state_vars = train_vars.copy()
+        return super().SetTrainVariables(train_vars)
+    
+    def GetBoundaryData(self):
+        """Load flamelet data equilibrium boundary data.
+        """
+
+        # Load controlling and train variables from boundary data.
+        X_boundary, Y_boundary = GetReferenceData(self.__boundary_data_file, x_vars=self._controlling_vars, train_variables=self._train_vars)
+        
+        
+        # Normalize controlling and labeled data with respect to domain data.
+        self.X_boundary_norm = self.scaler_function_x.transform(X_boundary)
+        self.Y_boundary_norm = self.scaler_function_y.transform(Y_boundary)
+
+        return 
+    
+    def SetBeta_pv_projection(self):
+        """Neumann boundary condition for progress variable preferential diffusion scalar.
+        The penalty equates the square of the Jacobian with respect to total enthalpy on the boundaries.
+
+        :return: penalty projection array, target projected gradient
+        :rtype: np.ndarray[float],np.ndarray[float]
+        """
+        projection_array_train = np.zeros(np.shape(self.X_boundary_norm))
+        projection_array_train[:, self._controlling_vars.index(DefaultProperties.name_enth)] = 1.0 
+        
+        target_grad_array = np.zeros([len(projection_array_train)])
+        return projection_array_train, target_grad_array
+    
+    def SetBeta_z_projection(self):
+        """Neumann boundary condition for mixture fraction preferential diffusion scalar.
+        The penalty equates the square of the Jacobian with respect to total enthalpy on the boundaries.
+
+        :return: penalty projection array, target projected gradient
+        :rtype: np.ndarray[float],np.ndarray[float]
+        """
+        return self.SetBeta_pv_projection()
+    
+    def LocateUnbBoundaryNodes(self):
+        """Locate the reactant and product nodes of the boundary data.
+
+        :return: reactant identification array.
+        :rtype: np.ndarray[bool]
+        """
+
+        # Initiate default reactant identifier array.
+        is_unb = np.ones(np.shape(self.X_boundary_norm)[0],dtype=bool)
+        
+        fuel_string = self.__Config.GetFuelString()
+        oxidizer_string = self.__Config.GetOxidizerString()
+        
+        # Loop over boundary nodes and locate indices where the progress variable is greater than the reactant progress variable.
+        X_boundary = self.scaler_function_x.inverse_transform(self.X_boundary_norm)
+        for iz in range(np.shape(self.X_boundary_norm)[0]):
+            z = X_boundary[iz,self._controlling_vars.index(DefaultProperties.name_mixfrac)]
+            pv_boundary = X_boundary[iz,self._controlling_vars.index(DefaultProperties.name_pv)]
+            self.__Config.gas.set_mixture_fraction(min(max(z,0),1.0), fuel_string, oxidizer_string)
+            self.__Config.gas.TP=self.__Config.GetUnbTempBounds()[0], DefaultProperties.pressure
+            Y = self.__Config.gas.Y 
+            pv_unb = self.__Config.ComputeProgressVariable(variables=None, flamelet_data=None, Y_flamelet=Y[:,np.newaxis])
+            
+            if pv_boundary > (pv_unb+1e-3*self._X_scale[self._controlling_vars.index(DefaultProperties.name_pv)]):
+                is_unb[iz] = False 
+
+        return is_unb
+    
+    def SetSource_projection(self):
+        """Neumann boundary condition for source terms.
+        Two penalties are applied: for non-zero gradients along the total enthalpy direction and 
+        for non-zero projected gradients along the equilibrium progress variable-mixture fraction line.
+        """
+
+        is_unb = self.LocateUnbBoundaryNodes()
+        
+        fuel_string = self.__Config.GetFuelString()
+        oxidizer_string = self.__Config.GetOxidizerString()
+        mixfrac_boundary_norm = self.X_boundary_norm[:, self._controlling_vars.index(DefaultProperties.name_mixfrac)]
+        
+        # Compute the progress variable derivative w.r.t. mixture fraction for equilibrium conditions
+
+        self.__Config.gas.TP = self.__Config.GetUnbTempBounds()[0], DefaultProperties.pressure
+
+        # Compute progress variable values for pure oxidizer and pure fuel.
+        self.__Config.gas.set_mixture_fraction(0.0, fuel_string,oxidizer_string)
+        Y_ox = self.__Config.gas.Y 
+        self.__Config.gas.set_mixture_fraction(1.0,  fuel_string,oxidizer_string)
+        Y_f = self.__Config.gas.Y
+        
+        pv_ox = self.__Config.ComputeProgressVariable(variables=None, flamelet_data=None, Y_flamelet=Y_ox[:, np.newaxis])[0]
+        pv_f = self.__Config.ComputeProgressVariable(variables=None, flamelet_data=None, Y_flamelet=Y_f[:,np.newaxis])[0]
+
+        # Compute the progress variable and mixture fraction for the stochiometric equilibrium condition.
+        self.__Config.gas.set_equivalence_ratio(1.0,  fuel_string,oxidizer_string)
+        self.__Config.gas.equilibrate("HP")
+        Y_b_st = self.__Config.gas.Y 
+        pv_st = self.__Config.ComputeProgressVariable(variables=None, flamelet_data=None, Y_flamelet=Y_b_st[:,np.newaxis])[0]
+        Z_st = self.__Config.gas.mixture_fraction( fuel_string,oxidizer_string)
+        h_st = self.__Config.gas.enthalpy_mass
+        X_st_norm = self.scaler_function_x.transform(np.array([[pv_st, h_st, Z_st]]))[0,:]
+        Z_st_norm = X_st_norm[2]
+
+        # Identify rich and lean boundary nodes.
+        is_rich = mixfrac_boundary_norm > Z_st_norm 
+        is_stoch = mixfrac_boundary_norm == Z_st_norm
+        is_lean = np.invert(is_rich)
+
+        # Calculate progress variable-mixture fraction derivative for reactants and products.
+        dpv_dz_unb = (pv_f - pv_ox)
+        dpv_dz_b_lean = (pv_st - pv_ox) / (Z_st)
+        dpv_dz_b_rich = (pv_f - pv_st) / (1 - Z_st)
+        dpv_dz_scale = self._X_scale[self._controlling_vars.index(DefaultProperties.name_pv)] \
+            / self._X_scale[self._controlling_vars.index(DefaultProperties.name_mixfrac)]
+        projection_unb_pvz = dpv_dz_unb/dpv_dz_scale
+        projection_b_pvz_lean = dpv_dz_b_lean /dpv_dz_scale
+        projection_b_pvz_rich = dpv_dz_b_rich /dpv_dz_scale
+
+        # Populate projection arrays for the boundary condition.
+        projection_array_pvz = np.zeros(np.shape(self.X_boundary_norm))
+
+        projection_array_pvz[:, self._controlling_vars.index(DefaultProperties.name_mixfrac)] = 1.0
+        projection_array_pvz[:, self._controlling_vars.index(DefaultProperties.name_enth)] = 1.0
+        projection_array_pvz[is_unb, self._controlling_vars.index(DefaultProperties.name_pv)] = projection_unb_pvz
+        projection_array_pvz[np.logical_and(np.invert(is_unb),is_rich), self._controlling_vars.index(DefaultProperties.name_pv)] = projection_b_pvz_rich
+        projection_array_pvz[np.logical_and(np.invert(is_unb),is_lean), self._controlling_vars.index(DefaultProperties.name_pv)] = projection_b_pvz_lean
+        projection_array_pvz[np.logical_and(np.invert(is_unb),is_stoch), self._controlling_vars.index(DefaultProperties.name_pv)] = 0.0
+        
+        target_grad_array_pvz = np.zeros(len(projection_array_pvz))
+
+        return projection_array_pvz, target_grad_array_pvz
+        
+    def SetT_projection(self):
+        """Neumann boundary condition for temperature.
+        The temperature derivative w.r.t. total enthalpy should be equal to the inverse of the specific heat.
+
+        :return: penalty projection array, target projected gradient
+        :rtype: np.ndarray[float],np.ndarray[float]
+        """
+
+        _, Cp_boundary = GetReferenceData(self.__boundary_data_file, x_vars=self._controlling_vars, train_variables=["Cp"])
+        T_scale = self._Y_scale[self._train_vars.index("Temperature")]
+        h_scale = self._X_scale[self._controlling_vars.index(DefaultProperties.name_enth)]
+        projection_array_train = np.zeros(np.shape(self.X_boundary_norm))
+        projection_array_train[:, self._controlling_vars.index(DefaultProperties.name_enth)] = 1.0
+        
+        target_grad_array = (1.0 / Cp_boundary[:,0]) * T_scale / h_scale
+
+        return projection_array_train, target_grad_array
+    
+    def CollectPIVars(self):
+        """Collect the Jacobian projection arrays and projected target arrays for any physics-informed variables in the training data set.
+        """
+
+        self.projection_arrays = []
+        self.target_arrays = []
+        self.vals_lambda = []
+        self.idx_PIvar = []
+        val_lambda_default = tf.constant(1.0,dtype=self._dt)
+        for ivar, var in enumerate(self._train_vars):
+
+            # Apply general invariance for source terms.
+            if (var == "ProdRateTot_PV") or (var == "Heat_Release") or ("Y_dot" in var):
+                self.idx_PIvar.append(ivar)
+
+                proj_array_pvz, target_grad_pvz = self.SetSource_projection()
+                self.projection_arrays.append(proj_array_pvz)
+                
+                self.target_arrays.append(target_grad_pvz)
+                
+                self.vals_lambda.append(val_lambda_default)
+
+            # Enforce total enthalpy invariance for pv and z preferential diffusion scalars.
+            if (var == "Beta_ProgVar") or (var == "Beta_MixFrac"):
+                self.idx_PIvar.append(ivar)
+                proj_array, target_grad = self.SetBeta_pv_projection()
+                self.projection_arrays.append(proj_array)
+                self.target_arrays.append(target_grad)
+                self.vals_lambda.append(val_lambda_default)   
+
+            # Enforce consistancy with specific heat for temperature.
+            if (var == "Temperature"):
+                self.idx_PIvar.append(ivar)
+                proj_array, target_grad = self.SetT_projection()
+                self.projection_arrays.append(proj_array)
+                self.target_arrays.append(target_grad)
+                self.vals_lambda.append(val_lambda_default)  
+        self._N_bc = len(self.vals_lambda) 
+        return 
+    
+    
+    def SetTrainBatches(self):
+        """Formulate train batches for domain and boundary data.
+
+        :return: train batches for domain and boundary data.
+        :rtype: list
+        """
+
+        # Collect domain data train batches
+        train_batches_domain = super().SetTrainBatches()
+        domain_batches_list = [b for b in train_batches_domain]
+
+        batch_size_train = 2**self._batch_expo
+
+        # Collect boundary labeled data.
+        Y_boundary_norm_concat = tf.stack([tf.constant(self.Y_boundary_norm[:, self.idx_PIvar[iVar]], dtype=self._dt) for iVar in range(self._N_bc)],axis=1)
+        
+        # Collect projection array data.
+        p_concatenated = tf.stack([tf.constant(p, dtype=self._dt) for p in self.projection_arrays],axis=2)
+        
+        # Collect target projection gradient data.
+        Y_target_concatenated = tf.stack([tf.constant(t, dtype=self._dt) for t in self.target_arrays], axis=1)
+
+        # Collect boundary controlling variable data.
+        X_boundary_tf = tf.constant(self.X_boundary_norm, dtype=self._dt)
+
+        # Forumulate batches.
+        batches_concat = tf.data.Dataset.from_tensor_slices((X_boundary_tf, Y_boundary_norm_concat, p_concatenated, Y_target_concatenated)).batch(batch_size_train)
+        batches_concat_list = [b for b in batches_concat]
+
+        # Re-size boundary data batches to that of the domain batches such that both data can be evaluated simultaneously during training.
+        Nb_boundary = len(batches_concat_list)
+        batches_concat_list_resized = [batches_concat_list[i % Nb_boundary] for i in range(len(domain_batches_list))]
+
+        return (domain_batches_list, batches_concat_list_resized)
+    
+    def LoopEpochs(self):
+        self.j_gradient_update = 0
+        return super().LoopEpochs()
+    
+    def LoopBatches(self, train_batches):
+        """Loop over domain and boundary batches for each epoch.
+
+        :param train_batches: tuple of domain and boundary data batches.
+        :type train_batches: tuple
+        """
+        domain_batches = train_batches[0]
+        boundary_batches = train_batches[1]
+        vals_lambda = self.vals_lambda.copy()
+        for batch_domain, batch_boundary in zip(domain_batches, boundary_batches):
+
+            # Extract domain batch data.
+            X_domain_batch = batch_domain[0]
+            Y_domain_batch = batch_domain[1]
+            # Extract boundary batch data.
+            X_boundary_batch = batch_boundary[0]
+            Y_boundary_batch = batch_boundary[1]
+            P_boundary_batch = batch_boundary[2]
+            Yt_boundary_batch = batch_boundary[3]
+
+            # Run train step and adjust weights.
+            self.Train_Step(X_domain_batch, Y_domain_batch, X_boundary_batch, Y_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda)
+            if (self.j_gradient_update + 1)%self.update_lambda_every_iter ==0:
+                vals_lambda_updated = self.UpdateLambdas(X_domain_batch, Y_domain_batch, X_boundary_batch, Y_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda)
+                self.vals_lambda = [v for v in vals_lambda_updated]
+            self.j_gradient_update += 1
+            
+        self.lambda_history.append([lamb.numpy() for lamb in self.vals_lambda])
+
+        return 
+    
+    
+    @tf.function
+    def ComputeNeumannPenalty(self, x_norm_boundary:tf.constant, y_norm_boundary_target:tf.constant, dy_norm_boundary_target:tf.constant,precon_gradient:tf.constant, iVar:int=0): 
+        """Neumann penalty function for projected MLP Jacobians along boundary data.
+
+        :param x_norm_boundary: boundary data controlling variable values.
+        :type x_norm_boundary: tf.constant
+        :param y_norm_boundary_target: labeled boundary data.
+        :type y_norm_boundary_target: tf.constant
+        :param dy_norm_boundary_target: target projected gradient.
+        :type dy_norm_boundary_target: tf.constant
+        :param precon_gradient: MLP Jacobian pre-conditioner.
+        :type precon_gradient: tf.constant
+        :param iVar: boundary condition index, defaults to 0
+        :type iVar: int, optional
+        :return: direct evaluation and Neumann penalty values.
+        :rtype: tf.constant
+        """
+
+        # Evaluate MLP Jacobian on boundary data.
+        y_pred_norm, dy_pred_norm = self.ComputeFirstOrderDerivatives(x_norm_boundary, self.idx_PIvar[iVar])
+
+        # Project Jacobian along boundary data according to penalty function.
+        project_dy_pred_norm = tf.norm(tf.multiply(precon_gradient[:,:,iVar], dy_pred_norm), axis=1)
+
+        # Compute direct and Neumann penalty values.
+        penalty_direct = tf.pow(y_pred_norm[:,self.idx_PIvar[iVar]] - y_norm_boundary_target[:,iVar], 2)
+        penalty_gradient = tf.pow(project_dy_pred_norm - dy_norm_boundary_target[:, iVar], 2)
+        penalty = tf.reduce_mean(penalty_direct + penalty_gradient)
+        return penalty
+    
+    
+    @tf.function
+    def Train_Step(self, X_domain_batch:tf.constant, Y_domain_batch:tf.constant, \
+                   X_boundary_batch:tf.constant, Y_boundary_batch:tf.constant, \
+                    P_boundary_batch:tf.constant, Yt_boundary_batch:tf.constant, vals_lambda:list[tf.constant]):
+        """Gradient descend update function for training physics-informed FGM MLP.
+
+        :param X_domain_batch: normalized controlling variable array from the domain data.
+        :type X_domain_batch: tf.constant
+        :param Y_domain_batch: normalized labeled output array from the domain data.
+        :type Y_domain_batch: tf.constant
+        :param X_boundary_batch: normalized controlling variable array from the boundary data.
+        :type X_boundary_batch: tf.constant
+        :param Y_boundary_batch: normalized labeled output array from the boundary data.
+        :type Y_boundary_batch: tf.constant
+        :param P_boundary_batch: Jacobian projection vector for current training batch.
+        :type P_boundary_batch: tf.constant
+        :param Yt_boundary_batch: target projection vector for current training batch.
+        :type Yt_boundary_batch: tf.constant
+        :param vals_lambda: boundary condition weights.
+        :type vals_lambda: list[tf.constant]
+        :return: training penalty value.
+        :rtype: tf.constant
+        """
+
+        # Compute training loss for the current batch and extract HP sensitivities.
+        batch_loss, sens_batch = self.Train_sensitivity_function(X_domain_batch, Y_domain_batch, X_boundary_batch, Y_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda)
+        
+        # Update network weigths and biases.
+        self.UpdateWeights(sens_batch)
+
+        return batch_loss
+    
+    @tf.function 
+    def Train_sensitivity_function(self, X_domain_batch, Y_domain_batch, X_boundary_batch, Y_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda):
+        with tf.GradientTape() as tape:
+            tape.watch(self._trainable_hyperparams)
+            train_loss = self.Train_loss_function(X_domain_batch, Y_domain_batch, X_boundary_batch, Y_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda)
+            grads_loss = tape.gradient(train_loss[0], self._trainable_hyperparams)
+        return train_loss, grads_loss 
+    
+    @tf.function 
+    def Train_loss_function(self, X_domain_batch, Y_domain_batch, X_boundary_batch, Y_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda):
+        
+        domain_loss = self.TrainingLoss_error(X_domain_batch, Y_domain_batch)
+
+        boundary_loss = 0.0
+        for iBc in range(self._N_bc):
+            bc_loss = self.ComputeNeumannPenalty(X_boundary_batch, Y_boundary_batch, Yt_boundary_batch, P_boundary_batch,iBc)
+            boundary_loss += vals_lambda[iBc] * bc_loss
+
+        total_loss = domain_loss + boundary_loss
+        return [total_loss, domain_loss, bc_loss]
+    
+    @tf.function
+    def ComputeGradients_Boundary_Error(self, X_boundary_batch, Y_boundary_batch, Yt_boundary_batch,P_boundary_batch,iVar):
+        with tf.GradientTape() as tape:
+            tape.watch(self._trainable_hyperparams)
+            neumann_penalty_var = self.ComputeNeumannPenalty(X_boundary_batch, Y_boundary_batch, Yt_boundary_batch, P_boundary_batch,iVar)
+            grads_neumann = tape.gradient(neumann_penalty_var, self._trainable_hyperparams)
+        return neumann_penalty_var, grads_neumann
+    
+    @tf.function
+    def ComputeGradients(self, X_domain_batch, Y_domain_batch, X_boundary_batch, Y_boundary_batch, P_boundary_batch, Yt_boundary_batch):
+        y_domain_loss, grads_domain = self.ComputeGradients_Direct_Error(X_domain_batch, Y_domain_batch)
+        grads_bc_list = []
+        loss_bc_list = []
+
+        for iBC in range(self._N_bc):
+            boundary_loss, grads_boundary_loss = self.ComputeGradients_Boundary_Error(X_boundary_batch, Y_boundary_batch, Yt_boundary_batch,P_boundary_batch,iBC)
+            grads_bc_list.append(grads_boundary_loss)
+            loss_bc_list.append(boundary_loss)
+        return y_domain_loss, grads_domain, loss_bc_list, grads_bc_list
+    
+    @tf.function 
+    def UpdateLambdas(self, X_domain_batch, Y_domain_batch, X_boundary_batch, Y_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda_old):
+        _, grads_domain, _, grads_bc_list = self.ComputeGradients(X_domain_batch, Y_domain_batch, X_boundary_batch, Y_boundary_batch, P_boundary_batch, Yt_boundary_batch)
+        vals_lambda_new = []
+        for iBc, lambda_old in enumerate(vals_lambda_old):
+            lambda_new = self.update_lambda(grads_domain, grads_bc_list[iBc], lambda_old)
+            vals_lambda_new.append(lambda_new)
+        return vals_lambda_new
+    
+    @tf.function
+    def UpdateWeights(self, grads):
+        self._optimizer.apply_gradients(zip(grads, self._trainable_hyperparams))
+        return
+    
+    def GenerateBoundaryMatrices(self):
+        print("Generating boundary data matrix...")
+        mixfrac_range = np.linspace(0, 1, self.__Config.GetNpMix())
+        T_range = np.linspace(self.__Config.GetUnbTempBounds()[0], self.__Config.GetUnbTempBounds()[1], self.__Config.GetNpTemp())
+        self.pv_unb = np.zeros([len(mixfrac_range), len(T_range)])
+        self.h_unb = np.zeros([len(mixfrac_range), len(T_range)])
+        self.z_unb = np.zeros([len(mixfrac_range), len(T_range)])
+        self.pv_b = np.zeros([len(mixfrac_range), len(T_range)])
+        self.h_b = np.zeros([len(mixfrac_range), len(T_range)])
+        self.z_b = np.zeros([len(mixfrac_range), len(T_range)])
+
+        gas_unb = ct.Solution(self.__Config.GetReactionMechanism())
+        gas_b = ct.Solution(self.__Config.GetReactionMechanism())
+        gas_unb.set_equivalence_ratio(1.0, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        gas_b.set_equivalence_ratio(1.0, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        gas_unb.TP = T_range[0], DefaultProperties.pressure
+        gas_b.TP = T_range[0], DefaultProperties.pressure
+        
+        for iZ, Z in enumerate(mixfrac_range):
+            gas_unb.TP = T_range[0], DefaultProperties.pressure
+            gas_b.TP = T_range[0], DefaultProperties.pressure
+            gas_unb.set_mixture_fraction(Z, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+            gas_b.set_mixture_fraction(Z, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+            gas_b.equilibrate("HP")
+            for iT, T in enumerate(T_range):
+                gas_unb.TP = T, DefaultProperties.pressure
+                self.pv_unb[iZ, iT] = self.__Config.ComputeProgressVariable(variables=None, flamelet_data=None, Y_flamelet=gas_unb.Y[:,np.newaxis])[0]
+                self.h_unb[iZ, iT] = gas_unb.enthalpy_mass
+                self.z_unb[iZ, iT] = Z 
+
+                gas_b.TP = T, DefaultProperties.pressure
+                self.pv_b[iZ, iT] = self.__Config.ComputeProgressVariable(variables=None, flamelet_data=None, Y_flamelet=gas_b.Y[:,np.newaxis])[0]
+                self.h_b[iZ, iT] = gas_b.enthalpy_mass
+                self.z_b[iZ, iT] = Z 
+        print("Done!")
+        
+        return 
+    
+    def PlotUnbData(self):
+        pv_unb = self.pv_unb.flatten()
+        h_unb = self.h_unb.flatten()
+        z_unb = self.z_unb.flatten()
+        
+        pv_b = self.pv_b.flatten()
+        h_b = self.h_b.flatten()
+        z_b = self.z_b.flatten()
+        
+        X_unb = np.hstack((pv_unb[:, np.newaxis], h_unb[:,np.newaxis], z_unb[:,np.newaxis]))
+        X_unb_norm_np = self.scaler_function_x.transform(X_unb)
+        X_b = np.hstack((pv_b[:, np.newaxis], h_b[:,np.newaxis], z_b[:,np.newaxis]))
+        X_b_norm_np = self.scaler_function_x.transform(X_b)
+        
+        X_unb_norm = tf.constant(X_unb_norm_np,dtype=self._dt)
+        X_b_norm = tf.constant(X_b_norm_np,dtype=self._dt)
+        
+        Y_unb_pred_norm = self._MLP_Evaluation(X_unb_norm).numpy()
+        Y_b_pred_norm = self._MLP_Evaluation(X_b_norm).numpy()
+
+        Y_unb_pred = self.scaler_function_y.inverse_transform(Y_unb_pred_norm)
+        Y_b_pred = self.scaler_function_y.inverse_transform(Y_b_pred_norm)
+
+        for iBC in range(self._N_bc):
+            iVar = self.idx_PIvar[iBC]
+            Y_plot_unb = Y_unb_pred[:, iVar].reshape(np.shape(self.pv_unb))
+            fig = plt.figure(figsize=[10,10])
+            ax = plt.axes()
+            cont = ax.contourf(self.h_unb, self.z_unb, Y_plot_unb, levels=20)
+            ax.set_xlabel(r"Total enthalpy $(h)[J/kg]$",fontsize=20)
+            ax.set_ylabel(r"Mixture fraction $(Z)[-]$",fontsize=20)
+            cbar = plt.colorbar(cont)
+            ax.tick_params(which='both',labelsize=18)
+            ax.set_title(r""+self._train_vars[iVar] + r" Prediction along reactants",fontsize=20)
+            fig.savefig(self._save_dir+"/Model_"+str(self._model_index)+"/Unburnt_Pred_"+self._train_vars[iVar] +"."+self._figformat,format=self._figformat,bbox_inches='tight')
+            plt.close(fig)
+
+            Y_plot_b = Y_b_pred[:, iVar].reshape(np.shape(self.pv_unb))
+            fig = plt.figure(figsize=[10,10])
+            ax = plt.axes()
+            cont = ax.contourf(self.h_b, self.z_b, Y_plot_b, levels=20)
+            ax.set_xlabel(r"Total enthalpy $(h)[J/kg]$",fontsize=20)
+            ax.set_ylabel(r"Mixture fraction $(Z)[-]$",fontsize=20)
+            cbar = plt.colorbar(cont)
+            ax.tick_params(which='both',labelsize=18)
+            ax.set_title(r""+self._train_vars[iVar] + r" Prediction along products",fontsize=20)
+            fig.savefig(self._save_dir+"/Model_"+str(self._model_index)+"/Burnt_Pred_"+self._train_vars[iVar] +"."+self._figformat,format=self._figformat,bbox_inches='tight')
+            plt.close(fig)
+        return 
+    
+    def PlotLambdaHistory(self):
+        fig = plt.figure(figsize=[10,10])
+        ax = plt.axes()
+        for iBc in range(self._N_bc):
+            ax.plot([self.lambda_history[i][iBc] for i in range(len(self.lambda_history))], label=self._train_vars[self.idx_PIvar[iBc]])
+        ax.grid()
+        ax.set_xlabel(r"Epoch [-]",fontsize=20)
+        ax.set_ylabel(r"Lambda value[-]",fontsize=20)
+        ax.tick_params(which='both',labelsize=18)
+        ax.legend(fontsize=20)
+        ax.set_title(r"Neumann penalty modifier history", fontsize=20)
+        fig.savefig(self._save_dir+"/Model_"+str(self._model_index)+"/Lambda_history."+self._figformat,format=self._figformat,bbox_inches='tight')
+        plt.close(fig)
+        return 
+    
+    def CustomCallback(self):
+        self.Plot_and_Save_History()
+        PlotFlameletData(self, self.__Config, self._train_name)
+        self.PlotUnbData()
+        self.PlotLambdaHistory()
+        self.write_SU2_MLP(self._save_dir + "/Model_"+str(self._model_index)+"/MLP_"+self._train_name)
+        return super().CustomCallback()
+    
+    def add_additional_header_info(self, fid):
+        fid.write("Progress variable definition: " + "+".join(("%+.6e*%s" % (w, s)) for w, s in zip(self.__Config.GetProgressVariableWeights(), self.__Config.GetProgressVariableSpecies())))
+        fid.write("\n\n")
+        return super().add_additional_header_info(fid)
+    
 class EvaluateArchitecture_FGM(EvaluateArchitecture):
     """Class for training MLP architectures
     """
@@ -506,6 +1056,7 @@ class EvaluateArchitecture_FGM(EvaluateArchitecture):
     __trainer_PINN:Train_Source_PINN = None 
     __kind_trainer:str = "direct"
 
+    __PINN_variables:list[str] = ["Temperature", "ProdRateTot_PV", "Heat_Release", "Beta_ProgVar", "Beta_MixFrac"]
     def __init__(self, Config:FlameletAIConfig, group_idx:int=0):
         """Define EvaluateArchitecture instance and prepare MLP trainer with
         default settings.
@@ -517,13 +1068,14 @@ class EvaluateArchitecture_FGM(EvaluateArchitecture):
         :raises Exception: if MLP output group index is undefined by flameletAI configuration.
         """
         output_vars = Config.GetMLPOutputGroup(group_idx)
-        if "ProdRateTot_PV" in output_vars:
+        if any([((v in self.__PINN_variables) or ("Y_dot" in v)) for v in output_vars]):
             self.__kind_trainer = "physicsinformed"
-            self.__trainer_PINN = Train_Source_PINN(Config_in=Config,group_idx=group_idx)
+            self.__trainer_PINN = Train_FGM_PINN(Config_in=Config,group_idx=group_idx)
             self._trainer_direct = self.__trainer_PINN
         else:
             self._trainer_direct = Train_Flamelet_Direct(Config_in=Config, group_idx=group_idx)
 
+        #self._trainer_direct = Train_Flamelet_Direct(Config_in=Config, group_idx=group_idx)
         self.__output_group=group_idx
         EvaluateArchitecture.__init__(self, Config_in=Config)
         self.SetOutputGroup(group_idx)
@@ -606,7 +1158,7 @@ def PlotFlameletData(Trainer:MLPTrainer, Config:FlameletAIConfig, train_name:str
             else:
                 CV_flamelet[:, iCv] = flameletData[:, variables_flamelet.index(Cv)]
         
-        CV_flamelet_norm = (CV_flamelet - Trainer._X_min)/(Trainer._X_max - Trainer._X_min)
+        CV_flamelet_norm = Trainer.scaler_function_x.transform(CV_flamelet)#(CV_flamelet - Trainer._X_min)/(Trainer._X_max - Trainer._X_min)
         
         ref_data_flamelet = np.zeros([len(flameletData), len(Trainer._train_vars)])
 
@@ -639,7 +1191,7 @@ def PlotFlameletData(Trainer:MLPTrainer, Config:FlameletAIConfig, train_name:str
 
         # Compute MLP prediction of flamelet data.
         pred_data_norm = Trainer.EvaluateMLP(CV_flamelet_norm)
-        pred_data = (Trainer._Y_max - Trainer._Y_min) * pred_data_norm + Trainer._Y_min
+        pred_data = Trainer.scaler_function_y.inverse_transform(pred_data_norm)#(Trainer._Y_max - Trainer._Y_min) * pred_data_norm + Trainer._Y_min
         # Plot flamelet data in corresponding figure window.
         for iVar, Var in enumerate(Trainer._train_vars):
             axs[iVar].plot(CV_flamelet[:, 0], ref_data_flamelet[:, iVar], 'bs-', linewidth=2, markevery=10, markerfacecolor='none', markersize=12, label=plot_label_ref)

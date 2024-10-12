@@ -43,6 +43,8 @@ import time
 from tensorflow import keras
 import matplotlib.pyplot as plt 
 from sklearn.metrics import r2_score
+from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
+from keras.initializers import HeUniform
 import csv 
 
 from Common.Config_base import Config
@@ -58,6 +60,9 @@ activation_function_options = [tf.keras.activations.linear,
                             tf.keras.activations.exponential,\
                             tf.keras.activations.gelu]
 
+scaler_functions = {"robust":RobustScaler,\
+                    "standard":StandardScaler,\
+                    "minmax":MinMaxScaler}
 class MLPTrainer:
     # Base class for flamelet MLP trainer
 
@@ -88,6 +93,8 @@ class MLPTrainer:
     _X_train:np.ndarray = None 
     _Y_train:np.ndarray = None 
     _Np_train:int = 30000
+    _Np_test:int = 3000
+    _Np_val:int = 3000
     _X_train_norm:np.ndarray = None 
     _Y_train_norm:np.ndarray = None
     _X_test:np.ndarray = None 
@@ -104,6 +111,14 @@ class MLPTrainer:
     _X_max:np.ndarray = None
     _Y_min:np.ndarray = None 
     _Y_max:np.ndarray = None
+
+    _X_mean:np.ndarray = None 
+    _X_scale:np.ndarray = None 
+    _X_offset:np.ndarray = None 
+
+    _Y_mean:np.ndarray = None 
+    _Y_scale:np.ndarray = None 
+    _Y_offset:np.ndarray = None 
 
     # Hidden layers neuron count.
     _hidden_layers:list[int] = None
@@ -135,11 +150,14 @@ class MLPTrainer:
     history_val_loss = []
 
     _stagnation_tolerance:float = 1e-11 
-    _stagnation_patience:int = 200
+    _stagnation_patience:int = 1000
     _verbose:int = 1
 
     callback_every:int = 20 
 
+    scaler_function_name:str = "robust"
+    scaler_function_x = scaler_functions[scaler_function_name]()
+    scaler_function_y = scaler_functions[scaler_function_name]()
     def __init__(self):
         """Initiate MLP trainer object.
         """
@@ -174,6 +192,12 @@ class MLPTrainer:
         """
         self._mlp_output_file_name = mlp_fileheader
         return 
+    
+    def SetScaler(self, scaler_function:str="robust"):
+        self.scaler_function_name = scaler_function
+        self.scaler_function_x = scaler_functions[scaler_function]()
+        self.scaler_function_y = scaler_functions[scaler_function]()
+        return
     
     def SetSaveDir(self, save_dir_in:str):
         """Define directory in which trained MLP information is saved.
@@ -452,6 +476,27 @@ class MLPTrainer:
             print("Reading train, test, and validation data...")
         X_full, Y_full = GetReferenceData(MLPData_filepath + "_full.csv", self._controlling_vars, self._train_vars)
         
+        self.scaler_function_x.fit(X_full)
+        self.scaler_function_y.fit(Y_full)
+        self._X_scale = self.scaler_function_x.scale_
+        self._Y_scale = self.scaler_function_y.scale_
+        if self.scaler_function_name == "standard":
+            self._X_offset = self.scaler_function_x.mean_
+            self._Y_offset = self.scaler_function_y.mean_
+        elif self.scaler_function_name == "robust":
+            self._X_offset = self.scaler_function_x.center_
+            self._Y_offset = self.scaler_function_y.center_ 
+        elif self.scaler_function_name == "minmax":  
+            self._X_scale = 1 / self.scaler_function_x.scale_
+            self._Y_scale = 1 / self.scaler_function_y.scale_
+            
+            self._X_offset = -self.scaler_function_x.min_ / self.scaler_function_x.scale_
+            self._Y_offset = -self.scaler_function_y.min_ / self.scaler_function_y.scale_
+
+        # Free up memory
+        del X_full
+        del Y_full
+
         self._X_train, self._Y_train = GetReferenceData(MLPData_filepath + "_train.csv", self._controlling_vars, self._train_vars)
         self._X_test, self._Y_test = GetReferenceData(MLPData_filepath + "_test.csv", self._controlling_vars, self._train_vars)
         self._X_val, self._Y_val = GetReferenceData(MLPData_filepath + "_val.csv", self._controlling_vars, self._train_vars)
@@ -459,25 +504,20 @@ class MLPTrainer:
             print("Done!")
 
 
-        # Calculate normalization bounds of full data set
-        self._X_min, self._X_max = np.min(X_full, 0), np.max(X_full, 0)
-        self._Y_min, self._Y_max = np.min(Y_full, 0), np.max(Y_full, 0)
-
-        # Free up memory
-        del X_full
-        del Y_full
-
         # Normalize train, test, and validation controlling variables
-        self._X_train_norm = (self._X_train - self._X_min) / (self._X_max - self._X_min)
-        self._X_test_norm = (self._X_test - self._X_min) / (self._X_max - self._X_min)
-        self._X_val_norm = (self._X_val - self._X_min) / (self._X_max - self._X_min)
+        self._X_train_norm = self.scaler_function_x.transform(self._X_train)
+        self._X_test_norm = self.scaler_function_x.transform(self._X_test)
+        self._X_val_norm = self.scaler_function_x.transform(self._X_val)
 
         # Normalize train, test, and validation data
-        self._Y_train_norm = (self._Y_train - self._Y_min) / (self._Y_max - self._Y_min)
-        self._Y_test_norm = (self._Y_test - self._Y_min) / (self._Y_max - self._Y_min)
-        self._Y_val_norm = (self._Y_val - self._Y_min) / (self._Y_max - self._Y_min)
+        self._Y_train_norm = self.scaler_function_y.transform(self._Y_train)
+        self._Y_test_norm = self.scaler_function_y.transform(self._Y_test)
+        self._Y_val_norm = self.scaler_function_y.transform(self._Y_val)
 
         self._Np_train = np.shape(self._X_train_norm)[0]
+        self._Np_test = np.shape(self._X_test_norm)[0]
+        self._Np_val = np.shape(self._X_val_norm)[0]
+        
         return 
     
     
@@ -527,15 +567,15 @@ class MLPTrainer:
         
         fid.write('\n[input normalization]\n')
         for i in range(len(self._controlling_vars)):
-            fid.write('%+.16e\t%+.16e\n' % (self._X_min[i], self._X_max[i]))
-        
+            fid.write('%+.16e\t%+.16e\n' % (self._X_offset[i], self._X_scale[i] + self._X_offset[i]))
+
         fid.write('\n[output names]\n')
         for output in self._train_vars:
             fid.write(output+'\n')
             
         fid.write('\n[output normalization]\n')
         for i in range(len(self._train_vars)):
-            fid.write('%+.16e\t%+.16e\n' % (self._Y_min[i], self._Y_max[i]))
+            fid.write('%+.16e\t%+.16e\n' % (self._Y_offset[i], self._Y_scale[i] + self._Y_offset[i]))
 
         fid.write("\n</header>\n")
         # Writing the weights of each layer
@@ -755,32 +795,54 @@ class TensorFlowFit(MLPTrainer):
                 return super().on_epoch_end(epoch, logs)
 
 class CustomTrainer(MLPTrainer):
-    _dt = tf.float32 
-    _trainable_hyperparams=[]
-    _optimizer = None 
-    _lr_schedule = None 
-    _train_name:str = ""
-    _figformat:str="pdf"
+    """MLP trainer class with full customization of loss functions.
+    """
+
+    _dt = tf.float32            # tensor data type used to cast training data.
+    _trainable_hyperparams:list[tf.Variable]=[] # MLP hyper-parameters to adjust during training.
+    _optimizer = None   # optimization algorithm used to adjust the MLP hyper-parameters during training.
+    _lr_schedule = None # learning rate decay schedule.
+    _train_name:str = ""    # MLP network name.
+    _figformat:str="pdf"    # format for which intermediate plots are saved.
+
+    # Training stagnation parameters.
     __keep_training:bool = True 
     __stagnation_iter:int = 0
+
+    _regularization_param:float = 1e-4
+
     def __init__(self):
         MLPTrainer.__init__(self)
-
         return
     
-    def SetWeights(self, weights_input):
+    def SetWeights(self, weights_input:list[np.ndarray]):
+        """Manually set the network weights values.
+
+        :param weights_input: list of network weights values.
+        :type weights_input: list[np.ndarray]
+        """
+
         self._weights = []
         for W in weights_input:
             self._weights.append(tf.Variable(W, self._dt))
         return 
     
-    def SetBiases(self, biases_input):
+    def SetBiases(self, biases_input:list[np.ndarray]):
+        """Manually set the network biases values.
+
+        :param biases_input: list of network bias values.
+        :type biases_input: list[np.ndarray]
+        """
+
         self._biases = []
         for b in biases_input:
             self._biases.append(tf.Variable(b, self._dt))
         return 
     
     def InitializeWeights_and_Biases(self):
+        """Initialize network weights and biases using He-invariance initialization.
+        """
+
         self._weights = []
         self._biases = []
 
@@ -789,18 +851,18 @@ class CustomTrainer(MLPTrainer):
             NN.append(N)
         NN.append(len(self._train_vars))
 
+        initializer = HeUniform()
         for i in range(len(NN)-1):
-            self._weights.append(tf.Variable(tf.random.normal([NN[i], NN[i+1]],
-                                            mean=0.0,
-                                            stddev=0.5,
-                                            name="weights"),self._dt))
-            self._biases.append(tf.Variable(tf.random.normal([NN[i+1],],
-                                    mean=0.0,
-                                    stddev=0.5,
-                                    name="bias"),self._dt))
+            self._weights.append(tf.Variable(initializer(shape=(NN[i],NN[i+1])),self._dt))
+            self._biases.append(tf.Variable(initializer(shape=(NN[i+1],)),self._dt))             
             
         return 
+    
+
     def LoadWeights(self):
+        """Load weights from saved numpy arrays.
+        """
+
         for i in range(len(self._weights)):
             loaded_W = np.load(self._save_dir + "/Model_"+str(self._model_index) + "/W_"+self._train_name+"_"+str(i)+".npy", allow_pickle=True)
             loaded_b = np.load(self._save_dir + "/Model_"+str(self._model_index) + "/b_"+self._train_name+"_"+str(i)+".npy", allow_pickle=True)
@@ -810,15 +872,23 @@ class CustomTrainer(MLPTrainer):
     
     @tf.function
     def CollectVariables(self):
+        """Define trainable hyper-parameters.
+        """
         self._trainable_hyperparams = []
         for W in self._weights:
             self._trainable_hyperparams.append(W)
         for b in self._biases:
             self._trainable_hyperparams.append(b)
+        return 
     
     def SetOptimizer(self):
+        """Set weights and biases training algorithm.
+        """
+
+        # Set number of gradient descend steps.
         self.SetDecaySteps()
-        #self._decay_steps = 1e4
+
+        # Define learning rate decay schedule.
         self._lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(10**self._alpha_expo, decay_steps=self._decay_steps,
                                                                             decay_rate=self._lr_decay, staircase=False)
 
@@ -864,11 +934,16 @@ class CustomTrainer(MLPTrainer):
         y_pred_norm = self._MLP_Evaluation(x_norm)
         return self.mean_square_error(y_label_norm, y_pred_norm)
     
+    @tf.function 
+    def TrainingLoss_error(self, x_norm:tf.constant, y_label_norm:tf.constant):
+        pred_error_outputs = self.Compute_Direct_Error(x_norm, y_label_norm)
+        return tf.reduce_mean(pred_error_outputs)
+    
     @tf.function
     def ComputeGradients_Direct_Error(self, x_norm:tf.constant, y_label_norm:tf.constant):
         with tf.GradientTape() as tape:
             tape.watch(self._trainable_hyperparams)
-            y_norm_loss = self.Compute_Direct_Error(x_norm, y_label_norm)
+            y_norm_loss = self.TrainingLoss_error(x_norm, y_label_norm)
             grads_loss = tape.gradient(y_norm_loss, self._trainable_hyperparams)
             
         return y_norm_loss, grads_loss
@@ -972,6 +1047,13 @@ class CustomTrainer(MLPTrainer):
             self.val_loss_history[iVar].append(val_loss[iVar])
         return val_loss
     
+    def RegularizationLoss(self):
+        reg_loss = 0.0
+        for w in self._weights:
+            reg_loss += self._regularization_param*tf.reduce_sum(tf.pow(w, 2))
+        
+        return reg_loss 
+    
     def TestLoss(self):
         t_start = time.time()
         self._test_score = tf.reduce_mean(self.Compute_Direct_Error(tf.constant(self._X_test_norm, self._dt), tf.constant(self._Y_test_norm, self._dt)))
@@ -1008,6 +1090,15 @@ class CustomTrainer(MLPTrainer):
         ax.tick_params(axis='both', which='major', labelsize=18)
         fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+ "/History_Plot_"+self._train_name+"."+self._figformat, format=self._figformat, bbox_inches='tight')
         plt.close(fig)
+
+        with open(self._save_dir + "/Model_"+str(self._model_index)+"/TrainingHistory.csv", "w+") as fid:
+            fid.write("epoch,"+ ",".join(("validation_loss_"+var for var in vars_to_plot))+"\n")
+            epochs = np.arange(np.shape(H)[1])
+            H_concat = np.vstack((epochs, H)).T 
+            csvWriter = csv.writer(fid, delimiter=',')
+            csvWriter.writerows(H_concat)
+
+
         return 
     
     def __CheckEarlyStopping(self, val_loss, worst_error):
@@ -1043,8 +1134,17 @@ class PhysicsInformedTrainer(CustomTrainer):
     _Y_state_max:np.ndarray 
     _Y_state_min:np.ndarray
 
+    _scaler_state = RobustScaler()
+    _Y_state_scale:np.ndarray = None 
+    _Y_state_offset:np.ndarray = None 
+
     _state_vars:list[str]
 
+    vals_lambda:list[float] = None
+    projection_vals:list[tf.constant] = None 
+
+    lambda_min:float = 0.0
+    lambda_max:float = 300.0
     def __init__(self):
         CustomTrainer.__init__(self)
         return 
@@ -1059,16 +1159,25 @@ class PhysicsInformedTrainer(CustomTrainer):
         
         _, State_full = GetReferenceData(MLPData_filepath + "_full.csv", self._controlling_vars, self._state_vars)
         
+        self._scaler_state.fit(State_full)
+        self._Y_state_scale = self._scaler_state.scale_
+        try:
+            self._Y_state_offset = self._scaler_state.min_ 
+        except:
+            self._Y_state_offset = self._scaler_state.center_ 
         _, self._Y_state_train = GetReferenceData(MLPData_filepath + "_train.csv", self._controlling_vars, self._state_vars)
         _, self._Y_state_test = GetReferenceData(MLPData_filepath + "_test.csv", self._controlling_vars, self._state_vars)
         _, self._Y_state_val = GetReferenceData(MLPData_filepath + "_val.csv", self._controlling_vars, self._state_vars)
 
-        self._Y_state_max, self._Y_state_min = np.max(State_full,axis=0),np.min(State_full,axis=0)
         del State_full
 
-        self._Y_state_train_norm = (self._Y_state_train - self._Y_state_min)/(self._Y_state_max-self._Y_state_min)
-        self._Y_state_test_norm = (self._Y_state_test - self._Y_state_min)/(self._Y_state_max-self._Y_state_min)
-        self._Y_state_val_norm = (self._Y_state_val - self._Y_state_min)/(self._Y_state_max-self._Y_state_min)
+        self._Y_state_train_norm = self._scaler_state.transform(self._Y_state_train)#(self._Y_state_train - self._Y_state_min)/(self._Y_state_max-self._Y_state_min)
+        self._Y_state_test_norm = self._scaler_state.transform(self._Y_state_test)#(self._Y_state_test - self._Y_state_min)/(self._Y_state_max-self._Y_state_min)
+        self._Y_state_val_norm = self._scaler_state.transform(self._Y_state_val)#(self._Y_state_val - self._Y_state_min)/(self._Y_state_max-self._Y_state_min)
+        
+        return 
+    
+    def PreprocessPINNVars(self):
         
         return 
     
@@ -1088,7 +1197,7 @@ class PhysicsInformedTrainer(CustomTrainer):
         return 
     
     def SetTrainBatches(self):
-        train_batches = tf.data.Dataset.from_tensor_slices((self._X_train_norm, self._Y_state_train_norm)).batch(2**self._batch_expo)
+        train_batches = tf.data.Dataset.from_tensor_slices((self._X_train_norm, self._Y_train_norm)).batch(2**self._batch_expo)
         return train_batches
     
     @tf.function
@@ -1108,7 +1217,43 @@ class PhysicsInformedTrainer(CustomTrainer):
             d2Y_norm = tape.gradient(tf.gather(dY_norm, indices=jVar, axis=1), x_norm_input)
         return Y_norm, dY_norm, d2Y_norm
     
+    @tf.function
+    def update_lambda(self, grads_direct, grads_ub, val_lambda_old):
+        max_grad_direct = 0.0
+        for g in grads_direct:
+            max_grad_direct = tf.maximum(max_grad_direct, tf.reduce_max(tf.abs(g)))
 
+        mean_grad_ub = 0.0
+        for g_ub in grads_ub:
+            mean_grad_ub += val_lambda_old * tf.reduce_mean(tf.abs(g_ub))
+        mean_grad_ub /= len(self._weights)
+
+        # max_grad_ub = 0.0
+        # for g in grads_ub:
+        #     max_grad_ub = tf.maximum(max_grad_ub, val_lambda_old*tf.reduce_max(tf.abs(g)))
+        
+        lambda_prime = max_grad_direct / (mean_grad_ub + 1e-32)
+        lambda_prime_scaled = tf.maximum(tf.minimum(lambda_prime, self.lambda_max), self.lambda_min)
+        val_lambda_new = 0.9 * val_lambda_old + 0.1 * lambda_prime_scaled
+        return val_lambda_new
+
+    @tf.function
+    def update_lambda_mean(self, grads_direct, grads_ub, val_lambda_old):
+        mean_grad_direct = 0.0
+        for g in grads_direct:
+            mean_grad_direct += tf.reduce_mean(tf.abs(g))
+        mean_grad_direct /= len(grads_direct)
+
+        mean_grad_ub = 0.0
+        for g_ub in grads_ub:
+            mean_grad_ub += tf.reduce_mean(tf.abs(g_ub))
+        mean_grad_ub /= len(grads_ub)
+
+        lambda_prime = mean_grad_direct / (mean_grad_ub + 1e-32)
+        lambda_prime_scaled = tf.maximum(tf.minimum(lambda_prime, self.lambda_max), self.lambda_min)
+        val_lambda_new = 0.1 * val_lambda_old + 0.9 * lambda_prime_scaled
+        return val_lambda_new
+    
 class EvaluateArchitecture:
     """Class for training MLP architectures
     """

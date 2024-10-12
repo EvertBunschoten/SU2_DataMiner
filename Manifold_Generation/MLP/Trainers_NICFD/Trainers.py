@@ -710,9 +710,9 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         d2sdrho2_norm = tf.gather(d2s_norm_rho,indices=self.__idx_rho,axis=1)
         d2sdrhode_norm = tf.gather(d2s_norm_e, indices=self.__idx_rho, axis=1)
 
-        s_scale = self.__s_max - self.__s_min
-        rho_scale = self.__rho_max - self.__rho_min
-        e_scale = self.__e_max - self.__e_min
+        s_scale = self._Y_scale[0]#self.__s_max - self.__s_min
+        rho_scale = self._X_scale[0]#self.__rho_max - self.__rho_min
+        e_scale = self._X_scale[1]#self.__e_max - self.__e_min
 
         s_dim = s_scale * s_norm + self.__s_min 
         dsdrho_e = tf.math.multiply((s_scale / rho_scale), dsdrho_e_norm)
