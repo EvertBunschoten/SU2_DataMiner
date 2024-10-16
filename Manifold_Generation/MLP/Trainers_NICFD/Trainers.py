@@ -186,9 +186,9 @@ class Train_Entropic_Derivatives(PhysicsInformedTrainer):
         d2sde2 = d2sdrho2e2[1][1]
         T = 1.0 / dsde_rho
         P = -tf.pow(rho, 2) * T * dsdrho_e
-        blue_term = (dsdrho_e * (2 - rho * tf.pow(dsde_rho, -1) * d2sdedrho) + rho*d2sdrho2)
-        green_term = (-tf.pow(dsde_rho, -1) * d2sde2 * dsdrho_e + d2sdedrho)
-        c2 = -rho * tf.pow(dsde_rho, -1) * (blue_term - rho * green_term * (dsdrho_e / dsde_rho))
+        blue_term = (dsdrho_e * (2 - rho * T * d2sdedrho) + rho*d2sdrho2)
+        green_term = (-T * d2sde2 * dsdrho_e + d2sdedrho)
+        c2 = -rho * T * (blue_term - rho * green_term * (dsdrho_e / dsde_rho))
   
         return T, P, c2
     @tf.function 
@@ -630,6 +630,10 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     __idx_p:int 
     __idx_c2:int 
 
+    _s_scale:float = None 
+    _rho_scale:float = None 
+    _e_scale:float = None 
+
     __s_min:float 
     __s_max:float 
     __rho_min:float 
@@ -644,6 +648,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
 
     def __init__(self):
         PhysicsInformedTrainer.__init__(self)
+        self.callback_every = 10
         self._controlling_vars = DefaultSettings_NICFD.controlling_variables
         self._hidden_layers = []
         for n in DefaultSettings_NICFD.hidden_layer_architecture:
@@ -660,10 +665,16 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     def GetTrainData(self):
 
         super().GetTrainData()
-        self.__s_max, self.__s_min = self._Y_max[0], self._Y_min[0]
+        self._s_scale = tf.cast(self._Y_scale[0], self._dt)
+        self._rho_scale = tf.cast(self._X_scale[self._controlling_vars.index(DefaultSettings_NICFD.name_density)], self._dt)
+        self._e_scale = tf.cast(self._X_scale[self._controlling_vars.index(DefaultSettings_NICFD.name_energy)], self._dt)
+        self._rho_offset = tf.cast(self._X_offset[self._controlling_vars.index(DefaultSettings_NICFD.name_density)], self._dt)
+        self._Y_state_scale_tf = tf.cast(self._Y_state_scale, self._dt)
+        self._Y_state_offset_tf = tf.cast(self._Y_state_offset, self._dt)
+        # self.__s_max, self.__s_min = self._Y_max[0], self._Y_min[0]
 
-        self.__rho_min, self.__rho_max = self._X_min[self.__idx_rho], self._X_max[self.__idx_rho]
-        self.__e_min, self.__e_max = self._X_min[self.__idx_e], self._X_max[self.__idx_e]
+        # self.__rho_min, self.__rho_max = self._X_min[self.__idx_rho], self._X_max[self.__idx_rho]
+        # self.__e_min, self.__e_max = self._X_min[self.__idx_e], self._X_max[self.__idx_e]
         
         return 
     
@@ -692,7 +703,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         return 
     
     @tf.function
-    def __ComputeEntropyGradients(self, rhoe_norm:tf.Tensor):
+    def ComputeEntropyGradients(self, rhoe_norm:tf.Tensor):
         with tf.GradientTape(watch_accessed_variables=False, persistent=True) as tape_2:
             tape_2.watch(rhoe_norm)
             with tf.GradientTape(watch_accessed_variables=False) as tape_1:
@@ -704,22 +715,22 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         d2s_norm_rho = tape_2.gradient(ds_norm_rho, rhoe_norm)
         d2s_norm_e = tape_2.gradient(ds_norm_e, rhoe_norm)
 
-        dsdrho_e_norm = tf.gather(ds_norm, indices=self.__idx_rho,axis=1)
-        dsde_rho_norm = tf.gather(ds_norm, indices=self.__idx_e,axis=1)
-        d2sde2_norm = tf.gather(d2s_norm_e, indices=self.__idx_e,axis=1)
-        d2sdrho2_norm = tf.gather(d2s_norm_rho,indices=self.__idx_rho,axis=1)
-        d2sdrhode_norm = tf.gather(d2s_norm_e, indices=self.__idx_rho, axis=1)
+        dsdrho_e_norm = tf.gather(ds_norm, indices=0,axis=1)
+        dsde_rho_norm = tf.gather(ds_norm, indices=1,axis=1)
+        d2sde2_norm = tf.gather(d2s_norm_e, indices=1,axis=1)
+        d2sdrho2_norm = tf.gather(d2s_norm_rho,indices=0,axis=1)
+        d2sdrhode_norm = tf.gather(d2s_norm_e, indices=0, axis=1)
 
-        s_scale = self._Y_scale[0]#self.__s_max - self.__s_min
-        rho_scale = self._X_scale[0]#self.__rho_max - self.__rho_min
-        e_scale = self._X_scale[1]#self.__e_max - self.__e_min
+        # s_scale = self._Y_scale[0]#self.__s_max - self.__s_min
+        # rho_scale = self._X_scale[0]#self.__rho_max - self.__rho_min
+        # e_scale = self._X_scale[1]#self.__e_max - self.__e_min
 
-        s_dim = s_scale * s_norm + self.__s_min 
-        dsdrho_e = tf.math.multiply((s_scale / rho_scale), dsdrho_e_norm)
-        dsde_rho = tf.math.multiply((s_scale / e_scale), dsde_rho_norm)
-        d2sdrho2 = tf.math.multiply((s_scale / tf.pow(rho_scale, 2)),d2sdrho2_norm)
-        d2sdedrho = tf.math.multiply((s_scale / (rho_scale * e_scale)), d2sdrhode_norm)
-        d2sde2 = tf.math.multiply((s_scale / tf.pow(e_scale, 2)), d2sde2_norm)
+        s_dim = self._s_scale * s_norm + self._Y_offset[0]
+        dsdrho_e = tf.math.multiply((self._s_scale / self._rho_scale), dsdrho_e_norm)
+        dsde_rho = tf.math.multiply((self._s_scale / self._e_scale), dsde_rho_norm)
+        d2sdrho2 = tf.math.multiply((self._s_scale / tf.pow(self._rho_scale, 2)),d2sdrho2_norm)
+        d2sdedrho = tf.math.multiply((self._s_scale / (self._rho_scale * self._e_scale)), d2sdrhode_norm)
+        d2sde2 = tf.math.multiply((self._s_scale / tf.pow(self._e_scale, 2)), d2sde2_norm)
 
         dsdrhoe = [dsdrho_e, dsde_rho]
         d2sdrho2e2 = [[d2sdrho2, d2sdedrho],[d2sdedrho, d2sde2]]
@@ -732,17 +743,18 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         d2sdrho2 = d2sdrho2e2[0][0]
         d2sdedrho = d2sdrho2e2[0][1]
         d2sde2 = d2sdrho2e2[1][1]
-        T = 1.0 / dsde_rho
-        P = -tf.pow(rho, 2) * T * dsdrho_e
-        blue_term = (dsdrho_e * (2 - rho * tf.pow(dsde_rho, -1) * d2sdedrho) + rho*d2sdrho2)
-        green_term = (-tf.pow(dsde_rho, -1) * d2sde2 * dsdrho_e + d2sdedrho)
-        c2 = -rho * tf.pow(dsde_rho, -1) * (blue_term - rho * green_term * (dsdrho_e / dsde_rho))
+        T = tf.pow(dsde_rho, -1)
+        rho2 = tf.pow(rho, 2)
+        P = -rho2 * T * dsdrho_e
+        blue_term = (dsdrho_e * (2 - rho * T * d2sdedrho) + rho*d2sdrho2)
+        green_term = (-T * d2sde2 * dsdrho_e + d2sdedrho)
+        c2 = -rho * T * (blue_term - rho * green_term * (dsdrho_e / dsde_rho))
 
-        dTde_rho = -tf.pow(dsde_rho, -2) * d2sde2 
-        dTdrho_e = -tf.pow(dsde_rho, -2) * d2sdedrho 
+        dTde_rho = -T*T * d2sde2 
+        dTdrho_e = -T*T * d2sdedrho 
 
-        dPde_rho = -tf.pow(rho, 2) * (dTde_rho * dsdrho_e + T * d2sdedrho)
-        dPdrho_e = -2 * rho * T * dsdrho_e - tf.pow(rho, 2) * (dTdrho_e * dsdrho_e + T * d2sdrho2)
+        dPde_rho = -rho2 * (dTde_rho * dsdrho_e + T * d2sdedrho)
+        dPdrho_e = -2 * rho * T * dsdrho_e - rho2 * (dTdrho_e * dsdrho_e + T * d2sdrho2)
         dhdrho_e = -P * tf.pow(rho, -2) + dPdrho_e / rho
         dhde_rho = 1 + dPde_rho / rho
 
@@ -757,9 +769,11 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     
     @tf.function 
     def TD_Evaluation(self, rhoe_norm:tf.Tensor):
-        s, dsdrhoe, d2sdrho2e2 = self.__ComputeEntropyGradients(rhoe_norm)
-        rho_norm = tf.gather(rhoe_norm, indices=self.__idx_rho, axis=1)
-        rho = (self.__rho_max - self.__rho_min)*rho_norm + self.__rho_min 
+        s, dsdrhoe, d2sdrho2e2 = self.ComputeEntropyGradients(rhoe_norm)
+        # rhoe_dim = self.scaler_function_x.inverse_transform(rhoe_norm)
+        # rho_norm = tf.gather(rhoe_norm, indices=self.__idx_rho, axis=1)
+        rho = tf.gather(rhoe_norm, indices=0, axis=1) * self._rho_scale + self._rho_offset#(self.__rho_max - self.__rho_min)*rho_norm + self.__rho_min 
+        
         return self.EntropicEOS(rho, dsdrhoe, d2sdrho2e2)
     
     @tf.function
@@ -769,13 +783,14 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     @tf.function 
     def ComputeStateError(self, Y_state_label_norm:tf.constant, X_label_norm:tf.constant):
         Y_state_pred = self.EvaluateState(X_label_norm)
-        Y_state_pred_norm = (Y_state_pred - self._Y_state_min)/(self._Y_state_max - self._Y_state_min)
+        #Y_state_pred_norm = (Y_state_pred - self._Y_state_min)/(self._Y_state_max - self._Y_state_min)
+        Y_state_pred_norm = (Y_state_pred - self._Y_state_offset_tf)/self._Y_state_scale_tf#self._scaler_state.transform(Y_state_pred)
         pred_error = tf.reduce_mean(tf.pow(Y_state_pred_norm - Y_state_label_norm, 2), axis=0)
         return pred_error
     
   
     @tf.function 
-    def __ComputeGradients_State_error(self, Y_state_label_norm:tf.constant, X_label_norm:tf.constant):
+    def ComputeGradients_State_error(self, Y_state_label_norm:tf.constant, X_label_norm:tf.constant):
         with tf.GradientTape() as tape:
             tape.watch(self._trainable_hyperparams)
             state_loss = self.ComputeStateError(Y_state_label_norm, X_label_norm)
@@ -785,7 +800,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         return state_loss, grads_state 
     
     @tf.function
-    def __ComputeGradient_State_error(self, Y_state_label_norm:tf.constant, X_label_norm:tf.constant, iVar:int):
+    def ComputeGradient_State_error(self, Y_state_label_norm:tf.constant, X_label_norm:tf.constant, iVar:int):
         with tf.GradientTape() as tape:
             tape.watch(self._trainable_hyperparams)
             state_loss = self.ComputeStateError(Y_state_label_norm, X_label_norm)[iVar]
@@ -793,65 +808,6 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
             grads_state = tape.gradient(tf.reduce_mean(state_loss), self._trainable_hyperparams)
         return state_loss, grads_state 
     
-    @tf.function
-    def __ComputeGradients_T_error(self, T_label_norm:tf.Tensor, rhoe_norm:tf.constant):
-        """Compute temperature prediction error and respective MLP weight sensitivities.
-
-        :param T_label: reference temperature data
-        :type T_label: tf.Tensor
-        :param rhoe_norm: normalized density and energy tensor.
-        :type rhoe_norm: tf.Variable
-        :return: temperature prediction loss value and MLP weight sensitivities.
-        :rtype: tf.Tensor
-        """
-
-        with tf.GradientTape() as tape:
-            tape.watch(self._trainable_hyperparams)
-            # Evaluate temperature loss value.
-            T_loss = self.__Compute_T_error(T_label_norm, rhoe_norm)
-            
-            # Compute MLP weight sensitvities.
-            grads_T = tape.gradient(T_loss, self._trainable_hyperparams)
-        
-        return T_loss, grads_T
-
-    @tf.function
-    def __ComputeGradients_P_error(self, P_label_norm:tf.Tensor, rhoe_norm:tf.constant):
-        """Compute pressure prediction error and respective MLP weight sensitivities.
-
-        :param P_label: reference pressure data
-        :type P_label: tf.Tensor
-        :param rhoe_norm: normalized density and energy tensor.
-        :type rhoe_norm: tf.Variable
-        :return: pressure prediction loss value and MLP weight sensitivities.
-        :rtype: tf.Tensor
-        """
-        with tf.GradientTape() as tape:
-            tape.watch(self._trainable_hyperparams)
-            # Evaluate pressure loss value.
-            P_loss = self.__Compute_P_error(P_label_norm, rhoe_norm)
-
-            # Compute MLP weight sensitvities.
-            grads_P = tape.gradient(P_loss, self._trainable_hyperparams)
-
-        return P_loss, grads_P
-    
-    @tf.function
-    def __ComputeGradients_C2_error(self, C2_label_norm:tf.Tensor, rhoe_norm:tf.constant):
-        """Compute SoS prediction error and respective MLP weight sensitivities.
-
-        :param C2_label: reference squared SoS data
-        :type C2_label: tf.Tensor
-        :param rhoe_norm: normalized density and energy tensor.
-        :type rhoe_norm: tf.Variable
-        :return: SoS prediction loss value and MLP weight sensitivities.
-        :rtype: tf.Tensor
-        """
-        with tf.GradientTape() as tape:
-            tape.watch(self._trainable_hyperparams)
-            C2_loss = self.__Compute_C2_error(C2_label_norm, rhoe_norm)
-            grads_C2 = tape.gradient(C2_loss, self._trainable_hyperparams)
-        return C2_loss, grads_C2
     
     @tf.function
     def Train_Step(self, X_batch_norm:tf.constant, Y_batch_norm:tf.constant):
@@ -862,10 +818,10 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     def Train_Step_state(self, X_batch_norm:tf.constant, Y_batch_norm:tf.constant):
 
         for ivar in range(len(self._state_vars)):
-            _, grads_loss = self.__ComputeGradient_State_error(Y_batch_norm, X_batch_norm, ivar)
+            _, grads_loss = self.ComputeGradient_State_error(Y_batch_norm, X_batch_norm, ivar)
             self._optimizer.apply_gradients(zip(grads_loss, self._trainable_hyperparams))
 
-        state_loss, _ = self.__ComputeGradients_State_error(Y_batch_norm,X_batch_norm)
+        state_loss, _ = self.ComputeGradients_State_error(Y_batch_norm,X_batch_norm)
         return state_loss
     
     def ValidationLoss(self):
@@ -915,8 +871,8 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         fid.write("Total neuron count:  %i\n" % np.sum(np.array(self._hidden_layers)))
         fid.write("Evaluation time[seconds]: %+.3e\n" % (self._test_time))
         fid.write("Evaluation cost parameter: %+.3e\n" % (self._cost_parameter))
-        fid.write("Alpha exponent: %+.4e\n" % self._alpha_expo)
-        fid.write("Learning rate decay: %+.4e\n" % self._lr_decay)
+        fid.write("Alpha exponent: %+.16e\n" % self._alpha_expo)
+        fid.write("Learning rate decay: %+.16e\n" % self._lr_decay)
         fid.write("Batch size exponent: %i\n" % self._batch_expo)
         fid.write("Decay steps: %i\n" % self._decay_steps)
         fid.write("Activation function index: %i\n" % self._i_activation_function)
@@ -931,17 +887,21 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         """Make nice plots of the interpolated test data.
         """
         state_test_pred = self.EvaluateState(self._X_test_norm).numpy()
-        figformat = "png"
         plot_fontsize = 20
         label_fontsize=18
         markevery=10
         val_pad = 30
 
-        rho_test = self._X_test[:, self.__idx_rho]
-        e_test = self._X_test[:, self.__idx_e]
+        
+        rhoe_test = self.scaler_function_x.inverse_transform(self._X_test_norm)
+        rho_test = rhoe_test[:,0]
+        e_test = rhoe_test[:,1]
+
+        Y_ref_test = self._scaler_state.inverse_transform(self._Y_state_test_norm)
         
         for var in self._state_vars:
-            Y_ref = self._Y_state_test[:, self._state_vars.index(var)]
+            print(self._save_dir + "/Model_"+str(self._model_index)+"/"+var+"_prediction."+self._figformat)
+            Y_ref = Y_ref_test[:, self._state_vars.index(var)]
             Y_pred = state_test_pred[:, self._state_vars.index(var)]
             fig = plt.figure(figsize=[10,10])
             ax = plt.axes(projection='3d')
@@ -958,7 +918,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
             ax.zaxis.labelpad=val_pad
             ax.tick_params(which='both',labelsize=18)
             plt.tight_layout()
-            fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/"+var+"_prediction."+figformat,format=figformat,bbox_inches='tight')
+            fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/"+var+"_prediction."+self._figformat,format=self._figformat,bbox_inches='tight')
             plt.close(fig)
 
             e = 100*np.abs((Y_pred - Y_ref)/(Y_ref+1e-6))
@@ -973,7 +933,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
             ax.set_ylabel(r"Static energy $(e)[J kg^{-1}]$",fontsize=plot_fontsize)
             ax.set_title(("%s prediction error" % var),fontsize=plot_fontsize)
             ax.tick_params(which='both',labelsize=label_fontsize)
-            fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/"+var+"_prediction_error."+figformat,format=figformat,bbox_inches='tight')
+            fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/"+var+"_prediction_error."+self._figformat,format=self._figformat,bbox_inches='tight')
             plt.close(fig)
 
         return
@@ -997,6 +957,7 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
 
         self._trainer_direct = Train_Entropic_Direct()
         self.__trainer_PINN = Train_Entropic_PINN()
+        self.__trainer_PINN.SetScaler("minmax")
         self.lr_decay = DefaultSettings_NICFD.learning_rate_decay
         self.alpha_expo = DefaultSettings_NICFD.init_learning_rate_expo
         self.activation_function = DefaultSettings_NICFD.activation_function
@@ -1032,8 +993,9 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
         """
         super().SynchronizeTrainer()
 
+        self.worker_dir = self.main_save_dir + ("/Worker_%i/" % self.process_index)
         self.__trainer_PINN.SetModelIndex(self.current_iter)
-        self.__trainer_PINN.SetSaveDir(self.main_save_dir)
+        self.__trainer_PINN.SetSaveDir(self.worker_dir)
         self.__trainer_PINN.SetStateVars(self._state_vars)
 
         self.__trainer_PINN.SetDeviceKind(self.device)
@@ -1047,6 +1009,7 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
         self.__trainer_PINN.SetHiddenLayers(self.architecture)
         self.__trainer_PINN.SetTrainFileHeader(self._train_file_header)
         self.__trainer_PINN.SetVerbose(self.verbose)
+        self.__trainer_PINN.SetFigFormat(self._fig_format)
         return 
     
     def CommenceTraining(self):
@@ -1055,6 +1018,7 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
 
         self.PrepareOutputDir()
         self._trainer_direct.SetMLPFileHeader("MLP_direct")
+        self._trainer_direct.SetNEpochs(100)
         self._trainer_direct.Train_MLP()
         super().TrainPostprocessing()
         
