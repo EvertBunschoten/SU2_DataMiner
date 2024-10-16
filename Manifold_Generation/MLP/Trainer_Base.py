@@ -90,28 +90,17 @@ class MLPTrainer:
 
     # Train, test, and validation data.
     _filedata_train:str 
-    _X_train:np.ndarray = None 
-    _Y_train:np.ndarray = None 
-    _Np_train:int = 30000
-    _Np_test:int = 3000
-    _Np_val:int = 3000
+    _Np_train:int = None
+    _Np_test:int = None
+    _Np_val:int = None
     _X_train_norm:np.ndarray = None 
     _Y_train_norm:np.ndarray = None
-    _X_test:np.ndarray = None 
-    _Y_test:np.ndarray = None 
     _X_test_norm:np.ndarray = None 
     _Y_test_norm:np.ndarray = None 
-    _X_val:np.ndarray = None 
-    _Y_val:np.ndarray = None 
     _X_val_norm:np.ndarray = None 
     _Y_val_norm:np.ndarray = None 
 
     # Dataset normalization bounds.
-    _X_min:np.ndarray = None
-    _X_max:np.ndarray = None
-    _Y_min:np.ndarray = None 
-    _Y_max:np.ndarray = None
-
     _X_mean:np.ndarray = None 
     _X_scale:np.ndarray = None 
     _X_offset:np.ndarray = None 
@@ -127,10 +116,6 @@ class MLPTrainer:
     _weights:list[np.ndarray] = []
     _biases:list[np.ndarray] = []
 
-    # Weights and biases with redundant neurons removed.
-    _trimmed_weights:list[np.ndarray] = []
-    _trimmed_biases:list[np.ndarray] = []
-
     _test_score:float = None       # Loss function on test set upon training termination.
     _cost_parameter:float = None   # Cost parameter of the trimmed network.
 
@@ -140,7 +125,6 @@ class MLPTrainer:
     _save_dir:str = "/"  # Directory to save trained network information to.
     _figformat:str="png"
     _mlp_output_file_name:str = "SU2_MLP"
-    optuna_trial = None 
 
     # Intermediate history update window settings.
     history_plot_window = None 
@@ -150,7 +134,7 @@ class MLPTrainer:
     history_val_loss = []
 
     _stagnation_tolerance:float = 1e-11 
-    _stagnation_patience:int = 1000
+    _stagnation_patience:int = 100
     _verbose:int = 1
 
     callback_every:int = 20 
@@ -158,6 +142,7 @@ class MLPTrainer:
     scaler_function_name:str = "robust"
     scaler_function_x = scaler_functions[scaler_function_name]()
     scaler_function_y = scaler_functions[scaler_function_name]()
+
     def __init__(self):
         """Initiate MLP trainer object.
         """
@@ -173,6 +158,16 @@ class MLPTrainer:
         if verbose_level < 0 or verbose_level > 2:
             raise Exception("Verbose level should be 0, 1, or 2.")
         self._verbose = int(verbose_level)
+        return 
+    
+    def SetFigFormat(self, fig_format:str="png"):
+        """Set the format by which to save any generated images during training.
+
+        :param fig_format: image file format, defaults to "png"
+        :type fig_format: str, optional
+        """
+
+        self._figformat = fig_format
         return 
     
     def SetTrainFileHeader(self, train_filepathname:str):
@@ -194,6 +189,8 @@ class MLPTrainer:
         return 
     
     def SetScaler(self, scaler_function:str="robust"):
+        if scaler_function not in scaler_functions.keys():
+            raise Exception("Train data scaling function should be one of the following: "+",".join(f for f in scaler_functions.keys()))
         self.scaler_function_name = scaler_function
         self.scaler_function_x = scaler_functions[scaler_function]()
         self.scaler_function_y = scaler_functions[scaler_function]()
@@ -432,16 +429,17 @@ class MLPTrainer:
         for iVar in range(len(self._train_vars)):
             R2_score = r2_score(ref_data_norm[:, iVar], pred_data_norm[:, iVar])
             if len(self._train_vars) == 1:
-                axs.plot([0, 1],[0,1],'r')
-                axs.plot(ref_data_norm[:, iVar], pred_data_norm[:, iVar], 'k.')
-                axs.grid()
-                axs.set_title(self._train_vars[iVar] + ": %.3e" % R2_score)
+                ax = axs
             else:
-                axs[iVar].plot([0, 1],[0,1],'r')
-                axs[iVar].plot(ref_data_norm[:, iVar], pred_data_norm[:, iVar], 'k.')
-                axs[iVar].grid()
-                axs[iVar].set_title(self._train_vars[iVar] + ": %.3e" % R2_score)
-        fig.savefig(self._save_dir + "/Model_"+str(self._model_index) + "/R2.pdf", format='pdf', bbox_inches='tight')
+                ax = axs[iVar]
+            ref_min, ref_max = min(ref_data_norm[:,iVar]), max(ref_data_norm[:, iVar])
+            ax.plot([ref_min, ref_max],[ref_min,ref_max],'r')
+            ax.plot(ref_data_norm[:, iVar], pred_data_norm[:, iVar], 'k.')
+            ax.grid()
+            ax.set_title(self._train_vars[iVar] + ": %.3e" % R2_score)
+            ax.set_xlabel("Labeled data",fontsize=20)
+            ax.set_ylabel("Predicted data",fontsize=20)
+        fig.savefig(self._save_dir + "/Model_"+str(self._model_index) + "/R2."+self._figformat, format=self._figformat, bbox_inches='tight')
         plt.close(fig)
 
         # Generate and save the MLP predictions along each of the controlling variable ranges.
@@ -449,18 +447,15 @@ class MLPTrainer:
         for iVar in range(len(self._train_vars)):
             for iInput in range(len(self._controlling_vars)):
                 if len(self._train_vars) == 1:
-                    axs[iInput].plot(self._X_test_norm[:, iInput],ref_data_norm[:, iVar],'k.')
-                    axs[iInput].plot(self._X_test_norm[:, iInput], pred_data_norm[:, iVar], 'r.')
-                    axs[iInput].grid()
-                    axs[iInput].set_title(self._train_vars[iVar])
-                    axs[iInput].set_xlabel(self._controlling_vars[iInput])
+                    ax = axs[iInput]
                 else:
-                    axs[iVar, iInput].plot(self._X_test_norm[:, iInput],ref_data_norm[:, iVar],'k.')
-                    axs[iVar, iInput].plot(self._X_test_norm[:, iInput], pred_data_norm[:, iVar], 'r.')
-                    axs[iVar, iInput].grid()
-                    axs[iVar, iInput].set_title(self._train_vars[iVar])
-                    axs[iVar, iInput].set_xlabel(self._controlling_vars[iInput])
-        fig.savefig(self._save_dir + "/Model_"+str(self._model_index) + "/Predict_along_CVs.pdf", format='pdf', bbox_inches='tight')
+                    ax = axs[iVar, iInput]
+                ax.plot(self._X_test_norm[:, iInput],ref_data_norm[:, iVar],'k.')
+                ax.plot(self._X_test_norm[:, iInput], pred_data_norm[:, iVar], 'r.')
+                ax.grid()
+                ax.set_title(self._train_vars[iVar])
+                ax.set_xlabel(self._controlling_vars[iInput])
+        fig.savefig(self._save_dir + "/Model_"+str(self._model_index) + "/Predict_along_CVs."+self._figformat, format=self._figformat, bbox_inches='tight')
         plt.close(fig)
         return 
     
@@ -470,14 +465,9 @@ class MLPTrainer:
         with a feature range of 0-1.
         """
 
-        MLPData_filepath = self._filedata_train
-        
-        if self._verbose > 0:
-            print("Reading train, test, and validation data...")
-        X_full, Y_full = GetReferenceData(MLPData_filepath + "_full.csv", self._controlling_vars, self._train_vars)
-        
-        self.scaler_function_x.fit(X_full)
-        self.scaler_function_y.fit(Y_full)
+        self._X_train_norm, self._X_test_norm, self._X_val_norm,\
+        self._Y_train_norm, self._Y_test_norm, self._Y_val_norm = self.GetTrainTestValData()
+
         self._X_scale = self.scaler_function_x.scale_
         self._Y_scale = self.scaler_function_y.scale_
         if self.scaler_function_name == "standard":
@@ -492,27 +482,7 @@ class MLPTrainer:
             
             self._X_offset = -self.scaler_function_x.min_ / self.scaler_function_x.scale_
             self._Y_offset = -self.scaler_function_y.min_ / self.scaler_function_y.scale_
-
-        # Free up memory
-        del X_full
-        del Y_full
-
-        self._X_train, self._Y_train = GetReferenceData(MLPData_filepath + "_train.csv", self._controlling_vars, self._train_vars)
-        self._X_test, self._Y_test = GetReferenceData(MLPData_filepath + "_test.csv", self._controlling_vars, self._train_vars)
-        self._X_val, self._Y_val = GetReferenceData(MLPData_filepath + "_val.csv", self._controlling_vars, self._train_vars)
-        if self._verbose > 0:
-            print("Done!")
-
-
-        # Normalize train, test, and validation controlling variables
-        self._X_train_norm = self.scaler_function_x.transform(self._X_train)
-        self._X_test_norm = self.scaler_function_x.transform(self._X_test)
-        self._X_val_norm = self.scaler_function_x.transform(self._X_val)
-
-        # Normalize train, test, and validation data
-        self._Y_train_norm = self.scaler_function_y.transform(self._Y_train)
-        self._Y_test_norm = self.scaler_function_y.transform(self._Y_test)
-        self._Y_val_norm = self.scaler_function_y.transform(self._Y_val)
+        
 
         self._Np_train = np.shape(self._X_train_norm)[0]
         self._Np_test = np.shape(self._X_test_norm)[0]
@@ -520,7 +490,57 @@ class MLPTrainer:
         
         return 
     
-    
+    def GetTrainTestValData(self, x_vars:list[str]=None, y_vars:list[str]=None, scaler_x=None, scaler_y=None):
+
+        if x_vars == None:
+            x_vars = [c for c in self._controlling_vars]
+            scaler_x = self.scaler_function_x
+        if y_vars == None:
+            y_vars = [c for c in self._train_vars]
+            scaler_y = self.scaler_function_y
+
+        MLPData_filepath = self._filedata_train
+        
+        is_nullMLP = ("null" in y_vars)
+        
+        if self._verbose > 0:
+            print("Reading train, test, and validation data...")
+        
+        if is_nullMLP:
+            X_full, _ = GetReferenceData(MLPData_filepath + "_full.csv", x_vars, [])
+            Y_full = np.zeros(np.shape(X_full)[0])
+        else:
+            X_full, Y_full = GetReferenceData(MLPData_filepath + "_full.csv", x_vars, y_vars)
+        
+        scaler_x.fit(X_full)
+        scaler_y.fit(Y_full)
+        
+        # Free up memory
+        del X_full
+        del Y_full
+
+        if is_nullMLP:
+            return 
+        else:
+            X_train, Y_train = GetReferenceData(MLPData_filepath + "_train.csv", x_vars, y_vars)
+            X_test, Y_test = GetReferenceData(MLPData_filepath + "_test.csv", x_vars, y_vars)
+            X_val, Y_val = GetReferenceData(MLPData_filepath + "_val.csv",x_vars, y_vars)
+            if self._verbose > 0:
+                print("Done!")
+
+
+            # Normalize train, test, and validation controlling variables
+            X_train_norm = scaler_x.transform(X_train)
+            X_test_norm = scaler_x.transform(X_test)
+            X_val_norm = scaler_x.transform(X_val)
+
+            # Normalize train, test, and validation data
+            Y_train_norm = scaler_y.transform(Y_train)
+            Y_test_norm = scaler_y.transform(Y_test)
+            Y_val_norm = scaler_y.transform(Y_val)
+
+            return X_train_norm, X_test_norm, X_val_norm, Y_train_norm, Y_test_norm, Y_val_norm
+        
     def write_SU2_MLP(self, file_out:str):
         """Write the network to ASCII format readable by the MLPCpp module in SU2.
 
@@ -613,9 +633,9 @@ class MLPTrainer:
         fid.write("Validation score: %+.16e\n" % self._test_score)
         fid.write("Total neuron count:  %i\n" % np.sum(np.array(self._hidden_layers)))
         fid.write("Evaluation time[seconds]: %+.3e\n" % (self._test_time))
-        fid.write("Evaluation cost parameter: %+.3e\n" % (self._cost_parameter))
-        fid.write("Alpha exponent: %+.4e\n" % self._alpha_expo)
-        fid.write("Learning rate decay: %+.4e\n" % self._lr_decay)
+        fid.write("Evaluation cost parameter: %+.6e\n" % (self._cost_parameter))
+        fid.write("Alpha exponent: %+.16e\n" % self._alpha_expo)
+        fid.write("Learning rate decay: %+.16e\n" % self._lr_decay)
         fid.write("Batch size exponent: %i\n" % self._batch_expo)
         fid.write("Decay steps: %i\n" % self._decay_steps)
         fid.write("Activation function index: %i\n" % self._i_activation_function)
@@ -635,7 +655,7 @@ class MLPTrainer:
             plt.plot((i+1)*np.ones(int(self._hidden_layers[i])), np.arange(int(self._hidden_layers[i])) - 0.5*self._hidden_layers[i], 'ko')
         plt.plot((i+2)*np.ones(len(self._train_vars)), np.arange(len(self._train_vars)) - 0.5*len(self._train_vars), 'go')
         plt.axis('equal')
-        fig.savefig(self._save_dir +"/Model_"+str(self._model_index) + "/architecture.png",format='png', bbox_inches='tight')
+        fig.savefig(self._save_dir +"/Model_"+str(self._model_index) + "/architecture."+self._figformat,format=self._figformat, bbox_inches='tight')
         plt.close(fig)
         return 
     
@@ -750,7 +770,7 @@ class TensorFlowFit(MLPTrainer):
             self.SaveWeights()
 
         self._cost_parameter = 0
-        for w in self._trimmed_weights:
+        for w in self._weights:
             self._cost_parameter += np.shape(w)[0] * np.shape(w)[1]
         return 
 
@@ -774,7 +794,7 @@ class TensorFlowFit(MLPTrainer):
         ax.set_ylabel(r"Training loss function [-]", fontsize=20)
         ax.set_title(r"Direct Training History", fontsize=22)
         ax.tick_params(axis='both', which='major', labelsize=18)
-        fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+ "/History_Plot_Direct.png", format='png', bbox_inches='tight')
+        fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+ "/History_Plot_Direct."+self._figformat, format=self._figformat, bbox_inches='tight')
         plt.close(fig)
         return 
         
@@ -803,7 +823,6 @@ class CustomTrainer(MLPTrainer):
     _optimizer = None   # optimization algorithm used to adjust the MLP hyper-parameters during training.
     _lr_schedule = None # learning rate decay schedule.
     _train_name:str = ""    # MLP network name.
-    _figformat:str="pdf"    # format for which intermediate plots are saved.
 
     # Training stagnation parameters.
     __keep_training:bool = True 
@@ -937,16 +956,18 @@ class CustomTrainer(MLPTrainer):
     @tf.function 
     def TrainingLoss_error(self, x_norm:tf.constant, y_label_norm:tf.constant):
         pred_error_outputs = self.Compute_Direct_Error(x_norm, y_label_norm)
-        return tf.reduce_mean(pred_error_outputs)
+        mean_pred_error = tf.reduce_mean(pred_error_outputs)
+        return mean_pred_error 
     
     @tf.function
     def ComputeGradients_Direct_Error(self, x_norm:tf.constant, y_label_norm:tf.constant):
         with tf.GradientTape() as tape:
             tape.watch(self._trainable_hyperparams)
             y_norm_loss = self.TrainingLoss_error(x_norm, y_label_norm)
-            grads_loss = tape.gradient(y_norm_loss, self._trainable_hyperparams)
+            total_loss = y_norm_loss
+            grads_loss = tape.gradient(total_loss, self._trainable_hyperparams)
             
-        return y_norm_loss, grads_loss
+        return total_loss, grads_loss
     
     @tf.function
     def ComputeJacobian_Direct_Error(self, x_norm, y_label_norm):
@@ -966,13 +987,9 @@ class CustomTrainer(MLPTrainer):
     def Train_MLP(self):
         """Commence network training.
         """
-        # prepare trainer start
         self.Preprocessing()
-        # prepare trainer end 
 
-        # loop epochs start
         self.LoopEpochs()
-        # loop epochs end 
 
         self.PostProcessing()
         return 
@@ -1011,29 +1028,28 @@ class CustomTrainer(MLPTrainer):
     def LoopEpochs(self):
         t_start = time.time()
         worst_error = 1e32
-        i = 0
+        self._i_epoch = 0
         train_batches = self.SetTrainBatches()
-        while (i < self._n_epochs) and self.__keep_training:
-            #train_batches_shuffled = self.SetTrainBatches()
+        while (self._i_epoch < self._n_epochs) and self.__keep_training:
             self.LoopBatches(train_batches=train_batches)
 
             val_loss = self.ValidationLoss()
             
-            if (i + 1) % self.callback_every == 0:
+            if (self._i_epoch + 1) % self.callback_every == 0:
                 self.TestLoss()
                 self.CustomCallback()
             
             worst_error = self.__CheckEarlyStopping(val_loss, worst_error)
 
-            self.PrintEpochInfo(i, val_loss)
-            i += 1
+            self.PrintEpochInfo(self._i_epoch, val_loss)
+            self._i_epoch += 1
         t_end = time.time()
         self._train_time = (t_end - t_start)/60
         return 
     
     def PrintEpochInfo(self, i_epoch, val_loss):
         if self._verbose > 0:
-                print("Epoch: ", str(i_epoch), " Validation loss: ", ", ".join("%.8e" % v.numpy() for v in val_loss))
+                print("Epoch: ", str(i_epoch), " Validation loss: ", ", ".join("%s : %.8e" % (s, v.numpy()) for s, v in zip(self._train_vars, val_loss)))
         return 
     
     def LoopBatches(self, train_batches):
@@ -1065,10 +1081,6 @@ class CustomTrainer(MLPTrainer):
         """Plot the training convergence trends.
         """
 
-        # with open(self._save_dir + "/Model_"+str(self._model_index)+"/TrainingHistory.csv", "w+") as fid:
-        #     fid.write("epoch,loss,validation_loss\n")
-        #     csvWriter = csv.writer(fid, delimiter=',')
-        #     csvWriter.writerows(np.array([self.history_epochs, self.history_val_loss]).T)
         if vars == None:
             vars_to_plot=self._train_vars 
         else:
@@ -1076,11 +1088,9 @@ class CustomTrainer(MLPTrainer):
 
         fig = plt.figure(figsize=[10,10])
         ax = plt.axes()
-        #ax.plot(np.log10(self.history.history['loss']), 'b', label=r'Training score')
         H = np.array(self.val_loss_history)
         for i in range(len(vars_to_plot)):
             ax.plot(H[i,:], label=r"Validation score "+vars_to_plot[i])
-        #ax.plot([0, np.log10(self.history_val_loss)], [np.log10(self._test_score), np.log10(self._test_score)], 'm--', label=r"Test score")
         ax.grid()
         ax.set_yscale('log')
         ax.legend(fontsize=20)
@@ -1097,7 +1107,6 @@ class CustomTrainer(MLPTrainer):
             H_concat = np.vstack((epochs, H)).T 
             csvWriter = csv.writer(fid, delimiter=',')
             csvWriter.writerows(H_concat)
-
 
         return 
     
@@ -1125,14 +1134,9 @@ class CustomTrainer(MLPTrainer):
 class PhysicsInformedTrainer(CustomTrainer):
 
     _Y_state_full:np.ndarray 
-    _Y_state_train:np.ndarray
     _Y_state_train_norm:np.ndarray 
-    _Y_state_test:np.ndarray
     _Y_state_test_norm:np.ndarray
-    _Y_state_val:np.ndarray
     _Y_state_val_norm:np.ndarray 
-    _Y_state_max:np.ndarray 
-    _Y_state_min:np.ndarray
 
     _scaler_state = RobustScaler()
     _Y_state_scale:np.ndarray = None 
@@ -1155,30 +1159,31 @@ class PhysicsInformedTrainer(CustomTrainer):
         with a feature range of 0-1.
         """
 
-        MLPData_filepath = self._filedata_train
+        _, _, _, self._Y_state_train_norm, \
+            self._Y_state_test_norm, self._Y_state_val_norm = self.GetTrainTestValData(self._controlling_vars, \
+                                                                                       self._state_vars, \
+                                                                                       self.scaler_function_x, \
+                                                                                       self._scaler_state)
         
-        _, State_full = GetReferenceData(MLPData_filepath + "_full.csv", self._controlling_vars, self._state_vars)
-        
-        self._scaler_state.fit(State_full)
         self._Y_state_scale = self._scaler_state.scale_
-        try:
-            self._Y_state_offset = self._scaler_state.min_ 
-        except:
+        if self.scaler_function_name == "standard":
+            self._Y_state_offset = self._scaler_state.mean_
+        elif self.scaler_function_name == "robust":
             self._Y_state_offset = self._scaler_state.center_ 
-        _, self._Y_state_train = GetReferenceData(MLPData_filepath + "_train.csv", self._controlling_vars, self._state_vars)
-        _, self._Y_state_test = GetReferenceData(MLPData_filepath + "_test.csv", self._controlling_vars, self._state_vars)
-        _, self._Y_state_val = GetReferenceData(MLPData_filepath + "_val.csv", self._controlling_vars, self._state_vars)
-
-        del State_full
-
-        self._Y_state_train_norm = self._scaler_state.transform(self._Y_state_train)#(self._Y_state_train - self._Y_state_min)/(self._Y_state_max-self._Y_state_min)
-        self._Y_state_test_norm = self._scaler_state.transform(self._Y_state_test)#(self._Y_state_test - self._Y_state_min)/(self._Y_state_max-self._Y_state_min)
-        self._Y_state_val_norm = self._scaler_state.transform(self._Y_state_val)#(self._Y_state_val - self._Y_state_min)/(self._Y_state_max-self._Y_state_min)
+        elif self.scaler_function_name == "minmax":  
+            self._Y_satate_scale = 1 / self._scaler_state.scale_
+            
+            self._Y_state_offset = -self._scaler_state.min_ / self._scaler_state.scale_
         
         return 
     
     def PreprocessPINNVars(self):
         
+        return 
+    
+    def SetScaler(self, scaler_function: str = "robust"):
+        super().SetScaler(scaler_function)
+        self._scaler_state = scaler_functions[scaler_function]()
         return 
     
     def GetTrainData(self):
@@ -1228,31 +1233,13 @@ class PhysicsInformedTrainer(CustomTrainer):
             mean_grad_ub += val_lambda_old * tf.reduce_mean(tf.abs(g_ub))
         mean_grad_ub /= len(self._weights)
 
-        # max_grad_ub = 0.0
-        # for g in grads_ub:
-        #     max_grad_ub = tf.maximum(max_grad_ub, val_lambda_old*tf.reduce_max(tf.abs(g)))
-        
         lambda_prime = max_grad_direct / (mean_grad_ub + 1e-32)
         lambda_prime_scaled = tf.maximum(tf.minimum(lambda_prime, self.lambda_max), self.lambda_min)
         val_lambda_new = 0.9 * val_lambda_old + 0.1 * lambda_prime_scaled
+        if tf.math.is_nan(val_lambda_new):
+            val_lambda_new = 1.0
         return val_lambda_new
 
-    @tf.function
-    def update_lambda_mean(self, grads_direct, grads_ub, val_lambda_old):
-        mean_grad_direct = 0.0
-        for g in grads_direct:
-            mean_grad_direct += tf.reduce_mean(tf.abs(g))
-        mean_grad_direct /= len(grads_direct)
-
-        mean_grad_ub = 0.0
-        for g_ub in grads_ub:
-            mean_grad_ub += tf.reduce_mean(tf.abs(g_ub))
-        mean_grad_ub /= len(grads_ub)
-
-        lambda_prime = mean_grad_direct / (mean_grad_ub + 1e-32)
-        lambda_prime_scaled = tf.maximum(tf.minimum(lambda_prime, self.lambda_max), self.lambda_min)
-        val_lambda_new = 0.1 * val_lambda_old + 0.9 * lambda_prime_scaled
-        return val_lambda_new
     
 class EvaluateArchitecture:
     """Class for training MLP architectures
@@ -1280,6 +1267,9 @@ class EvaluateArchitecture:
 
     _train_file_header:str = None 
     main_save_dir:str = "./"
+
+    _fig_format:str = "png"
+    _scaler:str = "robust"
 
     def __init__(self, Config_in:Config):
         """Define EvaluateArchitecture instance and prepare MLP trainer with
@@ -1327,7 +1317,8 @@ class EvaluateArchitecture:
         self._trainer_direct.SetHiddenLayers(self.architecture)
         self._trainer_direct.SetTrainFileHeader(self._train_file_header)
         self._trainer_direct.SetVerbose(self.verbose)
-
+        self._trainer_direct.SetFigFormat(self._fig_format)
+        self._trainer_direct.SetScaler(self._scaler)
         return 
     
     def SetSaveDir(self, save_dir:str):
@@ -1523,3 +1514,14 @@ class EvaluateArchitecture:
         self.SynchronizeTrainer()
 
         return                
+    
+    def SetFigFormat(self, fig_format:str="png"):
+        self._fig_format = fig_format
+        return 
+    
+    def SetScaler(self, scaler_name:str="robust"):
+        if scaler_name not in scaler_functions.keys():
+            raise Exception("Input-output scaler function should be one of the following: "+",".join(s for s in scaler_functions.keys()))
+        self._trainer_direct.SetScaler(scaler_name)
+        return 
+    
