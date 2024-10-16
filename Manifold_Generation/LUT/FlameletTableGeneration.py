@@ -35,7 +35,6 @@ import cantera as ct
 import gmsh 
 import pickle
 from multiprocessing import Pool 
-from sklearn.metrics import mean_squared_error
 from Common.Interpolators import Invdisttree 
 from random import sample 
 
@@ -157,7 +156,7 @@ class SU2TableGenerator_Base:
         for i in tqdm(range(len(n_near_range))):
             for j in range(len(p_range)):
                 PPV_predicted = self._lookup_tree(q=CV_test_scaled, nnear=n_near_range[i], p=p_range[j])
-                rms_local = mean_squared_error(y_true=D_test_scaled, y_pred=PPV_predicted)
+                rms_local = np.average(np.power(PPV_predicted - D_test_scaled, 2))
                 RMS_ppv[i,j] = rms_local 
         [imin,jmin] = divmod(RMS_ppv.argmin(), RMS_ppv.shape[1])
         self._n_near = n_near_range[imin]
@@ -238,7 +237,9 @@ class SU2TableGenerator:
 
         if n_near and p_fac:
             self._custom_KDtreeparams = True
-
+            self._n_near = n_near
+            self._p_fac = p_fac
+            
         if load_file:
             # Load an existing TableGenerator object.
             with open(load_file, "rb") as fid:
@@ -402,13 +403,13 @@ class SU2TableGenerator:
         if not self._custom_KDtreeparams:
             print("Search for best tree parameters...")
             # Do brute-force search to get the optimum number of nearest neighbors and distance power.
-            n_near_range = range(1, 20)
+            n_near_range = range(1, 25)
             p_range = range(1, 6)
             RMS_ppv = np.zeros([len(n_near_range), len(p_range)])
             for i in tqdm(range(len(n_near_range))):
                 for j in range(len(p_range)):
                     PPV_predicted = self._lookup_tree(q=CV_test_scaled, nnear=n_near_range[i], p=p_range[j])[:, self._Flamelet_Variables.index(var_to_test_for)]
-                    rms_local = mean_squared_error(y_true=PPV_test, y_pred=PPV_predicted)
+                    rms_local = np.average(np.power(PPV_predicted - PPV_test, 2))
                     RMS_ppv[i,j] = rms_local 
             [imin,jmin] = divmod(RMS_ppv.argmin(), RMS_ppv.shape[1])
             self._n_near = n_near_range[imin]
@@ -680,7 +681,7 @@ class SU2TableGenerator:
         h_max = self._Config.gas.enthalpy_mass
 
         # Equilibrate at constant enthalpy to get product progress variable value.
-        self._Config.gas.equilibrate("HP")
+        self._Config.gas.equilibrate("TP")
         pv_b = self._Config.ComputeProgressVariable(variables=None, flamelet_data=None, Y_flamelet=self._Config.gas.Y[:,np.newaxis])[0]
         
         # Define minimum enthalpy as the product enthalpy cooled to minimum reactant temperature.
