@@ -10,5 +10,8 @@ Concat = FlameletConcatenator(Config)
 Concat.SetAuxilarySpecies(["H2"])
 Concat.SetLookUpVars(["Heat_Release"])
 
+# Apply source term and chemical equilibrium data corrections for table generation.
+Concat.WriteLUTData(True)
+
 # Read and concatenate flamelet data
 Concat.ConcatenateFlameletData()
