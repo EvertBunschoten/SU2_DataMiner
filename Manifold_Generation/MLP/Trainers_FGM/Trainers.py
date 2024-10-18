@@ -741,13 +741,13 @@ class NullMLP(CustomTrainer):
 
         # Store controlling variables and null variable as output.
         self._controlling_vars = self.__Config.GetControllingVariables()
-        self._train_vars = ["null"]
+        self._train_vars = ["NULL"]
         
         # Define simple hidden layer architecture with default activation function.
         self._hidden_layers = [len(self._controlling_vars)]
         self.SetActivationFunction("linear")
 
-        self._train_name = "null"
+        self._train_name = "NULL"
 
         return 
     
@@ -872,9 +872,11 @@ class EvaluateArchitecture_FGM(EvaluateArchitecture):
             self.__kind_trainer = "physicsinformed"
             self.__trainer_PINN = Train_FGM_PINN(Config_in=self.__Config,group_idx=self.__output_group)
             self._trainer_direct = self.__trainer_PINN
+            print("Using physics-informed trainer.")
         else:
             self._trainer_direct = Train_Flamelet_Direct(Config_in=self.__Config, group_idx=self.__output_group)
             self.__kind_trainer = "direct"
+            print("Using direct trainer.")
         return 
     
     def SetBoundaryDataFile(self, boundary_data_file:str):
