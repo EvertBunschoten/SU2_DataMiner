@@ -477,11 +477,11 @@ class MLPTrainer:
             self._X_offset = self.scaler_function_x.center_
             self._Y_offset = self.scaler_function_y.center_ 
         elif self.scaler_function_name == "minmax":  
-            self._X_scale = 1 / self.scaler_function_x.scale_
-            self._Y_scale = 1 / self.scaler_function_y.scale_
+            self._X_scale = self.scaler_function_x.data_max_ - self.scaler_function_x.data_min_
+            self._Y_scale = self.scaler_function_y.data_max_ - self.scaler_function_y.data_min_
             
-            self._X_offset = -self.scaler_function_x.min_ / self.scaler_function_x.scale_
-            self._Y_offset = -self.scaler_function_y.min_ / self.scaler_function_y.scale_
+            self._X_offset = - self.scaler_function_x.data_min_#-self.scaler_function_x.min_ / self.scaler_function_x.scale_
+            self._Y_offset = - self.scaler_function_y.data_min_#-self.scaler_function_y.min_ / self.scaler_function_y.scale_
         
 
         self._Np_train = np.shape(self._X_train_norm)[0]
@@ -585,17 +585,27 @@ class MLPTrainer:
         for input in self._controlling_vars:
                 fid.write(input + '\n')
         
+        fid.write('\n[input regularization method]\n%s\n' % self.scaler_function_name)
+
         fid.write('\n[input normalization]\n')
         for i in range(len(self._controlling_vars)):
-            fid.write('%+.16e\t%+.16e\n' % (self._X_offset[i], self._X_scale[i] + self._X_offset[i]))
+            if self.scaler_function_name == "minmax":
+                fid.write('%+.16e\t%+.16e\n' % (self.scaler_function_x.data_min_[i], self.scaler_function_x.data_max_[i]))
+            else:
+                fid.write('%+.16e\t%+.16e\n' % (self._X_offset[i], self._X_scale[i]))
 
         fid.write('\n[output names]\n')
         for output in self._train_vars:
             fid.write(output+'\n')
-            
+        
+        fid.write('\n[output regularization method]\n%s\n' % self.scaler_function_name)
+
         fid.write('\n[output normalization]\n')
         for i in range(len(self._train_vars)):
-            fid.write('%+.16e\t%+.16e\n' % (self._Y_offset[i], self._Y_scale[i] + self._Y_offset[i]))
+            if self.scaler_function_name == "minmax":
+                fid.write('%+.16e\t%+.16e\n' % (self.scaler_function_y.data_min_[i], self.scaler_function_y.data_max_[i]))
+            else:
+                fid.write('%+.16e\t%+.16e\n' % (self._Y_offset[i], self._Y_scale[i]))
 
         fid.write("\n</header>\n")
         # Writing the weights of each layer
@@ -1522,6 +1532,7 @@ class EvaluateArchitecture:
     def SetScaler(self, scaler_name:str="robust"):
         if scaler_name not in scaler_functions.keys():
             raise Exception("Input-output scaler function should be one of the following: "+",".join(s for s in scaler_functions.keys()))
+        self._scaler = scaler_name
         self._trainer_direct.SetScaler(scaler_name)
         return 
     
