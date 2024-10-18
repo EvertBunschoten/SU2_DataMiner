@@ -33,6 +33,9 @@ Config = FlameletAIConfig("Hydrogen_PINNs.cfg")
 # Initiate flamelet data concatenator
 Concat = FlameletConcatenator(Config)
 
+# Reduce number of points per flamelet to speed up training
+Concat.SetNFlameletNodes(2**Config.GetBatchExpo())
+
 # Include H2O reaction rates and heat release in flamelet data set 
 Concat.SetAuxilarySpecies(["H2O"])
 Concat.SetLookUpVars(["Heat_Release"])
