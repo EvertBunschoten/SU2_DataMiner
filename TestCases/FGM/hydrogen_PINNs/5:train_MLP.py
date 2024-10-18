@@ -32,5 +32,6 @@ Config = FlameletAIConfig("Hydrogen_PINNs.cfg")
 # For every output group, train an MLP
 for iGroup in range(Config.GetNMLPOutputGroups()):
     Eval = EvaluateArchitecture_FGM(Config, iGroup)
+    Eval.SetVerbose(1)
     Eval.CommenceTraining()
     
