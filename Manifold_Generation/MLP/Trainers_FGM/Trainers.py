@@ -356,12 +356,12 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
                 self.target_arrays.append(target_grad)
                 self.vals_lambda.append(val_lambda_default)  
             
-            # if (var == "Beta_Enth"):
-            #     self.idx_PIvar.append(ivar)
-            #     proj_array, target_grad = self.SetBeta_h2_projection()
-            #     self.projection_arrays.append(proj_array)
-            #     self.target_arrays.append(target_grad)
-            #     self.vals_lambda.append(val_lambda_default)
+            if (var == "Beta_Enth"):
+                self.idx_PIvar.append(ivar)
+                proj_array, target_grad = self.SetBeta_h2_projection()
+                self.projection_arrays.append(proj_array)
+                self.target_arrays.append(target_grad)
+                self.vals_lambda.append(val_lambda_default)
 
         self._N_bc = len(self.vals_lambda) 
         return 
@@ -464,7 +464,7 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         y_pred_norm, dy_pred_norm = self.ComputeFirstOrderDerivatives(x_norm_boundary, self.idx_PIvar[iVar])
 
         # Project Jacobian along boundary data according to penalty function.
-        project_dy_pred_norm = tf.norm(tf.multiply(precon_gradient[:,:,iVar], dy_pred_norm), axis=1)
+        project_dy_pred_norm = tf.reduce_sum(tf.multiply(precon_gradient[:,:,iVar], dy_pred_norm), axis=1)
 
         # Compute direct and Neumann penalty values.
         penalty_direct = tf.pow(y_pred_norm[:,self.idx_PIvar[iVar]] - y_norm_boundary_target[:,iVar], 2)
@@ -815,7 +815,7 @@ class EvaluateArchitecture_FGM(EvaluateArchitecture):
     __kind_trainer:str = "direct"   # Kind of training process (direct of physicsinformed).
 
     # List of variables that will trigger the use of physics-informed training when any are present in the MLP output group.
-    __PINN_variables:list[str] = ["Temperature", "ProdRateTot_PV", "Heat_Release", "Beta_ProgVar", "Beta_MixFrac"]
+    __PINN_variables:list[str] = ["Temperature", "ProdRateTot_PV", "Heat_Release", "Beta_ProgVar", "Beta_MixFrac","Beta_Enth"]
 
     def __init__(self, Config:FlameletAIConfig, group_idx:int=0):
         """Define EvaluateArchitecture instance and prepare MLP trainer with
