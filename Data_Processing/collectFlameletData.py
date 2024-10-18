@@ -100,6 +100,8 @@ class FlameletConcatenator:
     __include_counterflame = False 
     __include_fuzzy = False
 
+    __write_LUT_data:bool = False   # Apply source term and equilibrium data corrections for table data preparations.
+
     __verbose:int=1
 
     def __init__(self, Config:FlameletAIConfig,verbose_level:int=1):
@@ -143,6 +145,13 @@ class FlameletConcatenator:
     def IgnoreMixtureBounds(self, ignore_bounds:bool=False):
         self.__ignore_mixture_bounds = ignore_bounds
         return 
+    
+    def WriteLUTData(self, write_LUT_data:bool=False):
+        """Apply corrections to chemical equilibrium data and source terms in order to ensure boundary
+        correctness for table generation.
+        """
+        self.__write_LUT_data = write_LUT_data
+        return
     
     def SetNFlameletNodes(self, Np_per_flamelet:int):
         """Manually define the number of data points per flamelet to be included in the manifold.
@@ -620,7 +629,7 @@ class FlameletConcatenator:
             fid.close()
 
             # Load flamelet data
-            if is_equilibrium:
+            if is_equilibrium and self.__write_LUT_data:
                 D = np.loadtxt(flamelet_dir + "/" + eq_file + "/" + f, delimiter=',',skiprows=1,max_rows=1)[np.newaxis, :]
             else:
                 D = np.loadtxt(flamelet_dir + "/" + eq_file + "/" + f, delimiter=',',skiprows=1)
@@ -647,13 +656,21 @@ class FlameletConcatenator:
                 is_valid_flamelet = False
 
             if is_valid_flamelet:
-                S_flamelet_norm = S_flamelet / (max(S_flamelet))
+                S_flamelet_norm = S_flamelet / (max(S_flamelet)+1e-32)
 
                 T_flamelet = D[:, variables.index("Temperature")]
                 if np.max(T_flamelet) < DefaultSettings_FGM.T_threshold:
                     BurningFlamelet = False 
 
                 sourceterm_zero_line_numbers = [0, -1]
+
+                if self.__write_LUT_data:
+                    # Set source terms to zero near the start and end of the flamelet.
+                    temp_margin = 2e-2
+                    T_max, T_min = np.max(T_flamelet), np.min(T_flamelet)
+                    deltaT = temp_margin*(T_max - T_min)
+                    sourceterm_zero_line_numbers = np.logical_or((T_flamelet - T_min) < deltaT,\
+                                                                 ((T_max - T_flamelet) < deltaT))
 
                 # Load flamelet thermophysical property data
                 TD_data = np.zeros([len(D), len(self.__TD_train_vars)])
@@ -732,25 +749,36 @@ class FlameletConcatenator:
                         sources_sampled = Sources_data[samples, :]
                     else:
                         # Define query controlling variable range
-                        S_q = 0.5 - 0.5*np.cos(np.linspace(0, np.pi, self.__Np_per_flamelet))
-                        CV_sampled = np.zeros([self.__Np_per_flamelet, np.shape(CV_flamelet)[1]])
-                        TD_sampled = np.zeros([self.__Np_per_flamelet, np.shape(TD_data)[1]])
-                        if self.__Config.PreferentialDiffusion():
-                            PD_sampled = np.zeros([self.__Np_per_flamelet, np.shape(PD_data)[1]])
-                        lookup_sampled = np.zeros([self.__Np_per_flamelet, np.shape(LookUp_data)[1]])
-                        sources_sampled = np.zeros([self.__Np_per_flamelet, 1 + 3*len(self.__Species_in_FGM)])
-                        for i_CV in range(self.__N_control_vars):
-                            CV_sampled[:, i_CV] = np.interp(S_q, S_flamelet_norm, CV_flamelet[:, i_CV])
-                        for iVar_TD in range(len(self.__TD_train_vars)):
-                            TD_sampled[:, iVar_TD] = np.interp(S_q, S_flamelet_norm, TD_data[:, iVar_TD])
-                        if self.__Config.PreferentialDiffusion():
-                            for iVar_PD in range(len(self.__PD_train_vars)):
-                                PD_sampled[:, iVar_PD] = np.interp(S_q, S_flamelet_norm, PD_data[:, iVar_PD])
+                        if is_equilibrium and self.__write_LUT_data:
+                            CV_sampled = CV_flamelet*np.ones([self.__Np_per_flamelet, np.shape(CV_flamelet)[1]])
+                            TD_sampled = TD_data*np.ones([self.__Np_per_flamelet, np.shape(CV_flamelet)[1]])
+                            if self.__Config.PreferentialDiffusion():
+                                PD_sampled = PD_data*np.ones([self.__Np_per_flamelet, np.shape(CV_flamelet)[1]])
+                            lookup_sampled = LookUp_data*np.ones([self.__Np_per_flamelet, np.shape(CV_flamelet)[1]])
+                            sources_sampled = np.zeros([self.__Np_per_flamelet, 1 + 3*len(self.__Species_in_FGM)])
+                        else:
+                            if is_equilibrium:
+                                S_q = np.linspace(0, 1.0, self.__Np_per_flamelet)
+                            else:
+                                S_q = 0.5 - 0.5*np.cos(np.linspace(0, np.pi, self.__Np_per_flamelet))
+                            CV_sampled = np.zeros([self.__Np_per_flamelet, np.shape(CV_flamelet)[1]])
+                            TD_sampled = np.zeros([self.__Np_per_flamelet, np.shape(TD_data)[1]])
+                            if self.__Config.PreferentialDiffusion():
+                                PD_sampled = np.zeros([self.__Np_per_flamelet, np.shape(PD_data)[1]])
+                            lookup_sampled = np.zeros([self.__Np_per_flamelet, np.shape(LookUp_data)[1]])
+                            sources_sampled = np.zeros([self.__Np_per_flamelet, 1 + 3*len(self.__Species_in_FGM)])
+                            for i_CV in range(self.__N_control_vars):
+                                CV_sampled[:, i_CV] = np.interp(S_q, S_flamelet_norm, CV_flamelet[:, i_CV])
+                            for iVar_TD in range(len(self.__TD_train_vars)):
+                                TD_sampled[:, iVar_TD] = np.interp(S_q, S_flamelet_norm, TD_data[:, iVar_TD])
+                            if self.__Config.PreferentialDiffusion():
+                                for iVar_PD in range(len(self.__PD_train_vars)):
+                                    PD_sampled[:, iVar_PD] = np.interp(S_q, S_flamelet_norm, PD_data[:, iVar_PD])
 
-                        for iVar_LU in range(len(self.__LookUp_vars)):
-                            lookup_sampled[:, iVar_LU] = np.interp(S_q, S_flamelet_norm, LookUp_data[:, iVar_LU])
-                        for iVar_Source in range(1 + 3*len(self.__Species_in_FGM)):
-                            sources_sampled[:, iVar_Source] = np.interp(S_q, S_flamelet_norm, Sources_data[:, iVar_Source])
+                            for iVar_LU in range(len(self.__LookUp_vars)):
+                                lookup_sampled[:, iVar_LU] = np.interp(S_q, S_flamelet_norm, LookUp_data[:, iVar_LU])
+                            for iVar_Source in range(1 + 3*len(self.__Species_in_FGM)):
+                                sources_sampled[:, iVar_Source] = np.interp(S_q, S_flamelet_norm, Sources_data[:, iVar_Source])
 
                     start = (i_start + i_flamelet + i_flamelet_total) * self.__Np_per_flamelet
                     end = (i_start + i_flamelet+1+ i_flamelet_total)*self.__Np_per_flamelet
