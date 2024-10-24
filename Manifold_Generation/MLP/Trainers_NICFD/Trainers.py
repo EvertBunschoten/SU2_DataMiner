@@ -665,17 +665,13 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     def GetTrainData(self):
 
         super().GetTrainData()
+        self._rho_scale = tf.cast(self._X_scale[0], self._dt)
+        self._e_scale = tf.cast(self._X_scale[1], self._dt)
+        self._rho_offset = tf.cast(self._X_offset[0], self._dt)
         self._s_scale = tf.cast(self._Y_scale[0], self._dt)
-        self._rho_scale = tf.cast(self._X_scale[self._controlling_vars.index(DefaultSettings_NICFD.name_density)], self._dt)
-        self._e_scale = tf.cast(self._X_scale[self._controlling_vars.index(DefaultSettings_NICFD.name_energy)], self._dt)
-        self._rho_offset = tf.cast(self._X_offset[self._controlling_vars.index(DefaultSettings_NICFD.name_density)], self._dt)
+        self._s_offset = tf.cast(self._Y_offset[0], self._dt)
         self._Y_state_scale_tf = tf.cast(self._Y_state_scale, self._dt)
         self._Y_state_offset_tf = tf.cast(self._Y_state_offset, self._dt)
-        # self.__s_max, self.__s_min = self._Y_max[0], self._Y_min[0]
-
-        # self.__rho_min, self.__rho_max = self._X_min[self.__idx_rho], self._X_max[self.__idx_rho]
-        # self.__e_min, self.__e_max = self._X_min[self.__idx_e], self._X_max[self.__idx_e]
-        
         return 
     
     def SetStateVars(self, state_vars_in:list[str]):
@@ -721,11 +717,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         d2sdrho2_norm = tf.gather(d2s_norm_rho,indices=0,axis=1)
         d2sdrhode_norm = tf.gather(d2s_norm_e, indices=0, axis=1)
 
-        # s_scale = self._Y_scale[0]#self.__s_max - self.__s_min
-        # rho_scale = self._X_scale[0]#self.__rho_max - self.__rho_min
-        # e_scale = self._X_scale[1]#self.__e_max - self.__e_min
-
-        s_dim = self._s_scale * s_norm + self._Y_offset[0]
+        s_dim = self._s_scale * s_norm + self._s_offset
         dsdrho_e = tf.math.multiply((self._s_scale / self._rho_scale), dsdrho_e_norm)
         dsde_rho = tf.math.multiply((self._s_scale / self._e_scale), dsde_rho_norm)
         d2sdrho2 = tf.math.multiply((self._s_scale / tf.pow(self._rho_scale, 2)),d2sdrho2_norm)
@@ -744,18 +736,18 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         d2sdedrho = d2sdrho2e2[0][1]
         d2sde2 = d2sdrho2e2[1][1]
         T = tf.pow(dsde_rho, -1)
-        rho2 = tf.pow(rho, 2)
+        rho2 = rho*rho
         P = -rho2 * T * dsdrho_e
         blue_term = (dsdrho_e * (2 - rho * T * d2sdedrho) + rho*d2sdrho2)
         green_term = (-T * d2sde2 * dsdrho_e + d2sdedrho)
-        c2 = -rho * T * (blue_term - rho * green_term * (dsdrho_e / dsde_rho))
+        c2 = -rho *T * (blue_term - rho * green_term * (dsdrho_e / dsde_rho))
 
         dTde_rho = -T*T * d2sde2 
         dTdrho_e = -T*T * d2sdedrho 
 
         dPde_rho = -rho2 * (dTde_rho * dsdrho_e + T * d2sdedrho)
         dPdrho_e = -2 * rho * T * dsdrho_e - rho2 * (dTdrho_e * dsdrho_e + T * d2sdrho2)
-        dhdrho_e = -P * tf.pow(rho, -2) + dPdrho_e / rho
+        dhdrho_e = -P * (1.0/rho2) + dPdrho_e / rho
         dhde_rho = 1 + dPde_rho / rho
 
         dhdrho_P = dhdrho_e - dhde_rho * (1 / dPde_rho) * dPdrho_e
@@ -770,10 +762,8 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     @tf.function 
     def TD_Evaluation(self, rhoe_norm:tf.Tensor):
         s, dsdrhoe, d2sdrho2e2 = self.ComputeEntropyGradients(rhoe_norm)
-        # rhoe_dim = self.scaler_function_x.inverse_transform(rhoe_norm)
-        # rho_norm = tf.gather(rhoe_norm, indices=self.__idx_rho, axis=1)
-        rho = tf.gather(rhoe_norm, indices=0, axis=1) * self._rho_scale + self._rho_offset#(self.__rho_max - self.__rho_min)*rho_norm + self.__rho_min 
-        
+        rho_norm = tf.gather(rhoe_norm, indices=0, axis=1)
+        rho = self._rho_scale*rho_norm + self._rho_offset
         return self.EntropicEOS(rho, dsdrhoe, d2sdrho2e2)
     
     @tf.function
@@ -783,8 +773,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     @tf.function 
     def ComputeStateError(self, Y_state_label_norm:tf.constant, X_label_norm:tf.constant):
         Y_state_pred = self.EvaluateState(X_label_norm)
-        #Y_state_pred_norm = (Y_state_pred - self._Y_state_min)/(self._Y_state_max - self._Y_state_min)
-        Y_state_pred_norm = (Y_state_pred - self._Y_state_offset_tf)/self._Y_state_scale_tf#self._scaler_state.transform(Y_state_pred)
+        Y_state_pred_norm = (Y_state_pred - self._Y_state_offset_tf)/self._Y_state_scale_tf
         pred_error = tf.reduce_mean(tf.pow(Y_state_pred_norm - Y_state_label_norm, 2), axis=0)
         return pred_error
     
@@ -817,11 +806,12 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     @tf.function 
     def Train_Step_state(self, X_batch_norm:tf.constant, Y_batch_norm:tf.constant):
 
-        for ivar in range(len(self._state_vars)):
-            _, grads_loss = self.ComputeGradient_State_error(Y_batch_norm, X_batch_norm, ivar)
-            self._optimizer.apply_gradients(zip(grads_loss, self._trainable_hyperparams))
+        # for ivar in range(len(self._state_vars)):
+        #     _, grads_loss = self.ComputeGradient_State_error(Y_batch_norm, X_batch_norm, ivar)
+        #     self._optimizer.apply_gradients(zip(grads_loss, self._trainable_hyperparams))
 
-        state_loss, _ = self.ComputeGradients_State_error(Y_batch_norm,X_batch_norm)
+        state_loss, grads_loss = self.ComputeGradients_State_error(Y_batch_norm,X_batch_norm)
+        self._optimizer.apply_gradients(zip(grads_loss, self._trainable_hyperparams))
         return state_loss
     
     def ValidationLoss(self):
@@ -900,7 +890,6 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         Y_ref_test = self._scaler_state.inverse_transform(self._Y_state_test_norm)
         
         for var in self._state_vars:
-            print(self._save_dir + "/Model_"+str(self._model_index)+"/"+var+"_prediction."+self._figformat)
             Y_ref = Y_ref_test[:, self._state_vars.index(var)]
             Y_pred = state_test_pred[:, self._state_vars.index(var)]
             fig = plt.figure(figsize=[10,10])
@@ -1010,6 +999,7 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
         self.__trainer_PINN.SetTrainFileHeader(self._train_file_header)
         self.__trainer_PINN.SetVerbose(self.verbose)
         self.__trainer_PINN.SetFigFormat(self._fig_format)
+        self.__trainer_PINN.SetScaler(self._scaler)
         return 
     
     def CommenceTraining(self):
@@ -1018,7 +1008,6 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
 
         self.PrepareOutputDir()
         self._trainer_direct.SetMLPFileHeader("MLP_direct")
-        self._trainer_direct.SetNEpochs(100)
         self._trainer_direct.Train_MLP()
         super().TrainPostprocessing()
         

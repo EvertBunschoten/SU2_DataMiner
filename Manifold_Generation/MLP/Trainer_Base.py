@@ -468,25 +468,29 @@ class MLPTrainer:
         self._X_train_norm, self._X_test_norm, self._X_val_norm,\
         self._Y_train_norm, self._Y_test_norm, self._Y_val_norm = self.GetTrainTestValData()
 
-        self._X_scale = self.scaler_function_x.scale_
-        self._Y_scale = self.scaler_function_y.scale_
-        if self.scaler_function_name == "standard":
+        if self.scaler_function_name == "minmax":
+            X_min,X_max = self.scaler_function_x.data_min_, self.scaler_function_x.data_max_
+            Y_min,Y_max = self.scaler_function_y.data_min_, self.scaler_function_y.data_max_
+            self._X_scale = X_max - X_min 
+            self._X_offset = X_min 
+            self._Y_scale = Y_max - Y_min 
+            self._Y_offset = Y_min 
+        elif self.scaler_function_name == "robust":
+            self._X_scale = self.scaler_function_x.scale_
+            self._Y_scale = self.scaler_function_y.scale_
+            self._X_offset = self.scaler_function_x.center_
+            self._Y_offset = self.scaler_function_y.center_
+        elif self.scaler_function_name == "standard":
+            self._X_scale = self.scaler_function_x.scale_
+            self._Y_scale = self.scaler_function_y.scale_
             self._X_offset = self.scaler_function_x.mean_
             self._Y_offset = self.scaler_function_y.mean_
-        elif self.scaler_function_name == "robust":
-            self._X_offset = self.scaler_function_x.center_
-            self._Y_offset = self.scaler_function_y.center_ 
-        elif self.scaler_function_name == "minmax":  
-            self._X_scale = self.scaler_function_x.data_max_ - self.scaler_function_x.data_min_
-            self._Y_scale = self.scaler_function_y.data_max_ - self.scaler_function_y.data_min_
-            
-            self._X_offset = - self.scaler_function_x.data_min_#-self.scaler_function_x.min_ / self.scaler_function_x.scale_
-            self._Y_offset = - self.scaler_function_y.data_min_#-self.scaler_function_y.min_ / self.scaler_function_y.scale_
-        
+
 
         self._Np_train = np.shape(self._X_train_norm)[0]
         self._Np_test = np.shape(self._X_test_norm)[0]
         self._Np_val = np.shape(self._X_val_norm)[0]
+        
         
         return 
     
@@ -1174,17 +1178,17 @@ class PhysicsInformedTrainer(CustomTrainer):
                                                                                        self._state_vars, \
                                                                                        self.scaler_function_x, \
                                                                                        self._scaler_state)
-        
-        self._Y_state_scale = self._scaler_state.scale_
-        if self.scaler_function_name == "standard":
-            self._Y_state_offset = self._scaler_state.mean_
+        if self.scaler_function_name == "minmax":
+            Y_state_max, Y_state_min = self._scaler_state.data_max_, self._scaler_state.data_min_
+            self._Y_state_scale = Y_state_max - Y_state_min
+            self._Y_state_offset = Y_state_min
         elif self.scaler_function_name == "robust":
-            self._Y_state_offset = self._scaler_state.center_ 
-        elif self.scaler_function_name == "minmax":  
-            self._Y_satate_scale = 1 / self._scaler_state.scale_
-            
-            self._Y_state_offset = -self._scaler_state.min_ / self._scaler_state.scale_
-        
+            self._Y_state_scale = self._scaler_state.scale_
+            self._Y_state_offset = self._scaler_state.center_
+        elif self.scaler_function_name == "standard":
+            self._Y_state_scale = self._scaler_state.scale_
+            self._Y_state_offset = self._scaler_state.mean_
+
         return 
     
     def PreprocessPINNVars(self):
@@ -1212,7 +1216,7 @@ class PhysicsInformedTrainer(CustomTrainer):
         return 
     
     def SetTrainBatches(self):
-        train_batches = tf.data.Dataset.from_tensor_slices((self._X_train_norm, self._Y_train_norm)).batch(2**self._batch_expo)
+        train_batches = tf.data.Dataset.from_tensor_slices((self._X_train_norm, self._Y_state_train_norm)).batch(2**self._batch_expo)
         return train_batches
     
     @tf.function
