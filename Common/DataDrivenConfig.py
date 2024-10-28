@@ -546,9 +546,11 @@ class FlameletAIConfig(Config):
 
     __run_mixture_fraction:bool = DefaultSettings_FGM.run_mixture_fraction    # Define premixed status as mixture fraction (True) or as equivalence ratio (False)
     __preferential_diffusion:bool = DefaultSettings_FGM.preferential_diffusion  # Include preferential diffusion effects. 
+    __add_unb_equilibrium:bool = DefaultSettings_FGM.add_unburnt_equilibrium    # Add unburnt equilibrium data to dataset
 
     __T_unb_lower:float = DefaultSettings_FGM.T_min   # Lower bound of unburnt reactants temperature.
     __T_unb_upper:float = DefaultSettings_FGM.T_max   # Upper bound of unburnt reactants temperature.
+    __Nf_interp:float = DefaultSettings_FGM.Nf_interp
     __Np_T_unb:int = DefaultSettings_FGM.Np_temp      # Number of unburnt temperature samples between bounds.
 
     __mix_status_lower:float = DefaultSettings_FGM.eq_ratio_min  # Lower bound of premixed status
@@ -559,7 +561,6 @@ class FlameletAIConfig(Config):
     __generate_burnerflames:bool = DefaultSettings_FGM.include_burnerflames   # Generate burner-stabilized flamelets
     __generate_equilibrium:bool = DefaultSettings_FGM.include_equilibrium     # Generate chemical equilibrium data
     __generate_counterflames:bool = DefaultSettings_FGM.include_counterflames   # Generate counter-flow diffusion flamelets.
-
     __write_MATLAB_files:bool = False  # Write TableGenerator compatible flamelet files.
 
     gas:ct.Solution = None  # Cantera solution object.
@@ -717,6 +718,8 @@ class FlameletAIConfig(Config):
             print("-Chemical equilibrium data")
         if self.__generate_counterflames:
             print("-Counter-flow diffusion flamelet data")
+        if self.__add_unb_equilibrium:
+            print("-unb eq data included in flamelet data")
         print("")
 
         print("Flamelet manifold data characteristics: ")
@@ -1203,6 +1206,18 @@ class FlameletAIConfig(Config):
         """
         self.__generate_equilibrium = input
         return
+
+    def AddUnbEquilibrium(self, input):
+        """
+        Also add unburnt equilibrium points to the dataset
+
+        :param input: enable adding unburnt chemical equilibrium data.
+        :type input: bool
+
+        """
+        self.__add_unb_equilibrium = input
+        return
+
     
     def RunCounterFlames(self, input:bool=DefaultSettings_FGM.include_counterflames):
         """
@@ -1241,7 +1256,15 @@ class FlameletAIConfig(Config):
         :rtype: bool
         """
         return self.__generate_equilibrium
-    
+    def UnbEquilibrium(self):
+        """
+        Also add unburnt equilibrium points to the dataset
+
+        :param input: enable adding unburnt chemical equilibrium data.
+        :type input: bool
+
+        """
+        return self.__add_unb_equilibrium
     def GenerateCounterFlames(self):
         """
         Whether the manifold data contains counter-flow diffusion flame data.
@@ -1251,6 +1274,20 @@ class FlameletAIConfig(Config):
         """
         return self.__generate_counterflames
     
+    def AddInterpFlamelets(self, input:int=DefaultSettings_FGM.Nf_interp):
+        """
+        Set number of interpolation steps between lowest burner stabilized flame and equilibrium. None for default.
+
+        :param input: Number of interpolation steps at low enthalpy
+        :type input: int
+        :raise: Exception: If the number of divisions is lower than one.
+
+        """
+        if (input < 0):
+            raise Exception("No negative value possible. Please set Nf_interp to at least zero.")
+        else:
+            self.__Nf_interp = input 
+
     def TranslateToMatlab(self, input:bool):
         """
         Save a copy of flamelet data as MATLAB TableMaster format.

@@ -63,12 +63,13 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
     __n_flamelets:int = DefaultSettings_FGM.Np_temp       # Number of adiabatic and burner flame computations per mixture fraction
     __T_unburnt_upper:float = DefaultSettings_FGM.T_max   # Highest unburnt reactant temperature
     __T_unburnt_lower:float = DefaultSettings_FGM.T_min   # Lowest unburnt reactant temperature
+    __Nf_interp:float = DefaultSettings_FGM.Nf_interp      #Number of interpolated flamelet data
 
     __reaction_mechanism:str = DefaultSettings_FGM.reaction_mechanism   # Cantera reaction mechanism
     __transport_model:str = DefaultSettings_FGM.transport_model
 
-    __initial_grid_length:float = 1e-2  # Flamelet grid width
-    __initial_grid_Np:int = 30          # Number of initial grid nodes.
+    __initial_grid_length:float = 0.3  # Flamelet grid width
+    __initial_grid_Np:int =50          # Number of initial grid nodes.
 
     __define_equivalence_ratio:bool = not DefaultSettings_FGM.run_mixture_fraction # Define unburnt mixture via the equivalence ratio
     __unb_mixture_status:list[float] = [] 
@@ -79,6 +80,7 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
     __run_burnerflames:bool = DefaultSettings_FGM.include_burnerflames    # Run burner stabilized flame computations
     __run_equilibrium:bool = DefaultSettings_FGM.include_equilibrium    # Run chemical equilibrium computations
     __run_counterflames:bool = DefaultSettings_FGM.include_counterflames   # Run counter-flow diffusion flamelet simulations.
+    __add_unb_equilibrium:bool = DefaultSettings_FGM.add_unburnt_equilibrium #Add also unburnt equilibrium data
     __run_fuzzy:bool = False           # Add randomized data around flamelet solutions to manifold.
 
     __u_fuel:float = 1.0       # Fuel stream velocity in counter-flow diffusion flame.
@@ -124,7 +126,7 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         self.__run_burnerflames = self._Config.GenerateBurnerFlames()
         self.__run_equilibrium = self._Config.GenerateEquilibrium()
         self.__run_counterflames = self._Config.GenerateCounterFlames()
-        
+        self.__add_unb_equilibrium = self._Config.UnbEquilibrium()
         self.__PrepareOutputDirectories()
         self.__translate_to_matlab = self._Config.WriteMatlabFiles()
         if self.__translate_to_matlab:
@@ -244,6 +246,15 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         self.__run_equilibrium = input 
         return
     
+    def AddUnbEquilibrium(self, input):
+        """Include unburnt chemical equilibrium data in the manifold.
+
+        :param input: Add unburnt chemical equilibrium data.
+        :type input: bool
+        """
+        self.__add_unb_equilibrium= input 
+        return
+        
     def RunCounterFlowFlames(self, input:bool=True):
         """Include counter-flow diffusion flame data in the manifold.
 
@@ -429,7 +440,7 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
 
         # Try to solve the flamelet solution. If solution diverges, move on to next flamelet.
         try:
-            flame.solve(loglevel=0, refine_grid=True, auto=True)
+            flame.solve(loglevel=0, refine_grid=True, auto=False)
             
             # Computing mass flow rate for later burner flame evaluation
             self.m_dot_free_flame = flame.velocity[0]*flame.density[0]
@@ -498,9 +509,9 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         # Initiate burner flame object.
         burner_flame = ct.BurnerFlame(self.gas, grid=initialgrid)
         burner_flame.burner.mdot = m_dot 
-        burner_flame.set_refine_criteria(ratio=2, slope=0.025, curve=0.025)
+        burner_flame.set_refine_criteria(ratio=3, slope=0.02, curve=0.02)
         burner_flame.transport_model = self.__transport_model
-        burner_flame.solve(loglevel=0, refine_grid=True, auto=False)
+        burner_flame.solve(loglevel=0, refine_grid=True, auto=True)
 
         return burner_flame
     
@@ -545,7 +556,7 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
                 if not path.isdir(self.GetOutputDir()+'/burnerflame_data/'+folder_header+'_'+str(round(mix_status, 6))):
                     mkdir(self.GetOutputDir()+'/burnerflame_data/'+folder_header+'_'+str(round(mix_status, 6)))
                 # burnerflame_filename = "burnerflamelet_"+folder_header+str(round(mix_status,6))+"_mdot"+str(round(m_dot_next, 4))+".csv"
-                burnerflame_filename = "burnerflamelet_%s%.6f_mdot%.4f.csv" % (folder_header, mix_status, m_dot_next)
+                burnerflame_filename = "burnerflamelet_%s%.6f_mdot%.5f.csv" % (folder_header, mix_status, m_dot_next)
                 filename_plus_folder = self.GetOutputDir()+"/burnerflame_data/"+folder_header+'_'+str(round(mix_status, 6)) + "/"+burnerflame_filename
                 fid = open(filename_plus_folder, 'w+')
                 fid.write(variables + "\n")
@@ -699,7 +710,7 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         else:
             gas_eq.set_mixture_fraction(mix_status, self.__fuel_string, self.__oxidizer_string)
 
-        gas_eq.TP = max(T_range), ct.one_atm 
+        gas_eq.TP = min(T_range), ct.one_atm 
         H_max = gas_eq.enthalpy_mass
         # In case of reaction products, set the maximum enthalpy to that of the reactants at the maximum temperature.
         if burnt:
@@ -707,6 +718,7 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
             gas_eq.HP = H_max, ct.one_atm
             T_range = np.linspace(min(T_range), gas_eq.T, len(T_range))
 
+        # loop over temperature range
         for i, T in enumerate(T_range):
             
             gas_eq.TP = T, ct.one_atm
@@ -721,6 +733,30 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
             else:
                 variables, data_calc_2 = self.__SaveFlameletData(gas_eq, self.gas)
                 data_calc = np.append(data_calc, data_calc_2, axis=0)
+        if not burnt and self.__add_unb_equilibrium:
+          # now go from min. Temperature cold to min Temperature burnt
+          gas_eq.TP = min(T_range), ct.one_atm 
+          H_max = gas_eq.enthalpy_mass
+          Y_left = gas_eq.Y
+
+          # compute burnt and cooled  
+          gas_eq.equilibrate('TP')
+          Y_right = gas_eq.Y
+
+          # skip point 0
+          N = len(T_range)  
+          for i in range(0,N+1):
+            
+            ratio = float(i)/float(N)
+            Y_mix = [(1.0-ratio)*a + (ratio)*b for a,b in zip(Y_left,Y_right)]
+ 
+            gas_eq.Y = Y_mix
+            gas_eq.TP = min(T_range), ct.one_atm 
+            H_max = gas_eq.enthalpy_mass
+            variables, data_calc_2 = self.__SaveFlameletData(gas_eq, self.gas)
+            data_calc = np.append(data_calc, data_calc_2, axis=0)
+
+
 
         eq_filename = fileHeader +folder_header+"_"+str(round(mix_status,6))+".csv"
         filename_plus_folder = self.GetOutputDir()+"/equilibrium_data/"+folder_header+"_"+str(round(mix_status,6))+"/"+ eq_filename
@@ -755,7 +791,8 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         else:
             gas_eq.set_mixture_fraction(mix_status, self.__fuel_string, self.__oxidizer_string)
         gas_eq.TP = T_u, ct.one_atm 
-        gas_eq.equilibrate("HP")
+        print("computing hard corner")
+        gas_eq.equilibrate("TP")
         gas_eq.TP = T_u, ct.one_atm 
         Y_target = gas_eq.Y 
         N_enth_grid = self.__n_flamelets+1
@@ -770,11 +807,8 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
                                                 fp=np.array([self.last_Y_flamelet[iSp, i], Y_target[iSp]]))
             
             max_Y, min_Y = np.max(Y_interpolated, axis=1), np.min(Y_interpolated, axis=1)
-            min_T, max_T = max(T_interpolated), min(T_interpolated)
+            min_T, max_T = min(T_interpolated), max(T_interpolated)
             for j in range(N_enth_grid):
-                # T_fuzzy = T_interpolated[j] + (max_T - min_T)*self.__fuzzy_delta*(np.random.rand()-0.5)
-                # Y_fuzzy = Y_interpolated[:, j] + (max_Y - min_Y)*self.__fuzzy_delta*(np.random.rand()-0.5)
-                # Y_fuzzy = Y_fuzzy / np.sum(Y_fuzzy)
                 gas_eq.TP = T_interpolated[j], ct.one_atm 
                 gas_eq.Y = Y_interpolated[:, j]   
                 if j == 0:
@@ -820,7 +854,7 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
                 self.ComputeFreeFlames(mix_status=mix_status, T_ub=self.__T_unburnt_lower, i_freeflame=0)
 
             # Define mass flow rate range.
-            m_dot_range = np.linspace(self.m_dot_free_flame, 0.001*self.m_dot_free_flame, self.__n_flamelets+1)
+            m_dot_range = np.linspace(0.98*self.m_dot_free_flame, 0.001*self.m_dot_free_flame, self.__n_flamelets+1)
             m_dot_range = m_dot_range[:-1]
 
             # Generate and safe adiabatic flamelet data.
@@ -839,8 +873,65 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
                                     T_range=np.linspace(self.__T_unburnt_lower, self.__T_unburnt_upper, 2*self.__n_flamelets),\
                                     burnt=True)
 
-            # if self.__run_freeflames or self.__run_burnerflames:
-            #     self.ComputeHardCorner(mix_status=mix_status, T_u=self.__T_unburnt_lower)
+        if self.__Nf_interp > 0:
+            # at this point we can create an interpolated flamelet using the final burner stabilized flamelet
+          folder_header = "phi"
+          burnerfolder= self.GetOutputDir() + '/burnerflame_data/' + folder_header + '_' + str(round(mix_status, 6))
+          # now check for existence of files, lowest first
+       
+          # Define mass flow rate range.
+          if not self.__run_freeflames:
+            self.ComputeFreeFlames(mix_status=mix_status, T_ub=self.__T_unburnt_lower, i_freeflame=0)
+          m_dot_range = np.linspace(0.98*self.m_dot_free_flame, 0.001*self.m_dot_free_flame, self.__Nf_interp)
+          m_dot_range = m_dot_range[:-1]
+          for m_dot_next in reversed(m_dot_range):
+            burnerflame_filename = burnerfolder + "/" + "burnerflamelet_%s%.6f_mdot%.4f.csv" % (folder_header, mix_status, m_dot_next)
+          
+            if path.isfile(burnerflame_filename):
+              break
+        
+          gas_eq = ct.Solution(self.__reaction_mechanism)
+          if self.__define_equivalence_ratio:
+              gas_eq.set_equivalence_ratio(mix_status, self.__fuel_string, self.__oxidizer_string)
+          else:
+              gas_eq.set_mixture_fraction(mix_status, self.__fuel_string, self.__oxidizer_string)
+
+          # read the equilibrium burnt data from file
+          eqfolder= self.GetOutputDir() + '/equilibrium_data/' + folder_header + '_' + str(round(mix_status, 6))
+          eqflame_filename = eqfolder + "/" + "equilibrium_b_" + folder_header + '_' + str(round(mix_status,6)) + ".csv" 
+          print("eqfilename=",eqflame_filename)
+          with open(eqflame_filename, newline='') as csvfile:
+            spamreader = csv.reader(csvfile, delimiter=',', quotechar='|')
+            headerline = next(spamreader)
+            eqline = list(map(float,next(spamreader)))
+
+          # now we can manipulate the burner file
+          headerline=[]
+          with open(burnerflame_filename, newline='') as csvfile:
+            spamreader = csv.reader(csvfile, delimiter=',', quotechar='|')
+            headerline = next(spamreader)
+
+          N_interp = 50
+          for i in range(0,N_interp):
+            filedata=[]
+            burnerflame_newfilename = burnerfolder + "/" + "burnerflamelet_%s%.6f_int%.4f.csv" % (folder_header, mix_status, i)
+            with open(burnerflame_filename, newline='') as csvfile:
+              spamreader = csv.reader(csvfile, delimiter=',', quotechar='|')
+              linenumber=0 
+              for row in spamreader:
+                if (linenumber>0):
+                  ratio = float(i)/float(N_interp)
+                  rowfloat=list(map(float,row)) 
+                  row_mix = [(1.0-ratio)*a + ratio*b for a,b in zip(rowfloat,eqline)]
+                  filedata.append(row_mix)
+
+                linenumber = linenumber + 1
+          
+            with open(burnerflame_newfilename, mode='w') as newfile:
+              spamwriter = csv.writer(newfile, delimiter=',', quotechar='|')
+              spamwriter.writerow(headerline)
+              for row in filedata:
+                spamwriter.writerow(row)
 
     def ComputeFlamelets(self):
         """Generate and store all flamelet data for the current settings.
