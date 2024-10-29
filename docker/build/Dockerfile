@@ -6,14 +6,6 @@ RUN apt-get update && apt-get install -y \
     git \
     build-essential \
     ccache \ 
-    && python3 -m pip install tensorflow \
-    pickledb \
-    CoolProp \
-    cantera \
-    tqdm \
-    python-csv \
-    matplotlib \
-    scikit-learn \
     && rm -rf /var/lib/apt/lists/* \
     && update-alternatives --install /usr/bin/python python /usr/bin/python3 10 \
     && /usr/sbin/update-ccache-symlinks \
