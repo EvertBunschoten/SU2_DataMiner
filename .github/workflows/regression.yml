@@ -43,15 +43,16 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           push: true
+          platforms: linux/amd64,linux/arm64 
           file: ./docker/build/Dockerfile
           tags: | 
-            EvertBunschoten/su2dataminer:latest
-            EvertBunschoten/su2dataminer:1.0.0
+            ecbunschoten/su2dataminer:latest
+            ecbunschoten/su2dataminer:1.0.0
       
       -
         name: Push image to GHCR
         run: |
           docker buildx imagetools create \
-          --tag ghcr.io/EvertBunschoten/su2dataminer:latest \ 
-          --tag ghcr.io/EvertBunschoten/su2dataminer:1.0.0 \ 
+          --tag ghcr.io/ecbunschoten/su2dataminer:latest \ 
+          --tag ghcr.io/ecbunschoten/su2dataminer:1.0.0 \ 
           EvertBunschoten/su2dataminer:latest
