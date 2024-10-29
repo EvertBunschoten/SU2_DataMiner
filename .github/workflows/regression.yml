@@ -55,4 +55,4 @@ jobs:
           docker buildx imagetools create \
           --tag ghcr.io/ecbunschoten/su2dataminer:latest \ 
           --tag ghcr.io/ecbunschoten/su2dataminer:1.0.0 \ 
-          EvertBunschoten/su2dataminer:latest
+          ecbunschoten/su2dataminer:latest
