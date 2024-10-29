@@ -5,7 +5,7 @@ on:
     branches:
       - 'main'
       - 'feature_regressiontests'
-      
+
   workflow_call:
     inputs:
       runner:
@@ -35,4 +35,5 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           push: true
+          file: ./docker/build/Dockerfile
           tags: ${{ vars.DOCKERHUB_USERNAME }}/su2dataminer:latest
