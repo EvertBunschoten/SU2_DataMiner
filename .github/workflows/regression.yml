@@ -55,3 +55,15 @@ jobs:
             --tag ghcr.io/ecbunschoten/su2dataminer:latest \
             --tag ghcr.io/ecbunschoten/su2dataminer:1.0.0 \
             ecbunschoten/su2dataminer:latest
+
+      - name: Pre Cleanup
+        uses: docker://ghcr.io/ecbunschoten/su2dataminer:latest
+        with:
+          entrypoint: /bin/rm
+          args: -rf install install_bin.tgz src ccache
+      
+      - name: Build
+        uses: docker://ghcr.io/ecbunschoten/su2dataminer:latest
+        with:
+          args: -b ${{ github.ref }}
+          
