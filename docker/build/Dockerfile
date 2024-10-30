@@ -12,6 +12,6 @@ RUN apt-get update && apt-get install -y \
     && echo 'export PATH="/usr/lib/ccache:$PATH"' | tee -a ~/.bashrc 
 
 # Copies your code file from your action repository to the filesystem path `/` of the container
-COPY docker/build/getSU2DataMiner.sh /getSU2DataMiner.sh
+COPY docker/build/runTests.sh /runTests.sh
 
-ENTRYPOINT ["/getSU2DataMiner.sh"]
+ENTRYPOINT ["/runTests.sh"]
