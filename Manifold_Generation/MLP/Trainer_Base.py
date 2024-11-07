@@ -45,6 +45,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 from keras.initializers import HeUniform
+from kerastuner.tuners import BayesianOptimization
 import csv 
 
 from Common.Config_base import Config
@@ -371,7 +372,7 @@ class MLPTrainer:
         return
     
     def SetDecaySteps(self):
-        self._decay_steps = 1e4
+        self._decay_steps = int(0.01*self._n_epochs * float(self._Np_train) / (2**self._batch_expo))
         return 
     
     def RestartTraining(self):
@@ -485,7 +486,6 @@ class MLPTrainer:
             self._Y_scale = self.scaler_function_y.scale_
             self._X_offset = self.scaler_function_x.mean_
             self._Y_offset = self.scaler_function_y.mean_
-
 
         self._Np_train = np.shape(self._X_train_norm)[0]
         self._Np_test = np.shape(self._X_test_norm)[0]
@@ -680,7 +680,7 @@ class MLPTrainer:
         return
     
 class TensorFlowFit(MLPTrainer):
-    __model:keras.models.Sequential
+    _model:keras.models.Sequential
     history_epochs = []
     history_loss = []
     history_val_loss = []
@@ -696,20 +696,20 @@ class TensorFlowFit(MLPTrainer):
         with tf.device("/"+self._kind_device+":"+str(self._device_index)):
 
             # Initialize sequential model
-            self.__model = keras.models.Sequential()
+            self._model = keras.models.Sequential()
             self.history = None 
 
             # Add input layer
-            self.__model.add(keras.layers.Input([len(self._controlling_vars, )]))
+            self._model.add(keras.layers.Input([len(self._controlling_vars, )]))
 
             # Add hidden layersSetTrainFileHeader
             iLayer = 0
             while iLayer < len(self._hidden_layers):
-                self.__model.add(keras.layers.Dense(self._hidden_layers[iLayer], activation=self._activation_function_name, kernel_initializer="he_uniform"))
+                self._model.add(keras.layers.Dense(self._hidden_layers[iLayer], activation=self._activation_function_name, kernel_initializer="he_uniform"))
                 iLayer += 1
             
             # Add output layer
-            self.__model.add(keras.layers.Dense(len(self._train_vars), activation='linear'))
+            self._model.add(keras.layers.Dense(len(self._train_vars), activation='linear'))
 
             # Define learning rate schedule and optimizer
             self.SetDecaySteps()
@@ -719,11 +719,11 @@ class TensorFlowFit(MLPTrainer):
             opt = keras.optimizers.Adam(learning_rate=_lr_schedule, beta_1=0.9, beta_2=0.999, epsilon=1e-8, amsgrad=False) 
 
             # Compile model on device
-            self.__model.compile(optimizer=opt, loss="mean_squared_error", metrics=["mape"])
+            self._model.compile(optimizer=opt, loss="mean_squared_error", metrics=["mape"])
         return 
     
     def EvaluateMLP(self,input_data_norm):
-        pred_data_norm = self.__model.predict(input_data_norm, verbose=0)
+        pred_data_norm = self._model.predict(input_data_norm, verbose=0)
         return pred_data_norm
     
     # Initialize MLP training 
@@ -743,7 +743,7 @@ class TensorFlowFit(MLPTrainer):
 
         self._weights = []
         self._biases = []
-        for layer in self.__model.layers:
+        for layer in self._model.layers:
             self._weights.append(layer.weights[0])
             self._biases.append(layer.weights[1])
 
@@ -761,7 +761,7 @@ class TensorFlowFit(MLPTrainer):
                                                       start_from_epoch=1,\
                                                       mode="min",\
                                                       verbose=self._verbose)
-            self.history = self.__model.fit(self._X_train_norm, self._Y_train_norm, \
+            self.history = self._model.fit(self._X_train_norm, self._Y_train_norm, \
                                           epochs=self._n_epochs, \
                                           batch_size=2**self._batch_expo,\
                                           verbose=self._verbose, \
@@ -773,12 +773,12 @@ class TensorFlowFit(MLPTrainer):
             self._train_time = (t_end - t_start) / 60
 
             t_start = time.time()
-            self._test_score = self.__model.evaluate(self._X_test_norm, self._Y_test_norm, verbose=0)[0]
+            self._test_score = self._model.evaluate(self._X_test_norm, self._Y_test_norm, verbose=0)[0]
             t_end = time.time()
             self._test_time = (t_end - t_start)
             self._weights = []
             self._biases = []
-            for layer in self.__model.layers:
+            for layer in self._model.layers:
                 self._weights.append(layer.weights[0])
                 self._biases.append(layer.weights[1])
             self.SaveWeights()
@@ -925,7 +925,7 @@ class CustomTrainer(MLPTrainer):
         self._lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(10**self._alpha_expo, decay_steps=self._decay_steps,
                                                                             decay_rate=self._lr_decay, staircase=False)
 
-        self._optimizer = tf.keras.optimizers.Adam(self._lr_schedule, beta_1=0.9, beta_2=0.999, epsilon=1e-8, amsgrad=False)
+        self._optimizer = tf.keras.optimizers.Adam(self._lr_schedule, beta_1=0.9, beta_2=0.999, epsilon=1e-7, amsgrad=False)
         return 
     
     @tf.function
@@ -1086,7 +1086,7 @@ class CustomTrainer(MLPTrainer):
     
     def TestLoss(self):
         t_start = time.time()
-        self._test_score = tf.reduce_mean(self.Compute_Direct_Error(tf.constant(self._X_test_norm, self._dt), tf.constant(self._Y_test_norm, self._dt)))
+        self._test_score = tf.reduce_mean(self.Compute_Direct_Error(tf.constant(self._X_test_norm, self._dt), tf.constant(self._Y_test_norm, self._dt))).numpy()
         t_end = time.time()
         self._test_time = (t_end - t_start)/60
         return 
@@ -1133,7 +1133,7 @@ class CustomTrainer(MLPTrainer):
             worst_error = current_error
         else:
             self.__stagnation_iter += 1
-            if self.__stagnation_iter > self._stagnation_patience:
+            if self.__stagnation_iter > self._stagnation_patience and self._verbose > 0:
                 self.__keep_training = False 
                 print("Early stopping due to stagnation")
         return worst_error 
@@ -1539,4 +1539,3 @@ class EvaluateArchitecture:
         self._scaler = scaler_name
         self._trainer_direct.SetScaler(scaler_name)
         return 
-    
