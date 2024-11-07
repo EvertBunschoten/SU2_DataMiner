@@ -44,47 +44,47 @@ from enum import Enum
 
 from Common.DataDrivenConfig import EntropicAIConfig
 from Common.CommonMethods import GetReferenceData
-from Common.Properties import DefaultSettings_NICFD
+from Common.Properties import DefaultSettings_NICFD, EntropicVars
 from Manifold_Generation.MLP.Trainer_Base import MLPTrainer, TensorFlowFit,PhysicsInformedTrainer,EvaluateArchitecture
 
-class EntropicVars(Enum):
-    T=0
-    P=1
-    C2=2
-    dTdRHO_E=3
-    dTdE_RHO=4
-    dPdRHO_E=5
-    dPdE_RHO=6
-    dHdRHO_E=7
-    dHdE_RHO=8
-    dHdP_RHO=9
-    dHdRHO_P=10
-    dSdP_RHO=11
-    dSdRHO_P=12
-    N_STATE_VARS=13
+# class EntropicVars(Enum):
+#     T=0
+#     P=1
+#     C2=2
+#     dTdRHO_E=3
+#     dTdE_RHO=4
+#     dPdRHO_E=5
+#     dPdE_RHO=6
+#     dHdRHO_E=7
+#     dHdE_RHO=8
+#     dHdP_RHO=9
+#     dHdRHO_P=10
+#     dSdP_RHO=11
+#     dSdRHO_P=12
+#     N_STATE_VARS=13
     
 
-EntropicVarPairing = {"T":EntropicVars.T.value,\
-                      "p":EntropicVars.P.value,\
-                      "c2":EntropicVars.C2.value,\
-                      "dTdrho_e":EntropicVars.dTdRHO_E.value,\
-                      "dTde_rho":EntropicVars.dTdE_RHO.value,\
-                      "dpdrho_e":EntropicVars.dPdRHO_E.value,\
-                      "dpde_rho":EntropicVars.dPdE_RHO.value,\
-                      "dhdrho_e":EntropicVars.dHdRHO_E.value,\
-                      "dhde_rho":EntropicVars.dHdE_RHO.value,\
-                      "dhdp_rho":EntropicVars.dHdP_RHO.value,\
-                      "dhdrho_p":EntropicVars.dHdRHO_P.value,\
-                      "dsdp_rho":EntropicVars.dSdP_RHO.value,\
-                      "dsdrho_p":EntropicVars.dSdRHO_P.value}
+# EntropicVarPairing = {"T":EntropicVars.T.value,\
+#                       "p":EntropicVars.P.value,\
+#                       "c2":EntropicVars.C2.value,\
+#                       "dTdrho_e":EntropicVars.dTdRHO_E.value,\
+#                       "dTde_rho":EntropicVars.dTdE_RHO.value,\
+#                       "dpdrho_e":EntropicVars.dPdRHO_E.value,\
+#                       "dpde_rho":EntropicVars.dPdE_RHO.value,\
+#                       "dhdrho_e":EntropicVars.dHdRHO_E.value,\
+#                       "dhde_rho":EntropicVars.dHdE_RHO.value,\
+#                       "dhdp_rho":EntropicVars.dHdP_RHO.value,\
+#                       "dhdrho_p":EntropicVars.dHdRHO_P.value,\
+#                       "dsdp_rho":EntropicVars.dSdP_RHO.value,\
+#                       "dsdrho_p":EntropicVars.dSdRHO_P.value}
 
-LabelPairing = {"T":r"Temperature $(T)[K]$",\
-                "p":r"Pressure $(p)[Pa]$",\
-                "c2":r"Squared speed of sound $(c^2)[m/s]$",\
-                "dTdrho_e":r"Temperature-density derivative $\left(\left.\frac{\partial T}{\partial \rho}\right|_e\right)$",\
-                "dTde_rho":r"Temperature-energy derivative $\left(\left.\frac{\partial T}{\partial e}\right|_\rho\right)$",\
-                "dpdrho_e":r"Pressure-density derivative $\left(\left.\frac{\partial p}{\partial \rho}\right|_e\right)$",\
-                "dpde_rho":r"Pressure-energy derivative $\left(\left.\frac{\partial p}{\partial e}\right|_\rho\right)$"}
+LabelPairing = {EntropicVars.T.name:r"Temperature $(T)[K]$",\
+                EntropicVars.p.name:r"Pressure $(p)[Pa]$",\
+                EntropicVars.c2.name:r"Squared speed of sound $(c^2)[m/s]$",\
+                EntropicVars.dTdrho_e.name:r"Temperature-density derivative $\left(\left.\frac{\partial T}{\partial \rho}\right|_e\right)$",\
+                EntropicVars.dTde_rho.name:r"Temperature-energy derivative $\left(\left.\frac{\partial T}{\partial e}\right|_\rho\right)$",\
+                EntropicVars.dpdrho_e.name:r"Pressure-density derivative $\left(\left.\frac{\partial p}{\partial \rho}\right|_e\right)$",\
+                EntropicVars.dpde_rho.name:r"Pressure-energy derivative $\left(\left.\frac{\partial p}{\partial e}\right|_\rho\right)$"}
 
 class Train_Entropic_Direct(TensorFlowFit):
 
@@ -624,22 +624,9 @@ class Train_Entropic_Derivatives(PhysicsInformedTrainer):
     
 class Train_Entropic_PINN(PhysicsInformedTrainer):
 
-    __idx_rho:int
-    __idx_e:int 
-    __idx_T:int
-    __idx_p:int 
-    __idx_c2:int 
-
     _s_scale:float = None 
     _rho_scale:float = None 
     _e_scale:float = None 
-
-    __s_min:float 
-    __s_max:float 
-    __rho_min:float 
-    __rho_max:float 
-    __e_min:float 
-    __e_max:float 
 
     T_test_loss:float 
     P_test_loss:float 
@@ -654,11 +641,11 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         for n in DefaultSettings_NICFD.hidden_layer_architecture:
             self._hidden_layers.append(n)
             
-        self._train_vars = ["s"]
-        self.__idx_rho = self._controlling_vars.index("Density")
-        self.__idx_e = self._controlling_vars.index("Energy")
+        self._train_vars = [EntropicVars.s.name]
 
-        self._state_vars = ["T","p","c2"]
+        self._state_vars = [EntropicVars.T.name,\
+                            EntropicVars.p.name,\
+                            EntropicVars.c2.name]
 
         return 
     
@@ -668,6 +655,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         self._rho_scale = tf.cast(self._X_scale[0], self._dt)
         self._e_scale = tf.cast(self._X_scale[1], self._dt)
         self._rho_offset = tf.cast(self._X_offset[0], self._dt)
+        self._e_offset = tf.cast(self._X_offset[1], self._dt)
         self._s_scale = tf.cast(self._Y_scale[0], self._dt)
         self._s_offset = tf.cast(self._Y_offset[0], self._dt)
         self._Y_state_scale_tf = tf.cast(self._Y_state_scale, self._dt)
@@ -729,7 +717,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         return s_dim, dsdrhoe, d2sdrho2e2
     
     @tf.function 
-    def EntropicEOS(self,rho, dsdrhoe, d2sdrho2e2):
+    def EntropicEOS(self,rho,e, s, dsdrhoe, d2sdrho2e2):
         dsdrho_e = dsdrhoe[0]
         dsde_rho = dsdrhoe[1]
         d2sdrho2 = d2sdrho2e2[0][0]
@@ -755,8 +743,8 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         dsdrho_P = dsdrho_e - dPdrho_e * (1 / dPde_rho) * dsde_rho
         dsdP_rho = dsde_rho / dPde_rho
         
-        Y_state = tf.stack((T, P, c2, dTdrho_e, dTde_rho, dPdrho_e, dPde_rho, dhdrho_e, dhde_rho, dhdP_rho, dhdrho_P, dsdP_rho, dsdrho_P),axis=1)
-        Y_state_selected = tf.stack(tf.tuple(Y_state[:,EntropicVarPairing[var]] for var in self._state_vars),axis=1)
+        Y_state = tf.stack((rho, e, T, P, c2, s, dsdrho_e, dsde_rho, d2sdrho2, d2sdedrho, d2sde2, dTdrho_e, dTde_rho, dPdrho_e, dPde_rho, dhdrho_e, dhde_rho, dhdP_rho, dhdrho_P, dsdP_rho, dsdrho_P),axis=1)
+        Y_state_selected = tf.stack(tf.tuple(Y_state[:,EntropicVars[var].value] for var in self._state_vars),axis=1)
         return Y_state_selected
     
     @tf.function 
@@ -764,7 +752,9 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         s, dsdrhoe, d2sdrho2e2 = self.ComputeEntropyGradients(rhoe_norm)
         rho_norm = tf.gather(rhoe_norm, indices=0, axis=1)
         rho = self._rho_scale*rho_norm + self._rho_offset
-        return self.EntropicEOS(rho, dsdrhoe, d2sdrho2e2)
+        e_norm = tf.gather(rhoe_norm, indices=1, axis=1)
+        e = self._e_scale*e_norm + self._e_offset
+        return self.EntropicEOS(rho, e, s[:,0], dsdrhoe, d2sdrho2e2)
     
     @tf.function
     def EvaluateState(self, X_norm:tf.Tensor):
@@ -784,7 +774,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
             tape.watch(self._trainable_hyperparams)
             state_loss = self.ComputeStateError(Y_state_label_norm, X_label_norm)
 
-            grads_state = tape.gradient(tf.reduce_mean(state_loss, axis=0), self._trainable_hyperparams)
+            grads_state = tape.gradient(tf.reduce_mean(state_loss), self._trainable_hyperparams)
 
         return state_loss, grads_state 
     
@@ -806,12 +796,12 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     @tf.function 
     def Train_Step_state(self, X_batch_norm:tf.constant, Y_batch_norm:tf.constant):
 
-        # for ivar in range(len(self._state_vars)):
-        #     _, grads_loss = self.ComputeGradient_State_error(Y_batch_norm, X_batch_norm, ivar)
-        #     self._optimizer.apply_gradients(zip(grads_loss, self._trainable_hyperparams))
+        # Gauss-Seidel style iteration over the state variables to update the weights
+        for ivar in range(len(self._state_vars)):
+            _, grads_loss = self.ComputeGradient_State_error(Y_batch_norm, X_batch_norm, ivar)
+            self._optimizer.apply_gradients(zip(grads_loss, self._trainable_hyperparams))
 
-        state_loss, grads_loss = self.ComputeGradients_State_error(Y_batch_norm,X_batch_norm)
-        self._optimizer.apply_gradients(zip(grads_loss, self._trainable_hyperparams))
+        state_loss, _ = self.ComputeGradients_State_error(Y_batch_norm,X_batch_norm)
         return state_loss
     
     def ValidationLoss(self):
@@ -931,7 +921,7 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
     """Class for training MLP architectures
     """
     __trainer_PINN:Train_Entropic_PINN      # MLP trainer object responsible for training itself.
-    _state_vars:list[str] = ["T", "p", "c2"]
+    _state_vars:list[str] = [EntropicVars.T.name, EntropicVars.p.name, EntropicVars.c2.name]
 
     def __init__(self, Config_in:EntropicAIConfig):
         """Define EvaluateArchitecture instance and prepare MLP trainer with

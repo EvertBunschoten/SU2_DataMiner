@@ -574,7 +574,8 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         """Generate controlling variable matrices for boundary conditions, where predicted quantities are visualized onto during convergence.
         """
 
-        print("Generating boundary data matrix...")
+        if self._verbose > 0:
+            print("Generating boundary data matrix...")
         mixfrac_range = np.linspace(0, 1, self.__Config.GetNpMix())
         T_range = np.linspace(self.__Config.GetUnbTempBounds()[0], self.__Config.GetUnbTempBounds()[1], self.__Config.GetNpTemp())
         self.pv_unb = np.zeros([len(mixfrac_range), len(T_range)])
@@ -609,7 +610,8 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
                 self.pv_b[iZ, iT] = pv_b
                 self.h_b[iZ, iT] = gas_b.enthalpy_mass
                 self.z_b[iZ, iT] = Z 
-        print("Done!")
+        if self._verbose > 0:
+            print("Done!")
         
         return 
     
@@ -872,11 +874,13 @@ class EvaluateArchitecture_FGM(EvaluateArchitecture):
             self.__kind_trainer = "physicsinformed"
             self.__trainer_PINN = Train_FGM_PINN(Config_in=self.__Config,group_idx=self.__output_group)
             self._trainer_direct = self.__trainer_PINN
-            print("Using physics-informed trainer.")
+            if self.verbose > 0:
+                print("Using physics-informed trainer.")
         else:
             self._trainer_direct = Train_Flamelet_Direct(Config_in=self.__Config, group_idx=self.__output_group)
             self.__kind_trainer = "direct"
-            print("Using direct trainer.")
+            if self.verbose > 0:
+                print("Using direct trainer.")
         return 
     
     def SetBoundaryDataFile(self, boundary_data_file:str):
