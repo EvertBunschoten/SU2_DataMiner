@@ -65,8 +65,8 @@ fi
 name="SU2_DataMiner_$(echo $branch | sed 's/\//_/g')"
 echo "Running regression tests for $name"
 cd "RegressionTests"
-python3 $testscript
-
 
 export PYTHONPATH=$PYTHONPATH:$SU2DATAMINER_HOME
 export PATH=$PATH:$SU2DATAMINER_HOME/bin/
+
+python3 $testscript
