@@ -49,12 +49,12 @@ jobs:
             ecbunschoten/su2dataminer_test:latest
             ecbunschoten/su2dataminer_test:1.0.0
       
-      - name: Push image to GHCR
-        run: |
-          docker buildx imagetools create \
-            --tag ghcr.io/ecbunschoten/su2dataminer_test:latest \
-            --tag ghcr.io/ecbunschoten/su2dataminer_test:1.0.0 \
-            ecbunschoten/su2dataminer_test:latest
+      # - name: Push image to GHCR
+      #   run: |
+      #     docker buildx imagetools create \
+      #       --tag ghcr.io/ecbunschoten/su2dataminer_test:latest \
+      #       --tag ghcr.io/ecbunschoten/su2dataminer_test:1.0.0 \
+      #       ecbunschoten/su2dataminer_test:latest
 
       # - name: Pre Cleanup
       #   uses: docker://ghcr.io/ecbunschoten/su2dataminer_test:latest
@@ -62,8 +62,8 @@ jobs:
       #     entrypoint: /bin/rm
       #     args: -rf install install_bin.tgz src ccache
       
-      # - name: Build
-      #   uses: docker://ghcr.io/ecbunschoten/su2dataminer_test:latest
-      #   with:
-      #     args: -b ${{ github.ref }}
+      - name: Build
+        uses: docker://ghcr.io/ecbunschoten/su2dataminer_test:latest
+        with:
+          args: -b ${{ github.ref }}
       
