@@ -24,6 +24,7 @@
 #=============================================================================================#
 
 import tensorflow as tf 
+from enum import Enum, auto
 
 class DefaultProperties:
     
@@ -41,6 +42,29 @@ class DefaultProperties:
     output_file_header:str = "fluid_data"
     config_name:str = "DataMiner"
 
+class EntropicVars(Enum):
+    Density=0
+    Energy=auto()
+    T=auto()
+    p=auto()
+    c2=auto()
+    s=auto()
+    dsdrho_e=auto()
+    dsde_rho=auto()
+    d2sdrho2=auto()
+    d2sdrhode=auto()
+    d2sde2=auto()
+    dTdrho_e=auto()
+    dTde_rho=auto()
+    dpdrho_e=auto()
+    dpde_rho=auto()
+    dhdrho_e=auto()
+    dhde_rho=auto()
+    dhdp_rho=auto()
+    dhdrho_p=auto()
+    dsdp_rho=auto()
+    dsdrho_p=auto()
+    N_STATE_VARS=auto()
 
 class DefaultSettings_NICFD(DefaultProperties):
     T_min:float = 300
@@ -61,9 +85,10 @@ class DefaultSettings_NICFD(DefaultProperties):
     EOS_type:str = "HEOS"
     use_PT_grid:bool = False 
 
-    controlling_variables:list[str] = ["Density", "Energy"]
-    name_density:str = "Density"
-    name_energy:str = "Energy"
+    controlling_variables:list[str] = [EntropicVars.Density.name, \
+                                       EntropicVars.Energy.name]
+    name_density:str = EntropicVars.Density.name
+    name_energy:str = EntropicVars.Energy.name
 
     hidden_layer_architecture:list[int] = [95]
 
