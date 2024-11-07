@@ -52,15 +52,21 @@ if [ ! -z "$branch" ]; then
   git fetch origin
   git checkout $branch
   git submodule update
+  export SU2DATAMINER_HOME=$PWD
 else
   if [ ! -d "src/SU2_DataMiner" ]; then
     echo "SU2_DataMiner source directory not found. Make sure to mount existing SU2_DataMiner at directory at /src/SU2_DataMiner. Otherwise use -b to provide a branch."
     exit 1
   fi
   cd src/SU2_DataMiner
+  export SU2DATAMINER_HOME=$PWD
 fi
 
 name="SU2_DataMiner_$(echo $branch | sed 's/\//_/g')"
 echo "Running regression tests for $name"
 cd "RegressionTests"
 python3 $testscript
+
+
+export PYTHONPATH=$PYTHONPATH:$SU2DATAMINER_HOME
+export PATH=$PATH:$SU2DATAMINER_HOME/bin/
