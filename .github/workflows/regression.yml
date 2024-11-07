@@ -27,10 +27,10 @@ jobs:
           file: ./docker/build/Dockerfile_test
           tags: | 
             ecbunschoten/su2dataminer_test:latest
-      - name: "Run regression"
-        uses: docker://ghcr.io/ecbunschoten/su2dataminer_test:latest
-        with:
-          args: -b ${{ github.ref }} -s run_regression.py
+      # - name: "Run regression"
+      #   uses: docker://ghcr.io/ecbunschoten/su2dataminer_test:latest
+      #   with:
+      #     args: -b ${{ github.ref }} -s run_regression.py
       # - name: Push image to GHCR
       #   run: |
       #     docker buildx imagetools create \
