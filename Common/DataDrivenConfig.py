@@ -82,6 +82,7 @@ class EntropicAIConfig(Config):
     __Table_ref_radius:float = None         # Refinement radius within which refined cell size is applied.
     __Table_curv_threshold:float = None     # Curvature threshold beyond which refinement is applied.
 
+    _config_type = DefaultSettings_NICFD.config_type
 
     def __init__(self, load_file:str=None):
         """EntropicAI SU2 DataMiner configuration class.
