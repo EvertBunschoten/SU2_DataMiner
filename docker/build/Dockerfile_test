@@ -6,9 +6,25 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     ccache \ 
     && apt-get update \
-    && apt-get install -y python3-virtualenv 
-    # && apt-get install -y python3.12-venv \
-    # && python3 -m venv /home/unbuntu/pyenv \
+    && apt-get install -y python3-virtualenv \
+    && apt-get install -y python3.12-venv \
+    && python3 -m venv /home/unbuntu/pyenv \
+    && source /home/ubuntu/pyenv/bin/activate \
+    && python -m pip install \
+    numpy \
+    pickle \
+    os \
+    CoolProp \
+    cantera \
+    tqdm \
+    csv \
+    matplotlib \
+    random \
+    tensorflow \
+    time \
+    scikit-learn \
+    time \
+    pyfiglet
     # && virtualenv -p /usr/bin/python3 /home/ubuntu/pyenv \
     # && python -m ensurepip --upgrade \
     # && python -m pip install CoolProp tensorflow 
