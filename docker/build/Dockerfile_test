@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     apt-get install -y python3.12-venv && \
     python3 -m venv /home/ubuntu/pyenv && \
     virtualenv -p /usr/bin/python3 /home/ubuntu/pyenv && \
-    source /home/ubuntu/pyenv/bin/activate && \
+    /home/ubuntu/pyenv/bin/activate && \
     python3 -m pip install \
     numpy \
     pickled \
