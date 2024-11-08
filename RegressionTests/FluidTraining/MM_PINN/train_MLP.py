@@ -2,7 +2,7 @@
 
 import os 
 import sys 
-from Manifold_Generation.MLP.Trainers_NICFD.Trainers import Train_Entropic_PINN, EvaluateArchitecture_NICFD
+from Manifold_Generation.MLP.Trainers_NICFD.Trainers import Train_Entropic_PINN
 
 from Common.DataDrivenConfig import EntropicAIConfig 
 
@@ -10,8 +10,9 @@ C = EntropicAIConfig(sys.argv[-1])
 
 M = Train_Entropic_PINN()
 M.SetTrainFileHeader(os.getcwd()+"/"+C.GetConcatenationFileHeader())
-M.SetNEpochs(10)
+M.SetNEpochs(100)
 M.SetHiddenLayers([10])
+M.SetBatchExpo(4)
 M.SetActivationFunction("exponential")
 M.SetVerbose(0)
 M.SetSaveDir(os.getcwd())
