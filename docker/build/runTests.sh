@@ -69,4 +69,6 @@ cd "RegressionTests"
 export PYTHONPATH=$PYTHONPATH:$SU2DATAMINER_HOME
 export PATH=$PATH:$SU2DATAMINER_HOME/bin/
 
+. /home/ubuntu/pyenv/bin/activate
+
 python3 $testscript
