@@ -45,7 +45,6 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 from keras.initializers import HeUniform
-from kerastuner.tuners import BayesianOptimization
 import csv 
 
 from Common.Config_base import Config
