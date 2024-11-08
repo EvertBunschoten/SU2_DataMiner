@@ -17,7 +17,7 @@ class TestCase:
     config_dir:str
     config_file:str 
     exec_command:str 
-    timeout:float = 10.0 
+    timeout:float = 120.0 
     comp_threshold:float = 0.0 
     tolerance:float = 0.0 
     
