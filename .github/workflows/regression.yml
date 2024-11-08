@@ -6,44 +6,56 @@ on:
       - 'feature_regressiontests'
 
 jobs:
-  build:
-    runs-on: 'ubuntu-latest'
+  regression:
+    runs-on: ubuntu-latest 
+    permissions:
+      packages: write
     steps:
-      - uses: actions/checkout@v3
+      - name: Authenticate to GHCR registry
+        run: docker login --username EvertBunschoten --password ${{ secrets.GHCR_TOKEN }} ghcr.io
+      
+      - name: Run regression tests
+        uses: docker://ghcr.io/evertbunschoten/su2dataminer_test:latest
+        with:
+          args: -b ${{ github.ref }} -s run_regression.py
+  # build:
+  #   runs-on: 'ubuntu-latest'
+  #   steps:
+  #     - uses: actions/checkout@v3
       
       
-      - name: Build and push the image
-        run : |
-          docker login --username EvertBunschoten --password ${{ secrets.GHCR_TOKEN }} ghcr.io
-          docker build . --file ./docker/build/Dockerfile_test --tag ghcr.io/evertbunschoten/su2dataminer_test:latest
-          docker push ghcr.io/evertbunschoten/su2dataminer_test:latest
-      # -
-      #   name: Build and push
-      #   uses: docker/build-push-action@v6
-      #   with:
-      #     push: true
-      #     file: ./docker/build/Dockerfile_test
-      #     tags: | 
-      #       ecbunschoten/su2dataminer_test:latest
-      # - name: "Run regression"
-      #   uses: docker://ghcr.io/ecbunschoten/su2dataminer_test:latest
-      #   with:
-      #     args: -b ${{ github.ref }} -s run_regression.py
-      # - name: Push image to GHCR
-      #   run: |
-      #     docker buildx imagetools create \
-      #       --tag ghcr.io/ecbunschoten/su2dataminer_test:latest \
-      #       --tag ghcr.io/ecbunschoten/su2dataminer_test:1.0.0 \
-      #       ecbunschoten/su2dataminer_test:latest
+  #     - name: Build and push the image
+  #       run : |
+  #         docker login --username EvertBunschoten --password ${{ secrets.GHCR_TOKEN }} ghcr.io
+  #         docker build . --file ./docker/build/Dockerfile_test --tag ghcr.io/evertbunschoten/su2dataminer_test:latest
+  #         docker push ghcr.io/evertbunschoten/su2dataminer_test:latest
+  #     # -
+  #     #   name: Build and push
+  #     #   uses: docker/build-push-action@v6
+  #     #   with:
+  #     #     push: true
+  #     #     file: ./docker/build/Dockerfile_test
+  #     #     tags: | 
+  #     #       ecbunschoten/su2dataminer_test:latest
+  #     # - name: "Run regression"
+  #     #   uses: docker://ghcr.io/ecbunschoten/su2dataminer_test:latest
+  #     #   with:
+  #     #     args: -b ${{ github.ref }} -s run_regression.py
+  #     # - name: Push image to GHCR
+  #     #   run: |
+  #     #     docker buildx imagetools create \
+  #     #       --tag ghcr.io/ecbunschoten/su2dataminer_test:latest \
+  #     #       --tag ghcr.io/ecbunschoten/su2dataminer_test:1.0.0 \
+  #     #       ecbunschoten/su2dataminer_test:latest
 
-      # - name: Pre Cleanup
-      #   uses: docker://ghcr.io/ecbunschoten/su2dataminer_test:latest
-      #   with:
-      #     entrypoint: /bin/rm
-      #     args: -rf install install_bin.tgz src ccache
+  #     # - name: Pre Cleanup
+  #     #   uses: docker://ghcr.io/ecbunschoten/su2dataminer_test:latest
+  #     #   with:
+  #     #     entrypoint: /bin/rm
+  #     #     args: -rf install install_bin.tgz src ccache
       
-      # - name: Run regression tests
-      #   uses: docker://ghcr.io/evertbunschoten/su2dataminer_test:latest
-      #   with:
-      #     args: -b ${{ github.ref }} -s run_regression.py
+  #     - name: Run regression tests
+  #       uses: docker://ghcr.io/evertbunschoten/su2dataminer_test:latest
+  #       with:
+  #         args: -b ${{ github.ref }} -s run_regression.py
       
