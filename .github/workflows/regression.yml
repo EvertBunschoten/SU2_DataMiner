@@ -23,7 +23,7 @@ jobs:
       
       - name: Build and push the image
         run : |
-          docker login --username EvertBunschoten --password ${{ secrets.REPO_TOKEN }} ghcr.io
+          docker login --username EvertBunschoten --password ${{ secrets.GHCR_TOKEN }} ghcr.io
           docker build . --file ./docker/build/Dockerfile_test --tag ghcr.io/evertbunschoten/su2dataminer_test:latest
           docker push ghcr.io/evertbunschoten/su2dataminer_test:latest
       # -
