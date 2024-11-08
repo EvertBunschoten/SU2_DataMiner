@@ -5,19 +5,51 @@ on:
     branches:
       - 'feature_regressiontests'
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
-  regression:
-    runs-on: ubuntu-latest 
+  push_to_registry:
+    name: Push Docker image to Docker Hub
+    runs-on: ubuntu-latest
     permissions:
       packages: write
+      contents: read
+      attestations: write
+      id-token: write
     steps:
-      - name: Authenticate to GHCR registry
-        run: docker login --username EvertBunschoten --password ${{ secrets.GHCR_TOKEN }} ghcr.io
-      
-      - name: Run regression tests
-        uses: docker://ghcr.io/evertbunschoten/su2dataminer_test:latest
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Login in to Docker hub
+        uses: docker/login-action@v2
         with:
-          args: -b ${{ github.ref }} -s run_regression.py
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+      
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          file: ./docker/build/Dockerfile_test
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          labels: latest
+
+  # regression:
+  #   runs-on: ubuntu-latest 
+  #   permissions:
+  #     packages: write
+  #   steps:
+  #     - name: Authenticate to GHCR registry
+  #       run: docker login --username EvertBunschoten --password ${{ secrets.GHCR_TOKEN }} ghcr.io
+      
+  #     - name: Run regression tests
+  #       uses: docker://ghcr.io/evertbunschoten/su2dataminer_test:latest
+  #       with:
+  #         args: -b ${{ github.ref }} -s run_regression.py
   # build:
   #   runs-on: 'ubuntu-latest'
   #   steps:
