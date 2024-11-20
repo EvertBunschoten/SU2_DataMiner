@@ -703,6 +703,7 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         H_max = gas_eq.enthalpy_mass
         # In case of reaction products, set the maximum enthalpy to that of the reactants at the maximum temperature.
         if burnt:
+            gas_eq.TP = min(T_range), ct.one_atm 
             gas_eq.equilibrate('TP')
             gas_eq.HP = H_max, ct.one_atm
             T_range = np.linspace(min(T_range), gas_eq.T, len(T_range))
@@ -886,9 +887,9 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         if flame_is_gas:
             Y = np.reshape(flame.Y, [gas.n_species, 1])
             X = np.reshape(flame.X, [gas.n_species, 1])
-            net_reaction_rate = flame.net_production_rates[:,np.newaxis]
-            neg_reaction_rate =flame.destruction_rates[:,np.newaxis]
-            pos_reaction_rate = net_reaction_rate- neg_reaction_rate
+            net_reaction_rate = np.zeros(np.shape(Y))#flame.net_production_rates[:,np.newaxis]
+            neg_reaction_rate =np.zeros(np.shape(Y))#flame.destruction_rates[:,np.newaxis]
+            pos_reaction_rate = np.zeros(np.shape(Y))#net_reaction_rate- neg_reaction_rate
             cp_i = np.reshape(flame.partial_molar_cp/gas.molecular_weights, [gas.n_species, 1])
             enth_i = np.reshape(flame.partial_molar_enthalpies/gas.molecular_weights, [gas.n_species, 1])
             grid = np.zeros([1,1])
