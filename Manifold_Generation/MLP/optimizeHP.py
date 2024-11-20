@@ -603,7 +603,7 @@ class MLPOptimizer:
         return
     
     def LoadOptimizer(self):
-        ga_instance = pygad.load(self.save_dir+"/optimizer_instance_"+self._history_extension+".pkl")
+        ga_instance = pygad.load(self.save_dir+"/optimizer_instance_"+self._history_extension)
         return ga_instance
     
     def _translateGene(self, x:np.ndarray[float], Evaluator:EvaluateArchitecture):
@@ -1200,5 +1200,5 @@ class PlotHPOResults_FGM(PlotHPOResults):
     def GetOptimHistory(self):
         history_filename = "history_optim_Group%i" % (self.__group_idx+1) + "_"
         history_filename += self._get_optim_extension()
-        history_filepath = self._Config.GetOutputDir()+"/"+history_filename + ".csv"
+        history_filepath = self._Config.GetOutputDir()+("/Architectures_Group%i_Optim%s/" % (self.__group_idx+1, self._get_optim_extension()))+history_filename + ".csv"
         return history_filepath
