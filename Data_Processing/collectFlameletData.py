@@ -38,7 +38,7 @@ prop_cycle = plt.rcParams["axes.prop_cycle"]
 colors = prop_cycle.by_key()['color']
 
 from Common.DataDrivenConfig import FlameletAIConfig
-from Common.Properties import DefaultSettings_FGM
+from Common.Properties import DefaultSettings_FGM, FGMVars
 
 class FlameletConcatenator:
     """Read, regularize, and concatenate flamelet data for MLP training or LUT generation.
@@ -66,11 +66,21 @@ class FlameletConcatenator:
     __N_control_vars:int = len(DefaultSettings_FGM.controlling_variables)
 
     # Thermodynamic data to search for in flamelet data.
-    __TD_train_vars = ['Temperature', 'MolarWeightMix', 'DiffusionCoefficient', 'Conductivity', 'ViscosityDyn', 'Cp']
+    __TD_train_vars = [FGMVars.Temperature.name, \
+                       FGMVars.MolarWeightMix.name, \
+                       FGMVars.DiffusionCoefficient.name, \
+                       FGMVars.Conductivity.name, \
+                       FGMVars.ViscosityDyn.name, \
+                       FGMVars.Cp.name]
+    
     __TD_flamelet_data:np.ndarray = None 
 
     # Differential diffusion data to search for in flamelet data.
-    __PD_train_vars = ['Beta_ProgVar', 'Beta_Enth_Thermal', 'Beta_Enth', 'Beta_MixFrac']
+    __PD_train_vars = [FGMVars.Beta_ProgVar.name, \
+                       FGMVars.Beta_Enth_Thermal.name, \
+                       FGMVars.Beta_Enth.name, \
+                       FGMVars.Beta_MixFrac.name]
+    
     __PD_flamelet_data:np.ndarray = None 
 
     __flamelet_ID_vars = ['FlameletID']
@@ -84,7 +94,7 @@ class FlameletConcatenator:
     __LookUp_flamelet_data:np.ndarray = None 
 
     # Progress variable source term name.
-    __PPV_train_vars = ['ProdRateTot_PV']
+    __PPV_train_vars = [FGMVars.ProdRateTot_PV.name]
     __Sources_vars = [__PPV_train_vars[0]]
     for s in __Species_in_FGM:
         __Sources_vars.append("Y_dot_pos-"+s)
@@ -424,7 +434,7 @@ class FlameletConcatenator:
         """
 
         # Collect all variable names in the manifold.
-        total_variables = "ProgressVariable,EnthalpyTot,MixtureFraction,"
+        total_variables = ",".join(self.__controlling_variables) + ","
         total_variables += ",".join(self.__TD_train_vars)+","
         if self.__Config.PreferentialDiffusion():
             total_variables += ",".join(self.__PD_train_vars)+","
@@ -658,7 +668,7 @@ class FlameletConcatenator:
             if is_valid_flamelet:
                 S_flamelet_norm = S_flamelet / (max(S_flamelet)+1e-32)
 
-                T_flamelet = D[:, variables.index("Temperature")]
+                T_flamelet = D[:, variables.index(FGMVars.Temperature.name)]
                 if np.max(T_flamelet) < DefaultSettings_FGM.T_threshold:
                     BurningFlamelet = False 
 
@@ -677,10 +687,10 @@ class FlameletConcatenator:
                 if BurningFlamelet:
 
                     for iVar_TD, TD_var in enumerate(self.__TD_train_vars):
-                        if TD_var == "DiffusionCoefficient":
-                            idx_cp = variables.index("Cp")
-                            idx_cond = variables.index("Conductivity")
-                            idx_density = variables.index("Density")
+                        if TD_var == FGMVars.DiffusionCoefficient.name:
+                            idx_cp = variables.index(FGMVars.Cp.name)
+                            idx_cond = variables.index(FGMVars.Conductivity.name)
+                            idx_density = variables.index(FGMVars.Density.name)
                             TD_data[:, iVar_TD] = D[:, idx_cond] / (D[:, idx_cp] * D[:, idx_density])
                         else:
                             idx_var_flamelet = variables.index(TD_var)
@@ -692,7 +702,7 @@ class FlameletConcatenator:
                     for iVar_LookUp, LookUp_var in enumerate(self.__LookUp_vars):
                         idx_var_flamelet = variables.index(LookUp_var)
                         LookUp_data[:, iVar_LookUp] = D[:, idx_var_flamelet]
-                        if LookUp_var == "Heat_Release":
+                        if LookUp_var == FGMVars.Heat_Release.name:
                             LookUp_data[sourceterm_zero_line_numbers, iVar_LookUp] = 0.0
                 
                 # Load species sources data
@@ -815,9 +825,9 @@ class GroupOutputs:
     __group_affinity:list[list[float]]  # Minimum affinity for each combination of groups.
 
     # Combinations of variables for FGM evaluation. 
-    __evaluations_TD:list[str] = ["Temperature", "ViscosityDyn","MolarWeightMix","Cp","Conductivity","DiffusionCoefficient"]
-    __evaluations_PD:list[str] = ["Beta_ProgVar","Beta_Enth_Thermal","Beta_Enth","Beta_MixFrac"]
-    __evaluations_Sources:list[str] = ["ProdRateTot_PV"]
+    __evaluations_TD:list[str] = [FGMVars.Temperature.name, FGMVars.ViscosityDyn.name, FGMVars.MolarWeightMix.name, FGMVars.Cp.name, FGMVars.Conductivity.name, FGMVars.DiffusionCoefficient.name]
+    __evaluations_PD:list[str] = [FGMVars.Beta_ProgVar.name, FGMVars.Beta_Enth_Thermal.name, FGMVars.Beta_Enth.name, FGMVars.Beta_MixFrac.name]
+    __evaluations_Sources:list[str] = [FGMVars.ProdRateTot_PV.name]
 
     __most_interesting_groups:list[list[list[str]]] = []    # Combinations of groups with highest affinity for a certain group count.
 
