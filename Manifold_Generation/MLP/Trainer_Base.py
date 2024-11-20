@@ -44,7 +44,7 @@ from tensorflow import keras
 import matplotlib.pyplot as plt 
 from sklearn.metrics import r2_score
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
-from keras.initializers import HeUniform
+from keras.initializers import HeUniform,RandomUniform
 from kerastuner.tuners import BayesianOptimization
 import csv 
 
@@ -965,7 +965,7 @@ class CustomTrainer(MLPTrainer):
     @tf.function
     def Compute_Direct_Error(self, x_norm:tf.constant, y_label_norm:tf.constant):
         y_pred_norm = self._MLP_Evaluation(x_norm)
-        return self.mean_square_error(y_label_norm, y_pred_norm)
+        return tf.reduce_mean(tf.pow(y_pred_norm - y_label_norm, 2),axis=0)
     
     @tf.function 
     def TrainingLoss_error(self, x_norm:tf.constant, y_label_norm:tf.constant):
@@ -1063,7 +1063,7 @@ class CustomTrainer(MLPTrainer):
     
     def PrintEpochInfo(self, i_epoch, val_loss):
         if self._verbose > 0:
-                print("Epoch: ", str(i_epoch), " Validation loss: ", ", ".join("%s : %.8e" % (s, v.numpy()) for s, v in zip(self._train_vars, val_loss)))
+            print("Epoch: ", str(i_epoch), " Validation loss: ", ", ".join("%s : %.8e" % (s, v) for s, v in zip(self._train_vars, val_loss)))
         return 
     
     def LoopBatches(self, train_batches):
@@ -1085,6 +1085,7 @@ class CustomTrainer(MLPTrainer):
         return reg_loss 
     
     def TestLoss(self):
+
         t_start = time.time()
         self._test_score = tf.reduce_mean(self.Compute_Direct_Error(tf.constant(self._X_test_norm, self._dt), tf.constant(self._Y_test_norm, self._dt))).numpy()
         t_end = time.time()
@@ -1156,13 +1157,26 @@ class PhysicsInformedTrainer(CustomTrainer):
     _Y_state_scale:np.ndarray = None 
     _Y_state_offset:np.ndarray = None 
 
+    _X_boundary_norm:np.ndarray[float] = None 
+    _Y_boundary_norm:np.ndarray[float] = None 
+    
     _state_vars:list[str]
 
     vals_lambda:list[float] = None
     projection_vals:list[tf.constant] = None 
 
-    lambda_min:float = 0.0
-    lambda_max:float = 300.0
+    projection_arrays:list[np.ndarray] = None 
+    target_arrays:list[np.ndarray] = None 
+    idx_PIvar:list[int] = None 
+    lamba_labels:list[str] = None 
+
+    _boundary_data_file:str = None 
+
+    _N_bc:int=None 
+
+    j_gradient_update:int = 0
+    lambda_history:list = []
+    update_lambda_every_iter:int = 10
     def __init__(self):
         CustomTrainer.__init__(self)
         return 
@@ -1191,6 +1205,25 @@ class PhysicsInformedTrainer(CustomTrainer):
 
         return 
     
+    def SetBoundaryDataFile(self, boundary_file_name:str):
+        self._boundary_data_file = boundary_file_name
+        return 
+    
+    def GetBoundaryData(self, y_vars=None):
+        """Load flamelet data equilibrium boundary data.
+        """
+        if y_vars == None:
+            y_vars = self._train_vars
+        # Load controlling and train variables from boundary data.
+        X_boundary, Y_boundary = GetReferenceData(self._boundary_data_file, x_vars=self._controlling_vars, train_variables=y_vars)
+        
+        
+        # Normalize controlling and labeled data with respect to domain data.
+        self._X_boundary_norm = self.scaler_function_x.transform(X_boundary)
+        self._Y_boundary_norm = self.scaler_function_y.transform(Y_boundary)
+
+        return 
+    
     def PreprocessPINNVars(self):
         
         return 
@@ -1202,7 +1235,11 @@ class PhysicsInformedTrainer(CustomTrainer):
     
     def GetTrainData(self):
         super().GetTrainData()
+        self.GetBoundaryData()
+        self.CollectPIVars()
         self.GetStateTrainData()
+        self._Y_state_scale_tf = tf.cast(self._Y_state_scale, self._dt)
+        self._Y_state_offset_tf = tf.cast(self._Y_state_offset, self._dt)
         return 
     
     def Plot_and_Save_History(self, vars=None):
@@ -1216,8 +1253,29 @@ class PhysicsInformedTrainer(CustomTrainer):
         return 
     
     def SetTrainBatches(self):
-        train_batches = tf.data.Dataset.from_tensor_slices((self._X_train_norm, self._Y_state_train_norm)).batch(2**self._batch_expo)
-        return train_batches
+        train_batches_domain = tf.data.Dataset.from_tensor_slices((self._X_train_norm, self._Y_state_train_norm)).batch(2**self._batch_expo)
+        domain_batches_list = [b for b in train_batches_domain]
+
+        batch_size_train = 2**self._batch_expo
+
+        # Collect projection array data.
+        p_concatenated = tf.stack([tf.constant(p, dtype=self._dt) for p in self.projection_arrays],axis=2)
+        
+        # Collect target projection gradient data.
+        Y_target_concatenated = tf.stack([tf.constant(t, dtype=self._dt) for t in self.target_arrays], axis=1)
+
+        # Collect boundary controlling variable data.
+        X_boundary_tf = tf.constant(self._X_boundary_norm, dtype=self._dt)
+
+        # Forumulate batches.
+        batches_concat = tf.data.Dataset.from_tensor_slices((X_boundary_tf, p_concatenated, Y_target_concatenated)).batch(batch_size_train)
+        batches_concat_list = [b for b in batches_concat]
+
+        # Re-size boundary data batches to that of the domain batches such that both data can be evaluated simultaneously during training.
+        Nb_boundary = len(batches_concat_list)
+        batches_concat_list_resized = [batches_concat_list[i % Nb_boundary] for i in range(len(domain_batches_list))]
+
+        return (domain_batches_list, batches_concat_list_resized)
     
     @tf.function
     def ComputeFirstOrderDerivatives(self, x_norm_input:tf.constant,idx_out:int=0):
@@ -1248,12 +1306,223 @@ class PhysicsInformedTrainer(CustomTrainer):
         mean_grad_ub /= len(self._weights)
 
         lambda_prime = max_grad_direct / (mean_grad_ub + 1e-32)
-        lambda_prime_scaled = tf.maximum(tf.minimum(lambda_prime, self.lambda_max), self.lambda_min)
-        val_lambda_new = 0.9 * val_lambda_old + 0.1 * lambda_prime_scaled
+        val_lambda_new = 0.9 * val_lambda_old + 0.1 * lambda_prime
         if tf.math.is_nan(val_lambda_new):
             val_lambda_new = 1.0
         return val_lambda_new
 
+    def CollectPIVars(self):
+        self.projection_arrays = []
+        self.target_arrays = []
+        self.vals_lambda = []
+        self.idx_PIvar = []
+        self.lamba_labels = []
+        val_lambda_default = tf.constant(1.0,dtype=self._dt)
+        return val_lambda_default
+    
+    def LoopEpochs(self):
+        self.j_gradient_update = 0
+        self.lambda_history.clear()
+        return super().LoopEpochs()
+    
+    def LoopBatches(self, train_batches):
+        """Loop over domain and boundary batches for each epoch.
+
+        :param train_batches: tuple of domain and boundary data batches.
+        :type train_batches: tuple
+        """
+        domain_batches = train_batches[0]
+        boundary_batches = train_batches[1]
+        vals_lambda = self.vals_lambda.copy()
+        for batch_domain, batch_boundary in zip(domain_batches, boundary_batches):
+
+            # Extract domain batch data.
+            X_domain_batch = batch_domain[0]
+            Y_domain_batch = batch_domain[1]
+            # Extract boundary batch data.
+            X_boundary_batch = batch_boundary[0]
+            P_boundary_batch = batch_boundary[1]
+            Yt_boundary_batch = batch_boundary[2]
+
+            # Run train step and adjust weights.
+            self.Train_Step(X_domain_batch, Y_domain_batch, X_boundary_batch,P_boundary_batch, Yt_boundary_batch, vals_lambda)
+
+            # Update boundary condition penalty values.
+            if (self.j_gradient_update + 1)%self.update_lambda_every_iter ==0:
+                vals_lambda_updated = self.UpdateLambdas(X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda)
+                self.vals_lambda = [v for v in vals_lambda_updated]
+
+            self.j_gradient_update += 1
+            
+        self.lambda_history.append([lamb.numpy() for lamb in self.vals_lambda])
+
+        return 
+    
+    @tf.function
+    def Train_Step(self, X_domain_batch:tf.constant, Y_domain_batch:tf.constant, \
+                   X_boundary_batch:tf.constant, P_boundary_batch:tf.constant, Yt_boundary_batch:tf.constant, vals_lambda:list[tf.constant]):
+
+        # Compute training loss for the current batch and extract HP sensitivities.
+        batch_loss, sens_batch = self.Train_sensitivity_function(X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda)
+        
+        # Update network weigths and biases.
+        self.UpdateWeights(sens_batch)
+
+        return batch_loss
+    
+    @tf.function
+    def UpdateWeights(self, grads):
+        self._optimizer.apply_gradients(zip(grads, self._trainable_hyperparams))
+        return
+    
+    @tf.function 
+    def UpdateLambdas(self, X_domain_batch:tf.constant, Y_domain_batch:tf.constant,\
+                            X_boundary_batch:tf.constant,  \
+                            P_boundary_batch:tf.constant, Yt_boundary_batch:tf.constant, vals_lambda_old:list[tf.constant]):
+        """Update boundary condition penalty values.
+
+        :return: list of updated penalty values.
+        :rtype: list[tf.constant]
+        """
+
+        _, grads_domain, _, grads_bc_list = self.ComputeGradients(X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch)
+        
+        vals_lambda_new = []
+        for iBc, lambda_old in enumerate(vals_lambda_old):
+            lambda_new = self.update_lambda(grads_domain, grads_bc_list[iBc], lambda_old)
+            vals_lambda_new.append(lambda_new)
+        return vals_lambda_new
+    
+    @tf.function 
+    def EvaluateState(self, X_norm:tf.constant):
+        return 
+    
+    @tf.function 
+    def ComputeStateError(self, X_label_norm:tf.constant,Y_state_label_norm:tf.constant):
+        Y_state_pred = self.EvaluateState(X_label_norm)
+        Y_state_pred_norm = (Y_state_pred - self._Y_state_offset_tf)/self._Y_state_scale_tf
+        pred_error = tf.reduce_mean(tf.pow(Y_state_pred_norm - Y_state_label_norm, 2), axis=0)
+        return pred_error
+    
+    @tf.function 
+    def ComputeGradients_State_error(self, Y_state_label_norm:tf.constant, X_label_norm:tf.constant):
+        with tf.GradientTape() as tape:
+            tape.watch(self._trainable_hyperparams)
+            state_loss = self.ComputeStateError(X_label_norm, Y_state_label_norm)
+
+            grads_state = tape.gradient(tf.reduce_mean(state_loss), self._trainable_hyperparams)
+
+        return state_loss, grads_state 
+    
+    @tf.function
+    def ComputeGradients(self, X_domain_batch, Y_domain_batch, X_boundary_batch,  P_boundary_batch, Yt_boundary_batch):
+        y_domain_loss, grads_domain = self.ComputeGradients_State_error(X_label_norm=X_domain_batch, Y_state_label_norm=Y_domain_batch)
+
+        grads_bc_list = []
+        loss_bc_list = []
+        for iBC in range(self._N_bc):
+            boundary_loss, grads_boundary_loss = self.ComputeGradients_Boundary_Error(X_boundary_batch, Yt_boundary_batch,P_boundary_batch,iBC)
+            
+            grads_bc_list.append(grads_boundary_loss)
+            loss_bc_list.append(boundary_loss)
+        return y_domain_loss, grads_domain, loss_bc_list, grads_bc_list
+    
+    @tf.function
+    def ComputeGradients_Boundary_Error(self, X_boundary_batch, Yt_boundary_batch,P_boundary_batch,iVar):
+        with tf.GradientTape() as tape:
+            tape.watch(self._trainable_hyperparams)
+            neumann_penalty_var = self.ComputeNeumannPenalty(X_boundary_batch, Yt_boundary_batch, P_boundary_batch,iVar)
+            grads_neumann = tape.gradient(neumann_penalty_var, self._trainable_hyperparams)
+        return neumann_penalty_var, grads_neumann
+    
+    @tf.function
+    def ComputeNeumannPenalty(self, x_norm_boundary:tf.constant, dy_norm_boundary_target:tf.constant,precon_gradient:tf.constant, iVar:int=0): 
+        """Neumann penalty function for projected MLP Jacobians along boundary data.
+
+        :param x_norm_boundary: boundary data controlling variable values.
+        :type x_norm_boundary: tf.constant
+        :param y_norm_boundary_target: labeled boundary data.
+        :type y_norm_boundary_target: tf.constant
+        :param dy_norm_boundary_target: target projected gradient.
+        :type dy_norm_boundary_target: tf.constant
+        :param precon_gradient: MLP Jacobian pre-conditioner.
+        :type precon_gradient: tf.constant
+        :param iVar: boundary condition index, defaults to 0
+        :type iVar: int, optional
+        :return: direct evaluation and Neumann penalty values.
+        :rtype: tf.constant
+        """
+
+        # Evaluate MLP Jacobian on boundary data.
+        _, dy_pred_norm = self.ComputeFirstOrderDerivatives(x_norm_boundary, self.idx_PIvar[iVar])
+
+        # Project Jacobian along boundary data according to penalty function.
+        project_dy_pred_norm = tf.reduce_sum(tf.multiply(precon_gradient[:,:,iVar], dy_pred_norm), axis=1)
+
+        # Compute direct and Neumann penalty values.
+        penalty = tf.reduce_mean(tf.pow(project_dy_pred_norm - dy_norm_boundary_target[:, iVar], 2))
+        return penalty
+    
+    @tf.function 
+    def Train_loss_function(self, X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda):
+        
+        domain_loss = self.TrainingLoss_error(X_domain_batch, Y_domain_batch)
+
+        boundary_loss = 0.0
+        for iBc in range(self._N_bc):
+            bc_loss = self.ComputeNeumannPenalty(X_boundary_batch, Yt_boundary_batch, P_boundary_batch,iBc)
+            boundary_loss += vals_lambda[iBc] * bc_loss
+
+        total_loss = domain_loss + boundary_loss
+        bc_loss = 0.0
+        return [total_loss, domain_loss, bc_loss]
+    
+    @tf.function 
+    def Train_sensitivity_function(self, X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda):
+        with tf.GradientTape() as tape:
+            tape.watch(self._trainable_hyperparams)
+            train_losses = self.Train_loss_function(X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda)
+            total_loss = train_losses[0]
+            grads_loss = tape.gradient(total_loss, self._trainable_hyperparams)
+        return total_loss, grads_loss 
+    
+    @tf.function 
+    def TrainingLoss_error(self, x_norm:tf.constant, y_state_label_norm:tf.constant):
+        pred_error_outputs = self.ComputeStateError(x_norm, y_state_label_norm)
+        mean_pred_error = tf.reduce_mean(pred_error_outputs)
+        return mean_pred_error
+    
+    def ValidationLoss(self):
+        val_error_state = self.ComputeStateError(tf.cast(self._X_val_norm, dtype=self._dt), tf.cast(self._Y_state_val_norm,dtype=self._dt))
+        val_error_state = val_error_state.numpy()
+        for iVar in range(len(self._state_vars)):
+            self.val_loss_history[iVar].append(val_error_state[iVar])
+        return val_error_state
+    
+    def TestLoss(self):
+        test_error_state = self.ComputeStateError(tf.cast(self._X_test_norm, dtype=self._dt), tf.cast(self._Y_state_test_norm,dtype=self._dt))
+        self.state_test_loss = test_error_state.numpy()
+        self._test_score = self.state_test_loss
+        return test_error_state
+    
+    def PlotLambdaHistory(self):
+        fig = plt.figure(figsize=[10,10])
+        ax = plt.axes()
+        for iBc in range(self._N_bc):
+            ax.plot([self.lambda_history[i][iBc] for i in range(len(self.lambda_history))], label=self.lamba_labels[iBc])
+        ax.grid()
+        ax.set_xlabel(r"Epoch [-]",fontsize=20)
+        ax.set_ylabel(r"Lambda value[-]",fontsize=20)
+        ax.tick_params(which='both',labelsize=18)
+        ax.legend(fontsize=20)
+        ax.set_title(r"Neumann penalty modifier history", fontsize=20)
+        fig.savefig(self._save_dir+"/Model_"+str(self._model_index)+"/Lambda_history."+self._figformat,format=self._figformat,bbox_inches='tight')
+        plt.close(fig)
+        return 
+    
+    def CustomCallback(self):
+        self.PlotLambdaHistory()
+        return 
     
 class EvaluateArchitecture:
     """Class for training MLP architectures
