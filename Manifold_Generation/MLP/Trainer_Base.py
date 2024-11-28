@@ -425,6 +425,7 @@ class MLPTrainer:
         pred_data_norm = self.EvaluateMLP(self._X_test_norm)
         ref_data_norm = self._Y_test_norm 
 
+        pred_data_norm[np.isnan(pred_data_norm)] = 10.0
         # Generate and save R2-plots for each of the output parameters.
         fig, axs = plt.subplots(nrows=len(self._train_vars), ncols=1,figsize=[5,5*len(self._train_vars)])
         for iVar in range(len(self._train_vars)):
@@ -1305,7 +1306,7 @@ class PhysicsInformedTrainer(CustomTrainer):
             mean_grad_ub += val_lambda_old * tf.reduce_mean(tf.abs(g_ub))
         mean_grad_ub /= len(self._weights)
 
-        lambda_prime = max_grad_direct / (mean_grad_ub + 1e-32)
+        lambda_prime = max_grad_direct / (mean_grad_ub + 1e-7)
         val_lambda_new = 0.9 * val_lambda_old + 0.1 * lambda_prime
         if tf.math.is_nan(val_lambda_new):
             val_lambda_new = 1.0
@@ -1474,8 +1475,7 @@ class PhysicsInformedTrainer(CustomTrainer):
             boundary_loss += vals_lambda[iBc] * bc_loss
 
         total_loss = domain_loss + boundary_loss
-        bc_loss = 0.0
-        return [total_loss, domain_loss, bc_loss]
+        return [total_loss, domain_loss, boundary_loss]
     
     @tf.function 
     def Train_sensitivity_function(self, X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda):
@@ -1501,9 +1501,11 @@ class PhysicsInformedTrainer(CustomTrainer):
     
     def TestLoss(self):
         test_error_state = self.ComputeStateError(tf.cast(self._X_test_norm, dtype=self._dt), tf.cast(self._Y_state_test_norm,dtype=self._dt))
-        self.state_test_loss = test_error_state.numpy()
+        self.state_test_loss = tf.reduce_mean(test_error_state).numpy()
         self._test_score = self.state_test_loss
-        return test_error_state
+        if np.isnan(self._test_score):
+            self._test_score = 1e6
+        return 
     
     def PlotLambdaHistory(self):
         fig = plt.figure(figsize=[10,10])
