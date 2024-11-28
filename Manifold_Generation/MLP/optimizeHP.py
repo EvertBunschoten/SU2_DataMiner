@@ -1042,6 +1042,7 @@ class PlotHPOResults:
         ax.grid()
         ax.set_xlabel(r"Validation loss $(\mathcal{L})[-]$",fontsize=20)
         ax.set_ylabel(r"Evaluation cost $(\mathcal{C})[-]$",fontsize=20)
+        ax.set_title(r"Cost-accuracy Pareto front",fontsize=20)
         ax.legend(fontsize=20)
         ax.tick_params(which='both',labelsize=18)
         plt.tight_layout()
