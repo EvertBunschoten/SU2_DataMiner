@@ -187,10 +187,10 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
 
         # Compute the progress variable and mixture fraction for the stochiometric equilibrium condition.
         self.__Config.gas.set_equivalence_ratio(1.0,  fuel_string,oxidizer_string)
-        self.__Config.gas.equilibrate("HP")
+        Z_st = self.__Config.gas.mixture_fraction( fuel_string,oxidizer_string)
+        self.__Config.gas.equilibrate("TP")
         Y_b_st = self.__Config.gas.Y 
         pv_st = self.__Config.ComputeProgressVariable(variables=None, flamelet_data=None, Y_flamelet=Y_b_st[:,np.newaxis])[0]
-        Z_st = self.__Config.gas.mixture_fraction( fuel_string,oxidizer_string)
         h_st = self.__Config.gas.enthalpy_mass
         X_st_norm = self.scaler_function_x.transform(np.array([[pv_st, h_st, Z_st]]))[0,:]
         Z_st_norm = X_st_norm[2]
@@ -201,8 +201,8 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         is_lean = np.invert(is_rich)
 
         # Calculate progress variable-mixture fraction derivative for reactants and products.
-        dpv_dz_unb = (pv_f - pv_ox)
-        dpv_dz_b_lean = (pv_st - pv_ox) / (Z_st)
+        dpv_dz_unb = (pv_f - pv_ox) / (1.0 - 0.0)
+        dpv_dz_b_lean = (pv_st - pv_ox) / (Z_st - 0.0)
         dpv_dz_b_rich = (pv_f - pv_st) / (1 - Z_st)
         
         pv_scale = self._X_scale[self._controlling_vars.index(DefaultProperties.name_pv)]
