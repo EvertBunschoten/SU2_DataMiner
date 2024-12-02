@@ -184,7 +184,9 @@ class DefaultSettings_FGM(DefaultProperties):
     include_burnerflames:bool = True 
     include_equilibrium:bool = True 
     include_counterflames:bool = False 
-    
+    add_unburnt_equilibrium:bool = False
+    Nf_interp:int = 0
+
     affinity_threshold:float = 0.7
     output_file_header:str = "flamelet_data"
     boundary_file_header:str = "boundary_data"

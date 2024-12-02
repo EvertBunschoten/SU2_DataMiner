@@ -35,13 +35,18 @@ T_unb_upper = 800.0 # Reactant upper temperature
 phi_lower = 0.25    # Lower equivalence ratio
 phi_upper = 20.0    # Upper equivalence ratio
 
-Np_T = 30   # Number of reactant temperature divisions
-Np_mix = 30 # Number of mixture divisions
+Np_T = 3#0   # Number of reactant temperature divisions
+Np_mix = 3#0 # Number of mixture divisions
+
+Nf_interp = 4#00    # Number of interpolating flamelets added between lowest enthalpy burner stabilized flamelet and quenched-cooled equilibrium
 
 # Initiate FlameletAIConfig
 Config = FlameletAIConfig()
 
 Config.SetConfigName("Hydrogen_PINNs")
+
+Config.AddInterpFlamelets(Nf_interp)
+Config.AddUnbEquilibrium(True)
 
 # Hydrogen-air flamelets using simple h2o2 mechanism.
 Config.SetFuelDefinition(fuel_species=["H2"],fuel_weights=[1.0])
