@@ -372,7 +372,7 @@ class MLPTrainer:
         return
     
     def SetDecaySteps(self):
-        self._decay_steps = int(0.01*self._n_epochs * float(self._Np_train) / (2**self._batch_expo))
+        self._decay_steps = int(float(self._Np_train) / (2**self._batch_expo))
         return 
     
     def RestartTraining(self):
@@ -1173,8 +1173,14 @@ class PhysicsInformedTrainer(CustomTrainer):
 
     _boundary_data_file:str = None 
 
+
+    _enable_boundary_loss:bool=True
+    _include_boundary_loss:bool=True
+    _boundary_loss_patience:int = 10
     _N_bc:int=None 
 
+    _train_step_type:str="Jacobi"
+    __train_step_type_options:list[str] = ["Gauss-Seidel","Jacobi"]
     j_gradient_update:int = 0
     lambda_history:list = []
     update_lambda_every_iter:int = 10
@@ -1223,6 +1229,18 @@ class PhysicsInformedTrainer(CustomTrainer):
         self._X_boundary_norm = self.scaler_function_x.transform(X_boundary)
         self._Y_boundary_norm = self.scaler_function_y.transform(Y_boundary)
 
+        return 
+    
+    def SetTrainStepType(self, train_step_type:str="Jacobi"):
+        if train_step_type not in self.__train_step_type_options:
+            raise Exception("Weights update step type should be one of the following : "+ ",".join(s for s in self.__train_step_type_options))
+        self._train_step_type = train_step_type
+        return 
+    
+    def SetDecaySteps(self):
+        super().SetDecaySteps()
+        if self._train_step_type=="Gauss-Seidel":
+            self._decay_steps *= len(self._state_vars)
         return 
     
     def PreprocessPINNVars(self):
@@ -1345,17 +1363,24 @@ class PhysicsInformedTrainer(CustomTrainer):
             P_boundary_batch = batch_boundary[1]
             Yt_boundary_batch = batch_boundary[2]
 
+            if self._i_epoch > self._boundary_loss_patience and self._enable_boundary_loss:
+                self._include_boundary_loss = True
+            else:
+                self._include_boundary_loss = False
             # Run train step and adjust weights.
-            self.Train_Step(X_domain_batch, Y_domain_batch, X_boundary_batch,P_boundary_batch, Yt_boundary_batch, vals_lambda)
+            if self._train_step_type == "Gauss-Seidel":
+                self.Train_Step_Gauss_Seidel(X_domain_batch, Y_domain_batch, X_boundary_batch,P_boundary_batch, Yt_boundary_batch, vals_lambda)
+            else:
+                self.Train_Step(X_domain_batch, Y_domain_batch, X_boundary_batch,P_boundary_batch, Yt_boundary_batch, vals_lambda)
 
             # Update boundary condition penalty values.
-            if (self.j_gradient_update + 1)%self.update_lambda_every_iter ==0:
+            if ((self.j_gradient_update + 1)%self.update_lambda_every_iter ==0) and self._include_boundary_loss:
                 vals_lambda_updated = self.UpdateLambdas(X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda)
                 self.vals_lambda = [v for v in vals_lambda_updated]
 
             self.j_gradient_update += 1
-            
-        self.lambda_history.append([lamb.numpy() for lamb in self.vals_lambda])
+        if self._enable_boundary_loss:  
+            self.lambda_history.append([lamb.numpy() for lamb in self.vals_lambda])
 
         return 
     
@@ -1370,6 +1395,28 @@ class PhysicsInformedTrainer(CustomTrainer):
         self.UpdateWeights(sens_batch)
 
         return batch_loss
+    
+    @tf.function
+    def Train_Step_Gauss_Seidel(self, X_domain_batch:tf.constant, Y_domain_batch:tf.constant, \
+                   X_boundary_batch:tf.constant, P_boundary_batch:tf.constant, Yt_boundary_batch:tf.constant, vals_lambda:list[tf.constant]):
+        for iVar in range(len(self._state_vars)):
+            with tf.GradientTape() as tape:
+                tape.watch(self._trainable_hyperparams)
+                Y_state_pred = self.EvaluateState(X_domain_batch)[:, iVar]
+                Y_state_pred_norm = (Y_state_pred - self._Y_state_offset[iVar]) / self._Y_state_scale[iVar]
+                Y_state_ref= Y_domain_batch[:, iVar]
+                state_error_norm = tf.reduce_mean(tf.pow((Y_state_pred_norm - Y_state_ref), 2))
+                grads_state_error = tape.gradient(state_error_norm, self._trainable_hyperparams)
+            self.UpdateWeights(grads_state_error)
+            if self._include_boundary_loss:
+                with tf.GradientTape() as tape:
+                    boundary_loss = 0.0
+                    for iBc in range(self._N_bc):
+                        bc_loss = self.ComputeNeumannPenalty(X_boundary_batch, Yt_boundary_batch, P_boundary_batch,iBc)
+                        boundary_loss += vals_lambda[iBc] * bc_loss
+                    grads_boundary_error = tape.gradient(boundary_loss, self._trainable_hyperparams)
+                    self.UpdateWeights(grads_boundary_error)
+        return 
     
     @tf.function
     def UpdateWeights(self, grads):
@@ -1468,14 +1515,18 @@ class PhysicsInformedTrainer(CustomTrainer):
     def Train_loss_function(self, X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda):
         
         domain_loss = self.TrainingLoss_error(X_domain_batch, Y_domain_batch)
+        total_loss = domain_loss
+        bc_loss = 0.0
+        if self._include_boundary_loss:
+            boundary_loss = 0.0
+            for iBc in range(self._N_bc):
+                bc_loss = self.ComputeNeumannPenalty(X_boundary_batch, Yt_boundary_batch, P_boundary_batch,iBc)
+                boundary_loss += vals_lambda[iBc] * bc_loss
 
-        boundary_loss = 0.0
-        for iBc in range(self._N_bc):
-            bc_loss = self.ComputeNeumannPenalty(X_boundary_batch, Yt_boundary_batch, P_boundary_batch,iBc)
-            boundary_loss += vals_lambda[iBc] * bc_loss
+            total_loss += boundary_loss
+            bc_loss = boundary_loss
 
-        total_loss = domain_loss + boundary_loss
-        return [total_loss, domain_loss, boundary_loss]
+        return [total_loss, domain_loss, bc_loss]
     
     @tf.function 
     def Train_sensitivity_function(self, X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda):
@@ -1501,11 +1552,9 @@ class PhysicsInformedTrainer(CustomTrainer):
     
     def TestLoss(self):
         test_error_state = self.ComputeStateError(tf.cast(self._X_test_norm, dtype=self._dt), tf.cast(self._Y_state_test_norm,dtype=self._dt))
-        self.state_test_loss = tf.reduce_mean(test_error_state).numpy()
-        self._test_score = self.state_test_loss
-        if np.isnan(self._test_score):
-            self._test_score = 1e6
-        return 
+        self.state_test_loss = test_error_state.numpy()
+        self._test_score = np.average(self.state_test_loss)
+        return test_error_state
     
     def PlotLambdaHistory(self):
         fig = plt.figure(figsize=[10,10])
@@ -1523,7 +1572,8 @@ class PhysicsInformedTrainer(CustomTrainer):
         return 
     
     def CustomCallback(self):
-        self.PlotLambdaHistory()
+        if self._enable_boundary_loss:
+            self.PlotLambdaHistory()
         return 
     
 class EvaluateArchitecture:
