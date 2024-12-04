@@ -652,6 +652,17 @@ class FlameletAIConfig(Config):
         # Re-set cantera solution.
         self.gas = ct.Solution(self.__reaction_mechanism)
         self.__species_in_mixture = self.gas.species_names
+        if any(f not in self.__species_in_mixture for f in self.__fuel_species):
+            default_fuels = ["CH4","H2"]
+            self.__fuel_species = []
+            self.__fuel_weights = []
+            for f in default_fuels:
+                if f in self.__species_in_mixture:
+                    self.__fuel_species.append(f)
+                    self.__fuel_weights.append(1.0)
+            fac_weights = sum(self.__fuel_weights)
+            for iF in range(len(self.__fuel_weights)):
+                self.__fuel_weights[iF] /= fac_weights
 
         n_fuel = len(self.__fuel_species)
         n_ox = len(self.__oxidizer_species)
@@ -1281,6 +1292,8 @@ class FlameletAIConfig(Config):
         """
         if (len(pv_species) != len(pv_weights)):
             raise Exception("Number of species and weights of the progress variable definition should be equal.")
+        if any(sp not in self.__species_in_mixture for sp in pv_species):
+            raise Exception("Not all progress variable species are supported by reaction mechanism.")
         else:
             self.__pv_definition = pv_species.copy()
             self.__pv_weights = pv_weights.copy()

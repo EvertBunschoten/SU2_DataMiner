@@ -50,7 +50,9 @@ class DataPlotter_FGM(DataPlotter_Base):
             self._Config = FlameletAIConfig()
 
         self.__data_dir = self._Config.GetOutputDir()
-
+        self.__plot_freeflames = self._Config.GenerateFreeFlames()
+        self.__plot_burnerflames = self._Config.GenerateBurnerFlames()
+        self.__plot_equilibrium = self._Config.GenerateEquilibrium()
         return 
 
     def ManualSelection(self, input:bool=False):
