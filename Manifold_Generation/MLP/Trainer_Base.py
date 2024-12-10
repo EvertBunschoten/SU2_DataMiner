@@ -53,13 +53,15 @@ from Common.Properties import DefaultProperties
 from Common.CommonMethods import GetReferenceData
 
 # Activation function options
-activation_function_names_options:list[str] = ["linear","elu","relu","tanh","exponential","gelu"]
+activation_function_names_options:list[str] = ["linear","elu","relu","tanh","exponential","gelu","sigmoid", "swish"]
 activation_function_options = [tf.keras.activations.linear,
                             tf.keras.activations.elu,\
                             tf.keras.activations.relu,\
                             tf.keras.activations.tanh,\
                             tf.keras.activations.exponential,\
-                            tf.keras.activations.gelu]
+                            tf.keras.activations.gelu,\
+                            tf.keras.activations.sigmoid,\
+                            tf.keras.activations.swish]
 
 scaler_functions = {"robust":RobustScaler,\
                     "standard":StandardScaler,\
@@ -135,7 +137,7 @@ class MLPTrainer:
     history_val_loss = []
 
     _stagnation_tolerance:float = 1e-11 
-    _stagnation_patience:int = 100
+    _stagnation_patience:int = 200
     _verbose:int = 1
 
     callback_every:int = 20 
@@ -1369,9 +1371,9 @@ class PhysicsInformedTrainer(CustomTrainer):
                 self._include_boundary_loss = False
             # Run train step and adjust weights.
             if self._train_step_type == "Gauss-Seidel":
-                self.Train_Step_Gauss_Seidel(X_domain_batch, Y_domain_batch, X_boundary_batch,P_boundary_batch, Yt_boundary_batch, vals_lambda)
+                self.Train_Step_Gauss_Seidel(X_domain_batch, Y_domain_batch, X_boundary_batch,P_boundary_batch, Yt_boundary_batch, vals_lambda, self._include_boundary_loss)
             else:
-                self.Train_Step(X_domain_batch, Y_domain_batch, X_boundary_batch,P_boundary_batch, Yt_boundary_batch, vals_lambda)
+                self.Train_Step(X_domain_batch, Y_domain_batch, X_boundary_batch,P_boundary_batch, Yt_boundary_batch, vals_lambda, self._include_boundary_loss)
 
             # Update boundary condition penalty values.
             if ((self.j_gradient_update + 1)%self.update_lambda_every_iter ==0) and self._include_boundary_loss:
@@ -1386,10 +1388,10 @@ class PhysicsInformedTrainer(CustomTrainer):
     
     @tf.function
     def Train_Step(self, X_domain_batch:tf.constant, Y_domain_batch:tf.constant, \
-                   X_boundary_batch:tf.constant, P_boundary_batch:tf.constant, Yt_boundary_batch:tf.constant, vals_lambda:list[tf.constant]):
+                   X_boundary_batch:tf.constant, P_boundary_batch:tf.constant, Yt_boundary_batch:tf.constant, vals_lambda:list[tf.constant], include_boundary:bool):
 
         # Compute training loss for the current batch and extract HP sensitivities.
-        batch_loss, sens_batch = self.Train_sensitivity_function(X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda)
+        batch_loss, sens_batch = self.Train_sensitivity_function(X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda,include_boundary)
         
         # Update network weigths and biases.
         self.UpdateWeights(sens_batch)
@@ -1398,7 +1400,7 @@ class PhysicsInformedTrainer(CustomTrainer):
     
     @tf.function
     def Train_Step_Gauss_Seidel(self, X_domain_batch:tf.constant, Y_domain_batch:tf.constant, \
-                   X_boundary_batch:tf.constant, P_boundary_batch:tf.constant, Yt_boundary_batch:tf.constant, vals_lambda:list[tf.constant]):
+                   X_boundary_batch:tf.constant, P_boundary_batch:tf.constant, Yt_boundary_batch:tf.constant, vals_lambda:list[tf.constant], include_boundary:bool):
         for iVar in range(len(self._state_vars)):
             with tf.GradientTape() as tape:
                 tape.watch(self._trainable_hyperparams)
@@ -1408,7 +1410,7 @@ class PhysicsInformedTrainer(CustomTrainer):
                 state_error_norm = tf.reduce_mean(tf.pow((Y_state_pred_norm - Y_state_ref), 2))
                 grads_state_error = tape.gradient(state_error_norm, self._trainable_hyperparams)
             self.UpdateWeights(grads_state_error)
-            if self._include_boundary_loss:
+            if include_boundary:
                 with tf.GradientTape() as tape:
                     boundary_loss = 0.0
                     for iBc in range(self._N_bc):
@@ -1512,30 +1514,35 @@ class PhysicsInformedTrainer(CustomTrainer):
         return penalty
     
     @tf.function 
-    def Train_loss_function(self, X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda):
+    def Train_loss_function(self, X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda, include_boundary):
         
         domain_loss = self.TrainingLoss_error(X_domain_batch, Y_domain_batch)
         total_loss = domain_loss
         bc_loss = 0.0
-        if self._include_boundary_loss:
-            boundary_loss = 0.0
-            for iBc in range(self._N_bc):
-                bc_loss = self.ComputeNeumannPenalty(X_boundary_batch, Yt_boundary_batch, P_boundary_batch,iBc)
-                boundary_loss += vals_lambda[iBc] * bc_loss
+        if include_boundary:
+            bc_loss = self.ComputeBCLoss(X_boundary_batch, Yt_boundary_batch, P_boundary_batch, vals_lambda)
 
-            total_loss += boundary_loss
-            bc_loss = boundary_loss
-
+        total_loss += bc_loss
         return [total_loss, domain_loss, bc_loss]
     
+    
     @tf.function 
-    def Train_sensitivity_function(self, X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda):
+    def ComputeBCLoss(self, X_boundary_batch, Yt_boundary_batch, P_boundary_batch, vals_lambda):
+        boundary_loss = 0.0
+        for iBc in range(self._N_bc):
+            boundary_loss += vals_lambda[iBc] * self.ComputeNeumannPenalty(X_boundary_batch, Yt_boundary_batch, P_boundary_batch,iBc)
+        return boundary_loss 
+    
+    @tf.function 
+    def Train_sensitivity_function(self, X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda, include_boundary):
         with tf.GradientTape() as tape:
             tape.watch(self._trainable_hyperparams)
-            train_losses = self.Train_loss_function(X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda)
+            train_losses = self.Train_loss_function(X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda,include_boundary)
             total_loss = train_losses[0]
+            domain_loss = train_losses[1]
+            boundary_loss = train_losses[2]
             grads_loss = tape.gradient(total_loss, self._trainable_hyperparams)
-        return total_loss, grads_loss 
+        return [total_loss, domain_loss, boundary_loss], grads_loss 
     
     @tf.function 
     def TrainingLoss_error(self, x_norm:tf.constant, y_state_label_norm:tf.constant):
@@ -1574,6 +1581,10 @@ class PhysicsInformedTrainer(CustomTrainer):
     def CustomCallback(self):
         if self._enable_boundary_loss:
             self.PlotLambdaHistory()
+        return 
+    
+    def EnableBCLoss(self, enable_bc_loss:bool=True):
+        self._enable_boundary_loss = enable_bc_loss
         return 
     
 class EvaluateArchitecture:
@@ -1801,7 +1812,9 @@ class EvaluateArchitecture:
         fid.close()
 
         self._test_score = self._trainer_direct.GetTestScore()
-        self.__cost_parameter = self._trainer_direct.GetCostParameter()
+        if np.isnan(self._test_score):
+            self._test_score = 1e2
+        self._cost_parameter = self._trainer_direct.GetCostParameter()
         return 
     
     def TrainPostprocessing(self):
@@ -1817,7 +1830,7 @@ class EvaluateArchitecture:
         :return: MLP cost parameter
         :rtype: float
         """
-        return self.__cost_parameter
+        return self._cost_parameter
     
     def GetTestScore(self):
         """Get MLP evaluation test score upon completion of training.
