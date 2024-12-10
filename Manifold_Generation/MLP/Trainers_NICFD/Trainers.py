@@ -148,7 +148,7 @@ class Train_Entropic_Derivatives(PhysicsInformedTrainer):
         return
     
     @tf.function
-    def __ComputeEntropyGradients(self, rhoe_norm:tf.Tensor):
+    def ComputeEntropyGradients(self, rhoe_norm:tf.Tensor):
 
         Y_norm = self._MLP_Evaluation(rhoe_norm)
         s_norm = tf.gather(Y_norm, indices=0, axis=1)
@@ -171,7 +171,7 @@ class Train_Entropic_Derivatives(PhysicsInformedTrainer):
     
     @tf.function 
     def TD_Evaluation(self, rhoe_norm:tf.Tensor):
-        s, dsdrhoe, d2sdrho2e2 = self.__ComputeEntropyGradients(rhoe_norm)
+        s, dsdrhoe, d2sdrho2e2 = self.ComputeEntropyGradients(rhoe_norm)
         rho_norm = tf.gather(rhoe_norm, indices=0, axis=1)
         rho = (self.__rho_max - self.__rho_min)*rho_norm + self.__rho_min 
         T, P, c2 = self.EntropicEOS(rho, dsdrhoe, d2sdrho2e2)
@@ -628,11 +628,6 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     _rho_scale:float = None 
     _e_scale:float = None 
 
-    T_test_loss:float 
-    P_test_loss:float 
-    C2_test_loss:float 
-
-
     def __init__(self):
         PhysicsInformedTrainer.__init__(self)
         self.callback_every = 10
@@ -646,6 +641,10 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         self._state_vars = [EntropicVars.T.name,\
                             EntropicVars.p.name,\
                             EntropicVars.c2.name]
+
+        self._train_step_type="Gauss-Seidel"
+        self._enable_boundary_loss = False
+        self.scaler_function_name="minmax"
 
         return 
     
@@ -667,12 +666,65 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
             raise Exception("Only the following state variables are supported: "+ ",".join((v for v in DefaultSettings_NICFD.supported_state_vars)))
         self._state_vars = state_vars_in.copy()
         return 
+
+    def CollectPIVars(self):
+        val_lambda_default = super().CollectPIVars()
+        self.lamba_labels = []
+        proj_arrays, target_grads, lambda_labels = self.__SetRhoEProjection()
+        for p, t, l in zip(proj_arrays, target_grads, lambda_labels):
+            self.projection_arrays.append(p)
+            self.target_arrays.append(t)
+            self.idx_PIvar.append(0)
+            self.vals_lambda.append(val_lambda_default)
+            self.lamba_labels.append(l)
+        self._N_bc = len(self.vals_lambda)
+        return 
     
-    def SetDecaySteps(self):
-        super().SetDecaySteps()
-        self._decay_steps = len(self._state_vars)*self._decay_steps
-        return
+    def GetBoundaryData(self, y_vars=None):
+        X_boundary, Y_boundary = GetReferenceData(self._filedata_train + "_val.csv", self._controlling_vars, self._train_vars)
+        self._X_boundary_norm = self.scaler_function_x.transform(X_boundary)
+        self._Y_boundary_norm = self.scaler_function_y.transform(Y_boundary)
+        
+        return 
     
+    def __SetRhoEProjection(self):
+        
+        X_val, Y_val = GetReferenceData(self._filedata_train + "_val.csv", self._controlling_vars, [EntropicVars.p.name, EntropicVars.T.name, EntropicVars.dsdrho_e.name, EntropicVars.dsde_rho.name])
+
+        rho_val = X_val[:, self._controlling_vars.index(EntropicVars.Density.name)]
+        p_val = Y_val[:, 0]
+        T_val = Y_val[:, 1]
+        
+        idx_minrho = np.argmin(rho_val)
+        Rgas = p_val[idx_minrho] / (rho_val[idx_minrho]*T_val[idx_minrho])
+
+        compress_factor_threshold = 0.0
+
+        compress_factor = p_val / (Rgas * rho_val * T_val)
+        
+        idx_idealgas = compress_factor > compress_factor_threshold
+
+        proj_rho, proj_e = np.zeros(np.shape(X_val)), np.zeros(np.shape(X_val))
+        proj_rho[idx_idealgas, self._controlling_vars.index(EntropicVars.Density.name)] = 1.0
+        proj_e[idx_idealgas, self._controlling_vars.index(EntropicVars.Energy.name)] = 1.0
+        
+        target_grad_rho = Y_val[:, 2]
+        target_grad_e = Y_val[:, 3]
+        
+        target_grad_rho[np.invert(idx_idealgas)] = 0.0
+        target_grad_e[np.invert(idx_idealgas)] = 0.0
+        
+        proj_rho = np.delete(proj_rho, np.invert(idx_idealgas),axis=0)
+        proj_e = np.delete(proj_e, np.invert(idx_idealgas),axis=0)
+        target_grad_rho = np.delete(target_grad_rho, np.invert(idx_idealgas))
+        target_grad_e = np.delete(target_grad_e, np.invert(idx_idealgas))
+        
+        target_grad_rho /= self._Y_scale[0] / self._X_scale[self._controlling_vars.index(EntropicVars.Density.name)]
+        target_grad_e /= self._Y_scale[0] / self._X_scale[self._controlling_vars.index(EntropicVars.Energy.name)]
+        
+        self._X_boundary_norm = self._X_boundary_norm[idx_idealgas, :]
+        lambda_labels = ["dsdrho_e"]
+        return [proj_rho], [target_grad_rho], lambda_labels
     
     @tf.function
     def CollectVariables(self):
@@ -683,7 +735,6 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
             self._trainable_hyperparams.append(W)
         for b in self._biases[:-1]:
             self._trainable_hyperparams.append(b)
-        
         return 
     
     @tf.function
@@ -761,72 +812,16 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         return self.TD_Evaluation(X_norm)
     
     @tf.function 
-    def ComputeStateError(self, Y_state_label_norm:tf.constant, X_label_norm:tf.constant):
+    def ComputeStateError(self, X_label_norm:tf.constant,Y_state_label_norm:tf.constant):
         Y_state_pred = self.EvaluateState(X_label_norm)
         Y_state_pred_norm = (Y_state_pred - self._Y_state_offset_tf)/self._Y_state_scale_tf
         pred_error = tf.reduce_mean(tf.pow(Y_state_pred_norm - Y_state_label_norm, 2), axis=0)
         return pred_error
     
-  
-    @tf.function 
-    def ComputeGradients_State_error(self, Y_state_label_norm:tf.constant, X_label_norm:tf.constant):
-        with tf.GradientTape() as tape:
-            tape.watch(self._trainable_hyperparams)
-            state_loss = self.ComputeStateError(Y_state_label_norm, X_label_norm)
-
-            grads_state = tape.gradient(tf.reduce_mean(state_loss), self._trainable_hyperparams)
-
-        return state_loss, grads_state 
-    
-    @tf.function
-    def ComputeGradient_State_error(self, Y_state_label_norm:tf.constant, X_label_norm:tf.constant, iVar:int):
-        with tf.GradientTape() as tape:
-            tape.watch(self._trainable_hyperparams)
-            state_loss = self.ComputeStateError(Y_state_label_norm, X_label_norm)[iVar]
-
-            grads_state = tape.gradient(tf.reduce_mean(state_loss), self._trainable_hyperparams)
-        return state_loss, grads_state 
-    
-    
-    @tf.function
-    def Train_Step(self, X_batch_norm:tf.constant, Y_batch_norm:tf.constant):
-
-        return self.Train_Step_state(X_batch_norm, Y_batch_norm)
-    
-    @tf.function 
-    def Train_Step_state(self, X_batch_norm:tf.constant, Y_batch_norm:tf.constant):
-
-        # Gauss-Seidel style iteration over the state variables to update the weights
-        for ivar in range(len(self._state_vars)):
-            _, grads_loss = self.ComputeGradient_State_error(Y_batch_norm, X_batch_norm, ivar)
-            self._optimizer.apply_gradients(zip(grads_loss, self._trainable_hyperparams))
-
-        state_loss, _ = self.ComputeGradients_State_error(Y_batch_norm,X_batch_norm)
-        return state_loss
-    
-    def ValidationLoss(self):
-        return self.__ValidationLoss()
     
     def PrintEpochInfo(self, i_epoch, val_loss):
         if self._verbose > 0:
             print(("Epoch %i Validation loss " % i_epoch) + ", ".join((" %s: %.4e" % (self._state_vars[iVar], val_loss[iVar])) for iVar in range(len(self._state_vars))))
-        return 
-    
-    def __ValidationLoss(self):
-        rhoe_val_norm = tf.constant(self._X_val_norm, self._dt)
-        state_val_error = self.ComputeStateError(self._Y_state_val_norm,rhoe_val_norm)
-        for var in self._state_vars:
-            self.val_loss_history[self._state_vars.index(var)].append(state_val_error[self._state_vars.index(var)])
-        return state_val_error
-    
-    def TestLoss(self):
-        
-        rhoe_test_norm = tf.constant(self._X_test_norm, self._dt)
-
-        state_test_loss_norm = self.ComputeStateError(self._Y_state_test_norm,rhoe_test_norm)
-        self.state_test_loss = state_test_loss_norm.numpy()
-        self._test_score = tf.reduce_max(state_test_loss_norm)
-
         return 
     
     def CustomCallback(self):
@@ -936,7 +931,6 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
 
         self._trainer_direct = Train_Entropic_Direct()
         self.__trainer_PINN = Train_Entropic_PINN()
-        self.__trainer_PINN.SetScaler("minmax")
         self.lr_decay = DefaultSettings_NICFD.learning_rate_decay
         self.alpha_expo = DefaultSettings_NICFD.init_learning_rate_expo
         self.activation_function = DefaultSettings_NICFD.activation_function
@@ -945,7 +939,7 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
             self.architecture.append(n)
 
         EvaluateArchitecture.__init__(self, Config_in=Config_in)
-        
+        self._scaler = "minmax"
         self._state_vars = Config_in.GetStateVars().copy()
 
         self.SynchronizeTrainer()
@@ -1013,13 +1007,15 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
         self.__trainer_PINN.Train_MLP()
         self.__trainer_PINN.PostProcessing()
 
-        fid = open(self.main_save_dir + "/current_iter.txt", "w+")
+        fid = open(self.worker_dir + "/current_iter.txt", "w+")
         fid.write(str(self.current_iter) + "\n")
         fid.close()
         return 
     
     def TrainPostprocessing(self):
         self._test_score = self.__trainer_PINN.GetTestScore()
+        if np.isnan(self._test_score):
+            self._test_score = 1e2
         self._cost_parameter = self.__trainer_PINN.GetCostParameter()
         self.__trainer_PINN.Save_Relevant_Data()
         return           
