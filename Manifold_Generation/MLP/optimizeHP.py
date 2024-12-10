@@ -244,6 +244,11 @@ class MLPOptimizer:
         self.__alpha_expo_max = alpha_expo_max
         return 
     
+    def SetBounds_LR_Decay(self, lr_decay_min:float=0.8, lr_decay_max:float=1.0):
+        self.__lr_decay_max = lr_decay_max
+        self.__lr_decay_min = lr_decay_min
+        return 
+    
     def Optimize_Batch_HP(self, optimize_batch:bool=True):
         """Consider the mini-batch size exponent as a hyper-parameter during optimization.
 
@@ -305,6 +310,20 @@ class MLPOptimizer:
         self.__batch_expo_max = batch_expo_max
 
         return
+    
+    def SetBounds_NLayers(self, Nlayers_min:int=2, Nlayers_max:int=10):
+        if Nlayers_max <=Nlayers_min:
+            raise Exception("Upper bound value should exceed lower bound value.")
+        if Nlayers_min < 1 or Nlayers_max < 1:
+            raise Exception("Number of hidden layers should be higher than one.")
+        self.NLayers_max = Nlayers_max
+        self.NLayers_min = Nlayers_min
+        return 
+    
+    def SetBounds_NNeurons(self, NN_min:int=6, NN_max:int=40):
+        self.__NN_min = NN_min
+        self.__NN_max = NN_max 
+        return 
     
     def Optimize_Architecture_HP(self, optimize_architecture:bool=True):
         """Consider the hidden layer perceptron count as a hyper-parameter during optimization.
@@ -802,19 +821,55 @@ class MLPOptimizer:
         return -self.fitnessFunction(x=x)
     
     
-    def SaveOptimizer(self, file_name:str):
-        """Save optimizer instance.
+    # def SaveOptimizer(self, file_name:str):
+    #     """Save optimizer instance.
 
-        :param file_name: file name under which to save the optimizer instance.
-        :type file_name: str
-        """
+    #     :param file_name: file name under which to save the optimizer instance.
+    #     :type file_name: str
+    #     """
 
-        file = open(self._Config.GetOutputDir()+"/"+file_name+'.hpo','wb')
-        pickle.dump(self, file)
-        file.close()
-        return 
+    #     file = open(self._Config.GetOutputDir()+"/"+file_name+'.hpo','wb')
+    #     pickle.dump(self, file)
+    #     file.close()
+    #     return 
     
+class MLPOptimizer_NICFD(MLPOptimizer):
+    _activation_function:str = "exponential"
 
+    def _prepare_evaluator(self):
+        return EvaluateArchitecture_NICFD(self._Config)
+    def _postprocess_optimization(self, x):
+
+        Config:EntropicAIConfig = EntropicAIConfig(self._Config.GetConfigName() + ".cfg")
+        idx_x = 0
+        print("Optimized hyper-parameters:")
+        if self._optimizebatch:
+            batch_expo = int(x[idx_x])
+            Config.SetBatchExpo(batch_expo)
+            idx_x += 1 
+            print("- mini-batch exponent: %i" % batch_expo)
+        if self._optimizeLR:
+            alpha_expo = x[idx_x]
+            idx_x += 1 
+            print("- initial learning rate exponent: %.5e" % (alpha_expo))
+            Config.SetAlphaExpo(alpha_expo)
+            lr_decay = x[idx_x]
+            print("- learning rate decay parameter: %.5e" % lr_decay)
+            Config.SetLRDecay(lr_decay)
+            idx_x += 1 
+        if self._optimizeNN:
+            architecture = [int(x[idx_x])]
+            idx_x += 1 
+            print("- hidden layer architecture: "+ " ".join(("%i" % n) for n in architecture))
+            Config.SetHiddenLayerArchitecture(architecture)
+        if self._optimizephi:
+            phi = self.__activation_function_options[int(x[idx_x])]
+            idx_x += 1
+            print("- hidden layer activation function: %s" % phi)
+            Config.SetActivationFunction(phi)
+        
+        Config.SaveConfig()
+        return
 class MLPOptimizer_FGM(MLPOptimizer):
     __output_group:int = 0 
     _activation_function:str="gelu"
