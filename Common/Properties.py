@@ -196,4 +196,5 @@ ActivationFunctionOptions = {"linear" : tf.keras.activations.linear,\
                              "tanh" : tf.keras.activations.tanh,\
                              "exponential" : tf.keras.activations.exponential,\
                              "gelu" : tf.keras.activations.gelu,\
-                             "sigmoid" : tf.keras.activations.sigmoid}
+                             "sigmoid" : tf.keras.activations.sigmoid,\
+                             "swish" : tf.keras.activations.swish}
