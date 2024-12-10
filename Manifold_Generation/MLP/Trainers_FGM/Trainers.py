@@ -76,9 +76,15 @@ class Train_Flamelet_Direct(TensorFlowFit):
         fid.write("\n\n")
         return super().add_additional_header_info(fid)
     
+    
     def SetDecaySteps(self):
-        self._decay_steps=0.01157 * self._Np_train
+        self._decay_steps=int(0.01*float(self._Np_train) / (2**self._batch_expo))
         return 
+
+
+    # def SetDecaySteps(self):
+    #     self._decay_steps=0.01157 * self._Np_train
+    #     return 
 
     def GetTrainData(self):
         super().GetTrainData()
@@ -123,13 +129,13 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         self._activation_function = self.__Config.GetActivationFunction(group_idx)
         self.SetHiddenLayers(self.__Config.GetHiddenLayerArchitecture(group_idx))
         self._train_name = "Group"+str(group_idx+1)
-
+        self.SetTrainStepType("Jacobi")
+        self._enable_boundary_loss=True
+        self._boundary_loss_patience=-1
         return 
-    
     def SetDecaySteps(self):
         self._decay_steps=0.01157 * self._Np_train
         return 
-    
     def GetTrainData(self):
         """Read domain and boundary training data and pre-process reactant-product matrices for visualization.
         """
@@ -566,8 +572,8 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
     def PostProcessing(self):
 
         # Apply correction for heat release and/or pv source term.
-        if any([(v == FGMVars.Heat_Release.name or v == FGMVars.ProdRateTot_PV.name) for v in self._train_vars]):
-            self.__SourcetermCorrection()
+        # if any([(v == FGMVars.Heat_Release.name or v == FGMVars.ProdRateTot_PV.name) for v in self._train_vars]):
+        #     self.__SourcetermCorrection()
         self.__PlotUnbData()
 
         return super().PostProcessing()
@@ -707,8 +713,20 @@ class EvaluateArchitecture_FGM(EvaluateArchitecture):
         self.main_save_dir = self._Config.GetOutputDir() + "/architectures_"+self.__group_name
         if not os.path.isdir(self.main_save_dir):
             os.mkdir(self.main_save_dir)
+        self.alpha_expo = self._Config.GetAlphaExpo(self.__output_group)
+        self.lr_decay = self._Config.GetLRDecay(self.__output_group)
+        self.batch_expo = self._Config.GetBatchExpo(self.__output_group)
+        self.activation_function = self._Config.GetActivationFunction(self.__output_group)
+        self.architecture = []
+        for n in self._Config.GetHiddenLayerArchitecture(self.__output_group):
+            self.architecture.append(n)
         self.CheckPINNVars()
         self.SynchronizeTrainer()
+        return 
+    
+    def EnableBCLoss(self, enable_bc_loss:bool=True):
+        if self.__kind_trainer == "physicsinformed":
+            self.__trainer_PINN.EnableBCLoss(enable_bc_loss)
         return 
     
     def CheckPINNVars(self):
