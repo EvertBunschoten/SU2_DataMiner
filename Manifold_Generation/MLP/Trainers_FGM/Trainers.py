@@ -77,14 +77,14 @@ class Train_Flamelet_Direct(TensorFlowFit):
         return super().add_additional_header_info(fid)
     
     
-    def SetDecaySteps(self):
-        self._decay_steps=int(0.01*float(self._Np_train) / (2**self._batch_expo))
-        return 
-
-
     # def SetDecaySteps(self):
-    #     self._decay_steps=0.01157 * self._Np_train
+    #     self._decay_steps=int(0.01*float(self._Np_train) / (2**self._batch_expo))
     #     return 
+
+
+    def SetDecaySteps(self):
+        self._decay_steps=0.01157 * self._Np_train
+        return 
 
     def GetTrainData(self):
         super().GetTrainData()
@@ -456,7 +456,7 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
             gas_unb.TP = T_range[-1], DefaultProperties.pressure
             H_max = gas_unb.enthalpy_mass
             gas_b.TP = T_range[0], DefaultProperties.pressure
-            gas_b.equilibrate("TP")
+            gas_b.equilibrate("HP")
             gas_b.HP = H_max, DefaultProperties.pressure 
             T_range_b = np.linspace(self.__Config.GetUnbTempBounds()[0], gas_b.T, self.__Config.GetNpTemp())
             pv_b = self.__Config.ComputeProgressVariable(variables=None, flamelet_data=None, Y_flamelet=gas_b.Y[:,np.newaxis])[0]
@@ -548,10 +548,10 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         """
 
         # Evaluate MLP predictions on chemical equilibrium data.
-        Y_pred_boundary_norm = self.EvaluateMLP(self._X_boundary_norm)
+        X_boundary = self.scaler_function_x.inverse_transform(self._X_boundary_norm)
+        Y_pred_boundary = self.EvaluateMLP(X_boundary)
 
         # Check maximum predicted source term value.
-        Y_pred_boundary = self.scaler_function_y.inverse_transform(Y_pred_boundary_norm)
         Y_pred_boundary_max = np.max(Y_pred_boundary, axis=0)
         Y_pred_boundary_max = np.maximum(Y_pred_boundary_max, 0.0)
 
@@ -572,8 +572,8 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
     def PostProcessing(self):
 
         # Apply correction for heat release and/or pv source term.
-        # if any([(v == FGMVars.Heat_Release.name or v == FGMVars.ProdRateTot_PV.name) for v in self._train_vars]):
-        #     self.__SourcetermCorrection()
+        if any([(v == FGMVars.Heat_Release.name or v == FGMVars.ProdRateTot_PV.name) for v in self._train_vars]):
+            self.__SourcetermCorrection()
         self.__PlotUnbData()
 
         return super().PostProcessing()
@@ -846,8 +846,7 @@ def PlotFlameletData(Trainer:MLPTrainer, Config:FlameletAIConfig, train_name:str
                 ref_data_flamelet[:, iVar] = flameletData[:, variables_flamelet.index(Var)]
 
         # Compute MLP prediction of flamelet data.
-        pred_data_norm = Trainer.EvaluateMLP(CV_flamelet_norm)
-        pred_data = Trainer.scaler_function_y.inverse_transform(pred_data_norm)#(Trainer._Y_max - Trainer._Y_min) * pred_data_norm + Trainer._Y_min
+        pred_data = Trainer.EvaluateMLP(CV_flamelet)
         # Plot flamelet data in corresponding figure window.
         for iVar, Var in enumerate(Trainer._train_vars):
             axs[iVar].plot(CV_flamelet[:, 0], ref_data_flamelet[:, iVar], 'bs-', linewidth=2, markevery=10, markerfacecolor='none', markersize=12, label=plot_label_ref)
