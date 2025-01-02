@@ -662,8 +662,8 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         return 
     
     def SetStateVars(self, state_vars_in:list[str]):
-        if any((v not in DefaultSettings_NICFD.supported_state_vars) for v in state_vars_in):
-            raise Exception("Only the following state variables are supported: "+ ",".join((v for v in DefaultSettings_NICFD.supported_state_vars)))
+        # if any((v not in DefaultSettings_NICFD.supported_state_vars) for v in state_vars_in):
+        #     raise Exception("Only the following state variables are supported: "+ ",".join((v for v in DefaultSettings_NICFD.supported_state_vars)))
         self._state_vars = state_vars_in.copy()
         return 
 
@@ -793,8 +793,13 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         dhdP_rho = dhde_rho * (1 / dPde_rho)
         dsdrho_P = dsdrho_e - dPdrho_e * (1 / dPde_rho) * dsde_rho
         dsdP_rho = dsde_rho / dPde_rho
+
+        drhode_p = -dPde_rho/dPdrho_e
+        dTde_p = dTde_rho + dTdrho_e*drhode_p
+        dhde_p = dhde_rho + drhode_p*dhdrho_e
+        Cp = dhde_p / dTde_p
         
-        Y_state = tf.stack((rho, e, T, P, c2, s, dsdrho_e, dsde_rho, d2sdrho2, d2sdedrho, d2sde2, dTdrho_e, dTde_rho, dPdrho_e, dPde_rho, dhdrho_e, dhde_rho, dhdP_rho, dhdrho_P, dsdP_rho, dsdrho_P),axis=1)
+        Y_state = tf.stack((rho, e, T, P, c2, s, dsdrho_e, dsde_rho, d2sdrho2, d2sdedrho, d2sde2, dTdrho_e, dTde_rho, dPdrho_e, dPde_rho, dhdrho_e, dhde_rho, dhdP_rho, dhdrho_P, dsdP_rho, dsdrho_P, Cp),axis=1)
         Y_state_selected = tf.stack(tf.tuple(Y_state[:,EntropicVars[var].value] for var in self._state_vars),axis=1)
         return Y_state_selected
     
@@ -912,6 +917,68 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
 
         return
     
+           
+def transform_dsdrho(dsdrho_untransformed):
+        return np.log(-dsdrho_untransformed)
+def transform_d2sdrho2(d2sdrho2_untransformed):
+    return np.log(d2sdrho2_untransformed)
+
+class Train_Entropic_Segregated(TensorFlowFit):
+    """Class for training MLP on segregated entropy derivatives using direct training.
+    """
+
+    def __init__(self):
+        TensorFlowFit.__init__(self)
+
+        self._controlling_vars = DefaultSettings_NICFD.controlling_variables
+        self._hidden_layers = []
+        for NN in DefaultSettings_NICFD.hidden_layer_architecture:
+            self._hidden_layers.append(NN)
+
+        self._train_vars = [EntropicVars.s.name,\
+                            EntropicVars.dsdrho_e.name,\
+                            EntropicVars.dsde_rho.name,\
+                            EntropicVars.d2sdrho2.name,\
+                            EntropicVars.d2sdrhode.name,\
+                            EntropicVars.d2sde2.name]
+        return 
+    
+    def TransformData(self, Y_untransformed):
+        """Transform first and second entropy derivative w.r.t. density through logarithmic scaling.
+
+        :param Y_untransformed: raw training data array.
+        :type Y_untransformed: np.ndarray[float]
+        :return: transformed training data array.
+        :rtype: np.ndarray[float]
+        """
+        idx_dsdrho_e = self._train_vars.index(EntropicVars.dsdrho_e.name)
+        idx_d2sdrho2 = self._train_vars.index(EntropicVars.d2sdrho2.name)
+        dsdrho_untransformed = Y_untransformed[:,idx_dsdrho_e]
+        d2sdrho2_untransformed = Y_untransformed[:,idx_d2sdrho2]
+        dsdrho_transformed = transform_dsdrho(dsdrho_untransformed)
+        d2sdrho2_transformed = transform_d2sdrho2(d2sdrho2_untransformed)
+        Y_transformed = Y_untransformed
+        Y_transformed[:, idx_dsdrho_e] = dsdrho_transformed
+        Y_transformed[:, idx_d2sdrho2] = d2sdrho2_transformed
+
+        return Y_transformed
+    
+    def TransformData_Inv(self, Y_transformed):
+        idx_dsdrho_e = self._train_vars.index(EntropicVars.dsdrho_e.name)
+        idx_d2sdrho2 = self._train_vars.index(EntropicVars.d2sdrho2.name)
+        dsdrho_transformed = Y_transformed[:,idx_dsdrho_e]
+        d2sdrho2_transformed = Y_transformed[:,idx_d2sdrho2]
+        dsdrho_untransformed = -np.exp(dsdrho_transformed)
+        d2sdrho2_untransformed = np.exp(d2sdrho2_transformed)
+        Y_untransformed = Y_transformed
+        Y_untransformed[:, idx_dsdrho_e] = dsdrho_untransformed
+        Y_untransformed[:, idx_d2sdrho2] = d2sdrho2_untransformed
+        return Y_untransformed
+    
+    def add_additional_header_info(self, fid):
+        fid.write("Inverse transform dsdrho_e: -exp(dsdrho_e)\nInverse transform d2sdrho2: exp(d2sdrho2)\n")
+        return 
+    
 class EvaluateArchitecture_NICFD(EvaluateArchitecture):
     """Class for training MLP architectures
     """
@@ -954,8 +1021,8 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
         :raises Exception: if any of the state variables is not supported.
         """
 
-        if any((v not in DefaultSettings_NICFD.supported_state_vars) for v in state_vars_in):
-            raise Exception("Only the following state variables are supported: "+ ",".join((v for v in DefaultSettings_NICFD.supported_state_vars)))
+        # if any((v not in DefaultSettings_NICFD.supported_state_vars) for v in state_vars_in):
+        #     raise Exception("Only the following state variables are supported: "+ ",".join((v for v in DefaultSettings_NICFD.supported_state_vars)))
         self._state_vars = state_vars_in.copy()
         self.SynchronizeTrainer()
         
@@ -1019,3 +1086,22 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
         self._cost_parameter = self.__trainer_PINN.GetCostParameter()
         self.__trainer_PINN.Save_Relevant_Data()
         return           
+    
+
+class EvaluateArchitecture_NICFD_Segregated(EvaluateArchitecture):
+    """Driver class for training a segregated entropic MLP.
+    """
+    def __init__(self, Config_in:EntropicAIConfig):
+
+        # Use segregated MLP trainer
+        self._trainer_direct = Train_Entropic_Segregated()
+        self.lr_decay = DefaultSettings_NICFD.learning_rate_decay
+        self.alpha_expo = DefaultSettings_NICFD.init_learning_rate_expo
+        self.activation_function = DefaultSettings_NICFD.activation_function
+        self.architecture = []
+        for n in DefaultSettings_NICFD.hidden_layer_architecture:
+            self.architecture.append(n)
+
+        EvaluateArchitecture.__init__(self, Config_in=Config_in)
+        self.SynchronizeTrainer()
+        return 
