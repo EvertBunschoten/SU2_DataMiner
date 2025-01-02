@@ -61,7 +61,7 @@ class MLPOptimizer:
     # Mini-batch exponent (base 2) for training.
     _optimizebatch:bool = True 
     _batch_expo:int = DefaultProperties.batch_size_exponent
-    __batch_expo_min:int=3
+    __batch_expo_min:int=4
     __batch_expo_max:int=7
     
     # Optimize learning rate decay parameters.
@@ -1013,6 +1013,8 @@ class PlotHPOResults:
                 lines = fid.readlines()
 
             validation_loss = float(lines[1].strip().split(":")[-1])
+            if np.isnan(validation_loss):
+                validation_loss = 1e1
             NN = [int(s) for s in lines[-1].strip().split(":")[-1].split()]
             cost_param = float(lines[4].strip().split(':')[-1])
             alpha_expo = float(lines[5].strip().split(':')[-1])
