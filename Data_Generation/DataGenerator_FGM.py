@@ -694,9 +694,16 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         if not path.isdir(self.GetOutputDir() + "/equilibrium_data/" + folder_header+"_"+str(round(mix_status,6))):
             mkdir(self.GetOutputDir() + "/equilibrium_data/" + folder_header+"_"+str(round(mix_status,6)))
         
+        is_lean = False
         if self.__define_equivalence_ratio:
             gas_eq.set_equivalence_ratio(mix_status, self.__fuel_string, self.__oxidizer_string)
+            if mix_status < 1.0:
+                is_lean = True
         else:
+            gas_eq.set_equivalence_ratio(1.0, self.__fuel_string, self.__oxidizer_string)
+            z_stoch = gas_eq.mixture_fraction(self.__fuel_string, self.__oxidizer_string)
+            if mix_status < z_stoch:
+                is_lean = True
             gas_eq.set_mixture_fraction(mix_status, self.__fuel_string, self.__oxidizer_string)
 
         gas_eq.TP = max(T_range), ct.one_atm 
@@ -704,7 +711,10 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         # In case of reaction products, set the maximum enthalpy to that of the reactants at the maximum temperature.
         if burnt:
             gas_eq.TP = min(T_range), ct.one_atm 
-            gas_eq.equilibrate('TP')
+            if is_lean:
+                gas_eq.equilibrate("TP")
+            else:
+                gas_eq.equilibrate('HP')
             gas_eq.HP = H_max, ct.one_atm
             T_range = np.linspace(min(T_range), gas_eq.T, len(T_range))
 
