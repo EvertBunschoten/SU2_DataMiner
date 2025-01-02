@@ -424,7 +424,9 @@ class MLPTrainer:
         """
 
         # Evaluate the MLP on the input test set data.
-        pred_data_norm = self.EvaluateMLP(self._X_test_norm)
+        X_test = self.scaler_function_x.inverse_transform(self._X_test_norm)
+        pred_data_dim = self.EvaluateMLP(X_test)
+        pred_data_norm = self.scaler_function_y.transform(self.TransformData(pred_data_dim))
         ref_data_norm = self._Y_test_norm 
 
         pred_data_norm[np.isnan(pred_data_norm)] = 10.0
@@ -462,6 +464,12 @@ class MLPTrainer:
         fig.savefig(self._save_dir + "/Model_"+str(self._model_index) + "/Predict_along_CVs."+self._figformat, format=self._figformat, bbox_inches='tight')
         plt.close(fig)
         return 
+    
+    def TransformData(self, Y_untransformed):
+        return Y_untransformed
+    
+    def TransformData_Inv(self, Y_transformed):
+        return Y_transformed 
     
     def GetTrainData(self):
         """
@@ -518,7 +526,8 @@ class MLPTrainer:
             Y_full = np.zeros(np.shape(X_full)[0])
         else:
             X_full, Y_full = GetReferenceData(MLPData_filepath + "_full.csv", x_vars, y_vars)
-        
+        Y_full = self.TransformData(Y_full)
+
         scaler_x.fit(X_full)
         scaler_y.fit(Y_full)
         
@@ -535,6 +544,9 @@ class MLPTrainer:
             if self._verbose > 0:
                 print("Done!")
 
+            Y_train = self.TransformData(Y_train)
+            Y_test = self.TransformData(Y_test)
+            Y_val = self.TransformData(Y_val)
 
             # Normalize train, test, and validation controlling variables
             X_train_norm = scaler_x.transform(X_train)
@@ -688,8 +700,20 @@ class TensorFlowFit(MLPTrainer):
     history_loss = []
     history_val_loss = []
 
+    __loaded_custom_weights:bool = False
+    __custom_model_weights = []
     def __init__(self):
         MLPTrainer.__init__(self)
+        return 
+    
+    def LoadWeights(self, weights_in: list[np.ndarray], biases_in: list[np.ndarray]):
+        super().LoadWeights(weights_in, biases_in)
+        self.__loaded_custom_weights = True 
+        self.__custom_model_weights = []
+        for w, b in zip(self._weights, self._biases):
+            self.__custom_model_weights.append(w)
+            self.__custom_model_weights.append(b)
+            
         return 
     
     # Construct MLP based on architecture information
@@ -714,6 +738,8 @@ class TensorFlowFit(MLPTrainer):
             # Add output layer
             self._model.add(keras.layers.Dense(len(self._train_vars), activation='linear'))
 
+            if self.__loaded_custom_weights:
+                self._model.set_weights(self.__custom_model_weights)
             # Define learning rate schedule and optimizer
             self.SetDecaySteps()
             #self._decay_steps = 1e4
@@ -725,9 +751,12 @@ class TensorFlowFit(MLPTrainer):
             self._model.compile(optimizer=opt, loss="mean_squared_error", metrics=["mape"])
         return 
     
-    def EvaluateMLP(self,input_data_norm):
+    def EvaluateMLP(self,input_data_dim):
+        input_data_norm = self.scaler_function_x.transform(input_data_dim)
         pred_data_norm = self._model.predict(input_data_norm, verbose=0)
-        return pred_data_norm
+        pred_data_dim = self.scaler_function_y.inverse_transform(pred_data_norm)
+        pred_data_dim_out = self.TransformData_Inv(pred_data_dim)
+        return pred_data_dim_out
     
     # Initialize MLP training 
     def Train_MLP(self):
@@ -946,7 +975,7 @@ class CustomTrainer(MLPTrainer):
         Y = self.ComputeLayerInput(Y, w[-1], b[-1])
         return Y 
     
-    def EvaluateMLP(self, input_data_norm:np.ndarray):
+    def EvaluateMLP(self, input_data_dim:np.ndarray):
         """Evaluate MLP for a given set of normalized input data.
 
         :param input_data_norm: array of normalized controlling variable data.
@@ -955,11 +984,15 @@ class CustomTrainer(MLPTrainer):
         :return: MLP output data for the given inputs.
         :rtype: np.ndarray
         """
-        if np.shape(input_data_norm)[1] != len(self._controlling_vars):
-            raise Exception("Number of input variables ("+str(np.shape(input_data_norm)[1]) + ") \
+        if np.shape(input_data_dim)[1] != len(self._controlling_vars):
+            raise Exception("Number of input variables ("+str(np.shape(input_data_dim)[1]) + ") \
                             does not equal the MLP input dimension ("+str(len(self._controlling_vars))+")")
+        input_data_norm = self.scaler_function_x.transform(input_data_dim)
         input_data_tf = tf.constant(input_data_norm, tf.float32)
-        return self._MLP_Evaluation(input_data_tf).numpy()
+        output_data_norm = self._MLP_Evaluation(input_data_tf).numpy()
+        output_data_dim = self.scaler_function_y.inverse_transform(output_data_norm)
+        output_data_dim_transformed = self.TransformData_Inv(output_data_dim)
+        return output_data_dim_transformed
     
     @tf.function
     def mean_square_error(self, y_true, y_pred):
@@ -1641,7 +1674,6 @@ class EvaluateArchitecture:
         
         # Define MLPTrainer object with default settings (currently only supports TensorFlowFit)
         self._train_file_header = self._Config.GetOutputDir()+"/"+self._Config.GetConcatenationFileHeader()
-
         self.SynchronizeTrainer()
         pass
 
