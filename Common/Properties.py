@@ -64,6 +64,7 @@ class EntropicVars(Enum):
     dhdrho_p=auto()
     dsdp_rho=auto()
     dsdrho_p=auto()
+    cp=auto()
     N_STATE_VARS=auto()
 
 class FGMVars(Enum):
