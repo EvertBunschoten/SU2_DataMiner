@@ -30,9 +30,10 @@ import os
 from numpy.core.multiarray import array as array
 from tqdm import tqdm
 import matplotlib.pyplot as plt 
-from scipy.optimize import differential_evolution, Bounds, LinearConstraint
+from scipy.optimize import differential_evolution, Bounds, LinearConstraint, minimize
+from sklearn.decomposition import PCA
 
-from Common.Properties import FGMVars
+from Common.Properties import FGMVars, DefaultProperties
 from Common.DataDrivenConfig import FlameletAIConfig
 
 class PVOptimizer:
@@ -51,7 +52,7 @@ class PVOptimizer:
     _Y_flamelets = None   # Flamelet mass fraction data
     _idx_relevant_species:np.ndarray[float] = None  # Indices of species with a high enough range to be considered as pv species.
     __additional_variables:list[str] = []   # Additional variable names to consider in the definition of the progress vector.
-    __idx_additional_vars:list[int] = []    # Indices of additional variables.
+    _idx_additional_vars:list[int] = []    # Indices of additional variables.
 
     _delta_Y_flamelets:np.ndarray[float] = None # Flamelet species mass fraction increment vector.
     _progress_vector:np.ndarray[float] = None   # Progress vector values of flamelet data set.
@@ -108,12 +109,16 @@ class PVOptimizer:
             os.mkdir(self._Config.GetOutputDir()+"/PV_Optimization")
         self._output_dir = self._Config.GetOutputDir()+"/PV_Optimization/"
 
-        self.SetAdditionalProgressVariables([FGMVars.Temperature.name, \
-                                             FGMVars.MolarWeightMix.name,\
-                                             FGMVars.Conductivity.name,\
-                                             FGMVars.Heat_Release.name,\
-                                             FGMVars.Cp.name,\
-                                             FGMVars.ViscosityDyn.name])
+        self.SetAdditionalProgressVariables([])
+        # self.SetAdditionalProgressVariables([FGMVars.Temperature.name, \
+        #                                      FGMVars.MolarWeightMix.name,\
+        #                                      FGMVars.Conductivity.name,\
+        #                                      FGMVars.Heat_Release.name,\
+        #                                      FGMVars.Cp.name,\
+        #                                      FGMVars.ViscosityDyn.name,\
+        #                                      FGMVars.Beta_Enth_Thermal.name,\
+        #                                      FGMVars.Beta_Enth.name,\
+        #                                      FGMVars.Beta_MixFrac.name])
         return 
     
     def SetOutputDir(self, output_dir:str):
@@ -207,7 +212,7 @@ class PVOptimizer:
         self._CollectFlameletData()
         print("Initiating Progress Variable Optimization")
         print("Relevant species in definition: " + ", ".join(s for s in self._pv_definition_optim))
-        if any(self.__idx_additional_vars):
+        if any(self.__additional_variables):
             print("Additional variables in progress vector: " + ", ".join(v for v in self.__additional_variables))
 
         self._current_generation = 0
@@ -228,7 +233,16 @@ class PVOptimizer:
         np.save(self._output_dir + "/" + self._Config.GetConfigName() + "_Weights_optim.npy", self._pv_weights_optim, allow_pickle=True)
         return
     
-
+    def CheckMonotonicity(self):
+        monotonicity_full = LinearConstraint(self._delta_Y_flamelets, lb=0.0,keep_feasible=True)
+        
+        res_full = min(monotonicity_full.residual(self._pv_weights_optim)[0])
+        if res_full > 0:
+            print("PV definition is monotonic")
+        else:
+            print("PV definition is not monotonic!")
+        return 
+    
     def _CollectFlameletData(self):
         """Load flamelet manifold data from storage.
         """
@@ -295,8 +309,26 @@ class PVOptimizer:
         pv_term = np.dot(self._delta_Y_flamelets, pv_w)
         y_term = self._progress_vector[:,0]
         fac = y_term / pv_term
-        result = np.max(np.abs(fac))# + np.sum(np.power(fac[pv_term < 0.0],2))
-        return result
+        abs_fac = np.abs(fac)
+
+        # Varience function:
+        #avg_fac = np.average(abs_fac)
+        #fac_variance = np.average(np.power(abs_fac - avg_fac, 2))
+        #result = fac_variance + np.sum(np.power(fac[pv_term < 0.0],2))
+
+        # Average function:
+        #result = avg_fac + np.sum(np.power(fac[pv_term < 0.0],2))
+
+        # Max grad:
+        result = np.max(abs_fac) + np.sum(np.power(fac[pv_term < 0.0],2))
+        return result 
+    
+    def monotonicity_penalty(self, x):
+        pv_w = x / np.linalg.norm(x)
+        pv_term = np.dot(self._delta_Y_flamelets, pv_w)
+        y_term = self._progress_vector[:,0]
+        fac = y_term / pv_term
+        return np.sum(np.power(fac[pv_term < 0.0],2))
     
     def _Optimization_Callback(self, x:np.array,convergence:bool=False):
         """Callback function during progress variable optimization.
@@ -346,7 +378,8 @@ class PVOptimizer:
             raise Exception("Number of generations should be higher than one.")
         self.__custom_generation_set = True
         self._N_generations = n_generations
-
+        return 
+    
     def SetPopulationSize(self, popsize:int):
         """Define the number of individuals per generation.
 
@@ -398,15 +431,18 @@ class PVOptimizer:
 
         # Implement user-defined bounds if specified.
         for isp, sp in enumerate(self._species_bounds_set):
-            # if sp not in self._pv_definition_optim:
-            #     raise Warning("Specie " + sp + " not in relevant species, custom bounds are ignored.")
-            # else:
             try:
                 idx = self._pv_definition_optim.index(sp)
                 lb[idx] = self._species_custom_lb[isp]
                 ub[idx] = self._species_custom_ub[isp]
             except:
                 pass
+        
+        self._Config.gas.set_equivalence_ratio(1.0, self._Config.GetFuelString(), self._Config.GetOxidizerString())
+        self._Config.gas.TP = self._Config.GetUnbTempBounds()[0], 101325
+        self.__Y_stoch_unb = self._Config.gas.Y
+        self._Config.gas.equilibrate("TP")
+        self.__Y_stoch_b = self._Config.gas.Y 
 
         bounds = Bounds(lb=lb, ub=ub)
         # Generate convergence output file.
@@ -421,7 +457,6 @@ class PVOptimizer:
         else:
             update_strategy = "immediate"
 
-        monotonicity_full = LinearConstraint(self._delta_Y_flamelets, lb=0.0,keep_feasible=True)
         # Initiate evolutionary algorithm.
         print("Generation,Penalty," + ",".join(s for s in self._pv_definition_optim))
         result = differential_evolution(func = self.penalty_function,\
@@ -435,13 +470,19 @@ class PVOptimizer:
                                         seed=1,\
                                         tol=1e-3)
         
-        res_full = min(monotonicity_full.residual(result.x)[0])
-        if res_full > 0:
-            print("PV definition is monotonic")
-        else:
-            print("PV definition is not monotonic!")
+        # Initiate simplex search algorithm.
+        result = minimize(self.penalty_function, \
+                          result.x, \
+                          method='Nelder-Mead', \
+                          bounds=bounds,\
+                          callback=self._Optimization_Callback)
+
         # Post-processing for best solution.
         self._Optimization_Callback(result.x)
+
+        # Check if optimized progress variable is monotonic.
+        self.CheckMonotonicity()
+
         print("Progress variable definition upon completion:")
         print("".join("%+.4e %s" % (self._pv_weights_optim[i], self._pv_definition_optim[i]) for i in range(len(self._pv_weights_optim))))
         return
@@ -451,8 +492,9 @@ class PVOptimizer:
         """
 
         # Compute reactant progress variable at stochiometry.
-        self._Config.gas.set_equivalence_ratio(1.0, "H2:1","O2:1,N2:3.76")
-        self._Config.gas.TP=300, 101325
+        self._Config.gas.set_equivalence_ratio(1.0, self._Config.GetFuelString(),\
+                                                    self._Config.GetOxidizerString())
+        self._Config.gas.TP=self._Config.GetUnbTempBounds()[0], 101325
         pv_unburnt = 0
         for iPv, pv in enumerate(self._pv_definition_optim):
             pv_unburnt += self._pv_weights_optim[iPv] * self._Config.gas.Y[self._Config.gas.species_index(pv)]
@@ -470,11 +512,13 @@ class PVOptimizer:
         return
     
     def GetMajorProduct(self):
-        self._Config.gas.set_equivalence_ratio(1.0, "H2:1","O2:1,N2:3.76")
-        self._Config.gas.TP=300, 101325
+        self._Config.gas.set_equivalence_ratio(1.0, self._Config.GetFuelString(),\
+                                                    self._Config.GetOxidizerString())
+        self._Config.gas.TP=self._Config.GetUnbTempBounds()[0], 101325
         self._Config.gas.equilibrate('TP')
         sp_to_consider = self._Config.gas.species_names.copy()
-        sp_to_consider.remove("N2")
+        if "N2" in sp_to_consider:
+            sp_to_consider.remove("N2")
         Y_to_consider = [self._Config.gas.Y[self._Config.gas.species_index(s)] for s in sp_to_consider]
 
         i_sp_max = np.argmax(Y_to_consider)
@@ -556,12 +600,12 @@ class PVOptimizer:
         species_relevant = []
         vars_not_in_data = []
         for var in self.__additional_variables:
-            if var not in self.__flamelet_variables:
+            if ("Beta" not in var) and (var not in self.__flamelet_variables):
                 vars_not_in_data.append(var)
         if any(vars_not_in_data):
             raise Exception("Additional progress variables not in data set: " + ", ".join(var for var in vars_not_in_data))
         
-        self.__idx_additional_vars = [self.__flamelet_variables.index(v) for v in self.__additional_variables]
+        #self._idx_additional_vars = [self.__flamelet_variables.index(v) for v in self.__additional_variables]
 
         # Find relevant species, nitrogen is excluded.
         for iVar, var in enumerate(self.__flamelet_variables):
@@ -583,8 +627,22 @@ class PVOptimizer:
 
             Y_relevant = D[:, iX_Y]
             self._Y_flamelets[iFlamelet] = Y_relevant 
-            if any(self.__idx_additional_vars):
-                self.__AddedD_flamelets[iFlamelet] = D[:, self.__idx_additional_vars]
+            
+            if any(self.__additional_variables):
+                _, beta_h1, beta_h2, beta_z = self._Config.ComputeBetaTerms(self.__flamelet_variables, D)
+                addedD_flamelet = np.zeros([np.shape(D)[0], len(self.__additional_variables)])
+                for iVar, var in enumerate(self.__additional_variables):
+                    if var == FGMVars.Beta_Enth_Thermal.name:
+                        addedD_flamelet[:, iVar] = beta_h1
+                    elif var == FGMVars.Beta_Enth.name:
+                        addedD_flamelet[:, iVar] = beta_h2
+                    elif var == FGMVars.Beta_MixFrac.name:
+                        addedD_flamelet[:, iVar] = beta_z 
+                    else:
+                        addedD_flamelet[:, iVar] = D[:, self.__flamelet_variables.index(var)]
+
+            #if any(self._idx_additional_vars):
+                self.__AddedD_flamelets[iFlamelet] = addedD_flamelet#D[:, self._idx_additional_vars]
 
             minY_flamelet, maxY_flamelet = np.min(Y_relevant, 0), np.max(Y_relevant, 0)
             for iSp in range(len(iX_Y)):
@@ -602,7 +660,7 @@ class PVOptimizer:
             self._population_size = 20 * len(self._pv_definition_optim)
         
         if not self.__custom_generation_set:
-            self._N_generations = 10 * self._population_size
+            self._N_generations = 5 * self._population_size
         return 
 
     def _FilterFlameletData(self):
@@ -613,38 +671,57 @@ class PVOptimizer:
         deltaY_arrays = [None] * NFlamelets
         progress_vector = [None] * NFlamelets
 
+        print("Retrieving progress vector data...")
         for iFlamelet in tqdm(range(NFlamelets)):
-            # Extract species mass fraction and additional data.
-            Y_filtered = self._Y_flamelets[iFlamelet][:, self._idx_relevant_species]
             otherdata = None 
-            if any(self.__idx_additional_vars):
+            if any(self.__additional_variables):
                 otherdata = self.__AddedD_flamelets[iFlamelet]
-
-            # Generate monotonic mass fraction increment vector for the current flamelet.
-            idx_mon = self._MakeMonotonic(Y_filtered, otherdata)
+            idx_mon, pv_famelet, deltaY_flamelet = self.GetFlameletProgressVector(self._Y_flamelets[iFlamelet], otherdata)
             if any(idx_mon):
-                Y_mon = Y_filtered[idx_mon,:]
-                delta_Y_mon = Y_mon[1:, :] - Y_mon[:-1, :]
+                progress_vector[iFlamelet] = pv_famelet
+                deltaY_arrays[iFlamelet] = deltaY_flamelet
 
-                # Normalize mass fraction increment vector to generate progress vector components.
-                range_Y = np.max(Y_filtered,axis=0) - np.min(Y_filtered,axis=0) + 1e-32
-                delta_Y_norm = delta_Y_mon / range_Y
-
-                # Add additional data as progress vector components if defined.
-                if any(self.__idx_additional_vars):
-                    range_otherdata = np.max(otherdata,axis=0) - np.min(otherdata,axis=0) + 1e-32
-                    otherdata_mon = otherdata[idx_mon, :]
-                    delta_otherdata_mon = otherdata_mon[1:, :] - otherdata_mon[:-1,:]
-                    delta_Y_norm = np.hstack((delta_Y_norm, delta_otherdata_mon / range_otherdata))
-
-                # Compute progress vector as modulus of mass fraction and additional data increments.
-                progress_vector[iFlamelet] = np.linalg.norm(delta_Y_norm, axis=1)[:, np.newaxis]
-                deltaY_arrays[iFlamelet] = delta_Y_mon 
         deltaY_arrays = [x for x in deltaY_arrays if x is not None]
         progress_vector = [x for x in progress_vector if x is not None]
         self._delta_Y_flamelets = np.vstack(tuple((b for b in deltaY_arrays)))
         self._progress_vector = np.vstack(tuple((b for b in progress_vector)))
         self._delta_Y_flamelets_constraints = np.vstack(tuple((deltaY_arrays[b] for b in np.random.choice(NFlamelets, 10))))
+        return 
+    
+    def GetFlameletProgressVector(self, Y_flamelet, otherdata=None):
+        """Retrieve the progress vector for a given set of monotonic flamelet data.
+
+        :param Y_flamelet: monotonic flamelet mass fraction data
+        :type Y_flamelet: _type_
+        :param otherdata: _description_, defaults to None
+        :type otherdata: _type_, optional
+        :return: _description_
+        :rtype: _type_
+        """
+        Y_filtered = Y_flamelet[:, self._idx_relevant_species]
+
+        # Generate monotonic mass fraction increment vector for the current flamelet.
+        idx_mon = self._MakeMonotonic(Y_filtered, otherdata)
+        if any(idx_mon):
+            Y_mon = Y_filtered[idx_mon,:]
+            delta_Y_mon = Y_mon[1:, :] - Y_mon[:-1, :]
+
+            # Normalize mass fraction increment vector to generate progress vector components.
+            range_Y = np.max(Y_filtered,axis=0) - np.min(Y_filtered,axis=0) + 1e-32
+            delta_Y_norm = delta_Y_mon / range_Y
+
+            # Add additional data as progress vector components if defined.
+            if any(self.__additional_variables):
+                range_otherdata = np.max(otherdata,axis=0) - np.min(otherdata,axis=0) + 1e-32
+                otherdata_mon = otherdata[idx_mon, :]
+                delta_otherdata_mon = otherdata_mon[1:, :] - otherdata_mon[:-1,:]
+                delta_Y_norm = np.hstack((delta_Y_norm, delta_otherdata_mon / range_otherdata))
+
+            # Compute progress vector as modulus of mass fraction and additional data increments.
+            progress_vector_flamelet = np.linalg.norm(delta_Y_norm, axis=1)[:, np.newaxis]
+            deltaY_flamelet_mon = delta_Y_mon
+            
+        return idx_mon, progress_vector_flamelet, deltaY_flamelet_mon
 
     def _MakeMonotonic(self, Y_flamelet:np.ndarray, AdditionalData:np.ndarray=None):
         """Generate monotonic flamelet solution.
@@ -708,20 +785,12 @@ class PVOptimizer_Niu(PVOptimizer):
         for iFlamelet in tqdm(range(NFlamelets)):
             # Extract species mass fraction and additional data.
             Y_filtered = self._Y_flamelets[iFlamelet][:, self._idx_relevant_species]
-        
-            # Generate monotonic mass fraction increment vector for the current flamelet.
-            idx_mon = self._MakeMonotonic(Y_filtered, None)
-            if any(idx_mon):
-                Y_mon = Y_filtered[idx_mon,:]
-                delta_Y_mon = Y_mon[1:, :] - Y_mon[:-1, :]
 
-                # Normalize mass fraction increment vector to generate progress vector components.
-                # range_Y = np.max(Y_filtered,axis=0) - np.min(Y_filtered,axis=0) + 1e-32
-                # delta_Y_norm = delta_Y_mon / range_Y
-
-                # Compute progress vector as modulus of mass fraction and additional data increments.
-                progress_vector[iFlamelet] = np.max(np.abs(delta_Y_mon), axis=1)[:, np.newaxis]
-                deltaY_arrays[iFlamelet] = delta_Y_mon 
+            delta_Y = Y_filtered[1:, :] - Y_filtered[:-1, :]
+            
+            # Compute progress vector as modulus of mass fraction and additional data increments.
+            progress_vector[iFlamelet] = np.max(np.abs(delta_Y), axis=1)[:, np.newaxis]
+            deltaY_arrays[iFlamelet] = delta_Y 
         deltaY_arrays = [x for x in deltaY_arrays if x is not None]
         progress_vector = [x for x in progress_vector if x is not None]
         self._delta_Y_flamelets = np.vstack(tuple((b for b in deltaY_arrays)))
@@ -730,8 +799,15 @@ class PVOptimizer_Niu(PVOptimizer):
         return
     
     def penalty_function(self, x: np.array):
+        x = x.copy()
         val_y = x[0]
+
         penalty = 1.0 / val_y
+        x[1:] /= np.linalg.norm(x[1:])
+        A_constr = np.hstack((-self._progress_vector, self._delta_Y_flamelets))
+        Ax = np.dot(A_constr, x)
+        ix_invalid = Ax < 0.0
+        penalty += np.sum(np.abs(Ax[ix_invalid]))**2
         return penalty 
     
     def _Optimization_Callback(self, x:np.array,convergence:bool=False):
@@ -749,7 +825,6 @@ class PVOptimizer_Niu(PVOptimizer):
 
         # Compute penalty function of current best solution.
         y = self.penalty_function(x)
-        print(min(self._monotonicity_full.residual(x)[0]))
         # Generate bar chart of pv weights
         self.VisualizeWeights(self._pv_weights_optim, y)
 
@@ -804,13 +879,10 @@ class PVOptimizer_Niu(PVOptimizer):
 
         # Implement user-defined bounds if specified.
         for isp, sp in enumerate(self._species_bounds_set):
-            # if sp not in self._pv_definition_optim:
-            #     raise Warning("Specie " + sp + " not in relevant species, custom bounds are ignored.")
-            # else:
             try:
                 idx = self._pv_definition_optim.index(sp)
-                lb[idx] = self._species_custom_lb[isp]+1
-                ub[idx] = self._species_custom_ub[isp]+1
+                lb[idx+1] = self._species_custom_lb[isp]
+                ub[idx+1] = self._species_custom_ub[isp]
             except:
                 pass
         
@@ -831,11 +903,10 @@ class PVOptimizer_Niu(PVOptimizer):
             update_strategy = "immediate"
 
         A_constr = np.hstack((-self._progress_vector, self._delta_Y_flamelets))
-        self._monotonicity_full = LinearConstraint(A_constr, lb=-1e-4,keep_feasible=True)
+        #self._monotonicity_full = LinearConstraint(A_constr, lb=-1e-4,keep_feasible=True)
         # Initiate evolutionary algorithm.
         print("Generation,Penalty," + ",".join(s for s in self._pv_definition_optim))
         result = differential_evolution(func = self.penalty_function,\
-                                        constraints=(self._monotonicity_full),\
                                         callback=self._Optimization_Callback,\
                                         maxiter=self._N_generations,\
                                         popsize=self._population_size,\
@@ -846,13 +917,18 @@ class PVOptimizer_Niu(PVOptimizer):
                                         seed=1,\
                                         tol=1e-3)
         
-        res_full = min(self._monotonicity_full.residual(result.x)[0])
-        if res_full > 0:
-            print("PV definition is feasible")
-        else:
-            print("PV definition is unfeasible!")
+        # Initiate simplex search algorithm.
+        result = minimize(self.penalty_function, \
+                          result.x, \
+                          method='Nelder-Mead', \
+                          bounds=bounds,\
+                          callback=self._Optimization_Callback)
+        
         # Post-processing for best solution.
         self._Optimization_Callback(result.x)
+
+        self.CheckMonotonicity()
+
         print("Progress variable definition upon completion:")
         print("".join("%+.4e %s" % (self._pv_weights_optim[i], self._pv_definition_optim[i]) for i in range(len(self._pv_weights_optim))))
         return
@@ -919,6 +995,27 @@ class PVOptimizer_Prufert(PVOptimizer):
         self._delta_Y_flamelets = np.vstack(tuple((b for b in deltaY_arrays)))
         self._progress_vector = np.vstack(tuple((b for b in progress_vector)))
         self._delta_Y_flamelets_constraints = np.vstack(tuple((deltaY_arrays[b] for b in np.random.choice(NFlamelets, 10))))
+        return
+
+class PVOptimizer_PCA(PVOptimizer):
+    def __init__(self, Config:FlameletAIConfig):
+        super().__init__(Config)
+        return 
+    def RunOptimizer(self):
+        """Initiate progress variable optimization process.
+        """
+
+        
+        pca_transformer = PCA(n_components=1)
+        pca_transformer.fit_transform(self._delta_Y_flamelets)
+        self._pv_weights_optim = pca_transformer.components_[0]
+        self.ScalePV()
+
+        self.CheckMonotonicity()
+        # Post-processing for best solution.
+        #self._Optimization_Callback(result.x)
+        print("Progress variable definition upon completion:")
+        print("".join("%+.4e %s" % (self._pv_weights_optim[i], self._pv_definition_optim[i]) for i in range(len(self._pv_weights_optim))))
         return
     
 if __name__ == "__main__":
