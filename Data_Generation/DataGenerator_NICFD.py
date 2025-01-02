@@ -39,32 +39,9 @@ np.random.seed(2)
 # Importing DataMiner classes and functions
 #---------------------------------------------------------------------------------------------#
 from Common.DataDrivenConfig import EntropicAIConfig
-from Common.Properties import DefaultSettings_NICFD
+from Common.Properties import DefaultSettings_NICFD, EntropicVars
 from Data_Generation.DataGenerator_Base import DataGenerator_Base
 
-class EntropicVars(Enum):
-    Density=0
-    Energy=auto()
-    T=auto()
-    p=auto()
-    c2=auto()
-    s=auto()
-    dsdrho_e=auto()
-    dsde_rho=auto()
-    d2sdrho2=auto()
-    d2sdrhode=auto()
-    d2sde2=auto()
-    dTdrho_e=auto()
-    dTde_rho=auto()
-    dpdrho_e=auto()
-    dpde_rho=auto()
-    dhdrho_e=auto()
-    dhde_rho=auto()
-    dhdp_rho=auto()
-    dhdrho_p=auto()
-    dsdp_rho=auto()
-    dsdrho_p=auto()
-    N_STATE_VARS=auto()
 
 class DataGenerator_CoolProp(DataGenerator_Base):
     """Class for generating fluid data using CoolProp
@@ -424,6 +401,7 @@ class DataGenerator_CoolProp(DataGenerator_Base):
             state_vector_vals[EntropicVars.dhdrho_p.value] = self.__fluid.first_partial_deriv(CP.iHmass, CP.iDmass, CP.iP)
             state_vector_vals[EntropicVars.dsdp_rho.value] = self.__fluid.first_partial_deriv(CP.iSmass, CP.iP, CP.iDmass)
             state_vector_vals[EntropicVars.dsdrho_p.value] = self.__fluid.first_partial_deriv(CP.iSmass, CP.iDmass, CP.iP)
+            state_vector_vals[EntropicVars.cp.value] = self.__fluid.cpmass()
         else:
             correct_phase = False
             state_vector_vals[:] = None 
@@ -494,13 +472,13 @@ class DataGenerator_CoolProp(DataGenerator_Base):
         TD_vars = [EntropicVars.T, EntropicVars.p, EntropicVars.c2]
         secondary_vars = [EntropicVars.dTdrho_e, EntropicVars.dTde_rho, EntropicVars.dpdrho_e, EntropicVars.dpde_rho,\
                           EntropicVars.dhdrho_e, EntropicVars.dhde_rho, EntropicVars.dhdrho_p, EntropicVars.dhdp_rho,\
-                          EntropicVars.dsdp_rho, EntropicVars.dsdrho_p]
+                          EntropicVars.dsdp_rho, EntropicVars.dsdrho_p,EntropicVars.cp]
         all_vars = controlling_vars + entropic_vars + TD_vars + secondary_vars
 
         
         CV_data = np.vstack(self.__StateVars_fluid[:, :, [v.value for v in controlling_vars]])
         entropic_data = np.vstack(self.__StateVars_fluid[:, :, [v.value for v in entropic_vars]])
-        secondary_data = np.vstack(self.__StateVars_fluid[:, :, [v.value for v in TD_vars]])
+        secondary_data = np.vstack(self.__StateVars_fluid[:, :, [v.value for v in secondary_vars]])
         TD_data = np.vstack(self.__StateVars_fluid[:, :, [v.value for v in TD_vars]])
 
         # CV_data_additional = np.vstack(self.__StateVars_additional[:, [v.value for v in controlling_vars]])
@@ -551,3 +529,8 @@ class DataGenerator_CoolProp(DataGenerator_Base):
             
         return 
     
+    def GetStateData(self):
+        return self.__StateVars_fluid, self.__success_locations
+    
+    def GetFluidDataGrid(self):
+        return self.__X_grid, self.__Y_grid
