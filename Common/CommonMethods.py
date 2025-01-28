@@ -68,7 +68,7 @@ def avg_Le_local(Le_sp:np.ndarray):
     return Le_sp
 
 
-def GetReferenceData(dataset_file, x_vars, train_variables):
+def GetReferenceData(dataset_file, x_vars, train_variables,dtype=np.float32):
     # Open data file and get variable names from the first line
     fid = open(dataset_file, 'r')
     line = fid.readline()
@@ -85,7 +85,7 @@ def GetReferenceData(dataset_file, x_vars, train_variables):
     iVar_y = [varnames.index(v) for v in train_variables]
 
     # Retrieve respective data from data set
-    D = np.loadtxt(dataset_file, delimiter=',', skiprows=1, dtype=np.float32)
+    D = np.loadtxt(dataset_file, delimiter=',', skiprows=1, dtype=dtype)
     X_data = D[:, iVar_x]
     Y_data = D[:, iVar_y]
 
