@@ -601,7 +601,7 @@ class FlameletAIConfig(Config):
     __mixfrac_constant:float = None 
     __mixfrac_coeff_carrier:float = None 
 
-    __Le_avg_method = avg_Le_arythmic
+    __Le_avg_method = avg_Le_const
     __Le_const_sp:np.ndarray[float] = None 
     __custom_Le_av_set:bool = False 
 
