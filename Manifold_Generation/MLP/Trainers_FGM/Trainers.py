@@ -59,7 +59,7 @@ class Train_Flamelet_Direct(TensorFlowFit):
         self._controlling_vars = DefaultProperties.controlling_variables
         self._train_vars = self.__Config.GetMLPOutputGroup(group_idx)
         self._train_name = "Group"+str(group_idx+1)
-
+        self.SetInitializer("he_uniform")
         return
     
     def CustomCallback(self):
@@ -76,11 +76,6 @@ class Train_Flamelet_Direct(TensorFlowFit):
         fid.write("\n\n")
         return super().add_additional_header_info(fid)
     
-    
-    # def SetDecaySteps(self):
-    #     self._decay_steps=int(0.01*float(self._Np_train) / (2**self._batch_expo))
-    #     return 
-
 
     def SetDecaySteps(self):
         self._decay_steps=0.01157 * self._Np_train
@@ -132,10 +127,15 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         self.SetTrainStepType("Jacobi")
         self._enable_boundary_loss=True
         self._boundary_loss_patience=-1
+
+        self.SetInitializer("he_uniform")
+
         return 
+    
     def SetDecaySteps(self):
         self._decay_steps=0.01157 * self._Np_train
         return 
+    
     def GetTrainData(self):
         """Read domain and boundary training data and pre-process reactant-product matrices for visualization.
         """
@@ -264,7 +264,10 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         :rtype: list[np.ndarray], list[np.ndarray], list[str]
         """
         projection_array_h, target_grad_h = self.__SetEnth_projection()
+        is_unb = self.__LocateUnbBoundaryNodes()
 
+        projection_array_h[np.invert(is_unb), :] = 0.0
+        target_grad_h[np.invert(is_unb)] = 0.0
         bc_labels = ["Beta_pv : h"]
         projection_arrays = [projection_array_h]
         target_grad_arrays = [target_grad_h]
@@ -277,6 +280,10 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         :rtype: list[np.ndarray], list[np.ndarray], list[str]
         """
         projection_array_h, target_grad_h = self.__SetEnth_projection()
+        is_unb = self.__LocateUnbBoundaryNodes()
+        projection_array_h[np.invert(is_unb), :] = 0.0
+        target_grad_h[np.invert(is_unb)] = 0.0
+        
 
         bc_labels = ["Beta_Z : h"]
         projection_arrays = [projection_array_h]
@@ -290,8 +297,13 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         :rtype: list[np.ndarray], list[np.ndarray], list[str]
         """
         projection_array_h, target_grad_array = self.__SetEnth_projection()
+        is_unb = self.__LocateUnbBoundaryNodes()
+        projection_array_h[np.invert(is_unb), :] = 0.0
+        target_grad_array[np.invert(is_unb)] = 0.0
         bc_name = "W_M : h"
-        return [projection_array_h], [target_grad_array], [bc_name]
+        projection_arrays = [projection_array_h]
+        target_grad_arrays = [target_grad_array]
+        return projection_arrays, target_grad_arrays, [bc_name]
     
     def __SetSource_projection(self):
         """Get boundary penalty gradient projection arrays and target projected gradients for source terms.
@@ -331,6 +343,7 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
 
         # Extract specific heat and beta_h1 from flamelet data.
         _, Y_boundary = GetReferenceData(self._boundary_data_file, x_vars=self._controlling_vars, train_variables=[FGMVars.Cp.name, FGMVars.Beta_Enth_Thermal.name])
+        is_unb = self.__LocateUnbBoundaryNodes()
         Cp_boundary = Y_boundary[:,0]
         Beta_h1_boundary = Y_boundary[:,1]
 
@@ -342,6 +355,9 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         projection_array_train, _ = self.__SetEnth_projection()
         # Normalized projected target gradient.
         target_grad_array = (1 - (Beta_h1_boundary / Cp_boundary)) * h_scale / Beta_h2_scale
+
+        projection_array_train[np.invert(is_unb),:] = 0.0
+        target_grad_array[np.invert(is_unb)] = 0.0
 
         bc_name = "Beta_h2 : 1 - Beta_h1/cp"
         return [projection_array_train], [target_grad_array], [bc_name]
