@@ -68,6 +68,8 @@ scaler_functions = {"robust":RobustScaler,\
                     "minmax":MinMaxScaler}
 class MLPTrainer:
     # Base class for flamelet MLP trainer
+    _dt = tf.float32
+    _dt_np = np.float32 
 
     _n_epochs:int = DefaultProperties.N_epochs      # Number of epochs to train for.
     _alpha_expo:float = DefaultProperties.init_learning_rate_expo  # Alpha training exponent parameter.
@@ -146,6 +148,8 @@ class MLPTrainer:
     scaler_function_x = scaler_functions[scaler_function_name]()
     scaler_function_y = scaler_functions[scaler_function_name]()
 
+    weights_initializer:str = "he_uniform"
+
     def __init__(self):
         """Initiate MLP trainer object.
         """
@@ -191,13 +195,17 @@ class MLPTrainer:
         self._mlp_output_file_name = mlp_fileheader
         return 
     
-    def SetScaler(self, scaler_function:str="robust"):
+    def SetScaler(self, scaler_function:str="robust",scale_x:float=None,scale_y:float=None,offset_x:float=None,offset_y:float=None):
         if scaler_function not in scaler_functions.keys():
             raise Exception("Train data scaling function should be one of the following: "+",".join(f for f in scaler_functions.keys()))
         self.scaler_function_name = scaler_function
         self.scaler_function_x = scaler_functions[scaler_function]()
         self.scaler_function_y = scaler_functions[scaler_function]()
         return
+    
+    def SetInitializer(self, initializer_function:str="he_uniform"):
+        self.weights_initializer = initializer_function
+        return 
     
     def SetSaveDir(self, save_dir_in:str):
         """Define directory in which trained MLP information is saved.
@@ -361,8 +369,8 @@ class MLPTrainer:
         self._weights = []
         self._biases = []
         for w, b in zip(weights_in, biases_in):
-            self._weights.append(tf.Variable(w, dtype=tf.float32))
-            self._biases.append(tf.Variable(b,dtype=tf.float32))
+            self._weights.append(tf.Variable(tf.cast(w,self._dt), dtype=self._dt))
+            self._biases.append(tf.Variable(tf.cast(b,self._dt),dtype=self._dt))
         return 
     
     def SaveWeights(self):
@@ -522,15 +530,15 @@ class MLPTrainer:
             print("Reading train, test, and validation data...")
         
         if is_nullMLP:
-            X_full, _ = GetReferenceData(MLPData_filepath + "_full.csv", x_vars, [])
+            X_full, _ = GetReferenceData(MLPData_filepath + "_full.csv", x_vars, [],dtype=self._dt_np)
             Y_full = np.zeros(np.shape(X_full)[0])
         else:
-            X_full, Y_full = GetReferenceData(MLPData_filepath + "_full.csv", x_vars, y_vars)
+            X_full, Y_full = GetReferenceData(MLPData_filepath + "_full.csv", x_vars, y_vars,dtype=self._dt_np)
         Y_full = self.TransformData(Y_full)
 
         scaler_x.fit(X_full)
         scaler_y.fit(Y_full)
-        
+
         # Free up memory
         del X_full
         del Y_full
@@ -538,9 +546,9 @@ class MLPTrainer:
         if is_nullMLP:
             return 
         else:
-            X_train, Y_train = GetReferenceData(MLPData_filepath + "_train.csv", x_vars, y_vars)
-            X_test, Y_test = GetReferenceData(MLPData_filepath + "_test.csv", x_vars, y_vars)
-            X_val, Y_val = GetReferenceData(MLPData_filepath + "_val.csv",x_vars, y_vars)
+            X_train, Y_train = GetReferenceData(MLPData_filepath + "_train.csv", x_vars, y_vars,dtype=self._dt_np)
+            X_test, Y_test = GetReferenceData(MLPData_filepath + "_test.csv", x_vars, y_vars,dtype=self._dt_np)
+            X_val, Y_val = GetReferenceData(MLPData_filepath + "_val.csv",x_vars, y_vars,dtype=self._dt_np)
             if self._verbose > 0:
                 print("Done!")
 
@@ -732,7 +740,7 @@ class TensorFlowFit(MLPTrainer):
             # Add hidden layersSetTrainFileHeader
             iLayer = 0
             while iLayer < len(self._hidden_layers):
-                self._model.add(keras.layers.Dense(self._hidden_layers[iLayer], activation=self._activation_function_name, kernel_initializer="he_uniform"))
+                self._model.add(keras.layers.Dense(self._hidden_layers[iLayer], activation=self._activation_function_name, kernel_initializer=self.weights_initializer))
                 iLayer += 1
             
             # Add output layer
@@ -874,7 +882,8 @@ class CustomTrainer(MLPTrainer):
     __keep_training:bool = True 
     __stagnation_iter:int = 0
 
-    _regularization_param:float = 1e-4
+    _include_regularization:bool = False
+    _regularization_param:float = 1e-5
 
     def __init__(self):
         MLPTrainer.__init__(self)
@@ -889,7 +898,7 @@ class CustomTrainer(MLPTrainer):
 
         self._weights = []
         for W in weights_input:
-            self._weights.append(tf.Variable(W, self._dt))
+            self._weights.append(tf.Variable(tf.cast(W, self._dt), self._dt))
         return 
     
     def SetBiases(self, biases_input:list[np.ndarray]):
@@ -901,7 +910,7 @@ class CustomTrainer(MLPTrainer):
 
         self._biases = []
         for b in biases_input:
-            self._biases.append(tf.Variable(b, self._dt))
+            self._biases.append(tf.Variable(tf.cast(b,self._dt), self._dt))
         return 
     
     def InitializeWeights_and_Biases(self):
@@ -916,10 +925,13 @@ class CustomTrainer(MLPTrainer):
             NN.append(N)
         NN.append(len(self._train_vars))
 
-        initializer = HeUniform()
+        if self.weights_initializer == "he_uniform":
+            initializer = HeUniform()
+        elif self.weights_initializer == "random_uniform":
+            initializer = RandomUniform()
         for i in range(len(NN)-1):
-            self._weights.append(tf.Variable(initializer(shape=(NN[i],NN[i+1])),self._dt))
-            self._biases.append(tf.Variable(initializer(shape=(NN[i+1],)),self._dt))             
+            self._weights.append(tf.Variable(tf.cast((initializer(shape=(NN[i],NN[i+1]))),self._dt),self._dt))
+            self._biases.append(tf.Variable(tf.cast((initializer(shape=(NN[i+1],))),self._dt),self._dt))             
             
         return 
     
@@ -988,7 +1000,7 @@ class CustomTrainer(MLPTrainer):
             raise Exception("Number of input variables ("+str(np.shape(input_data_dim)[1]) + ") \
                             does not equal the MLP input dimension ("+str(len(self._controlling_vars))+")")
         input_data_norm = self.scaler_function_x.transform(input_data_dim)
-        input_data_tf = tf.constant(input_data_norm, tf.float32)
+        input_data_tf = tf.constant(input_data_norm, self._dt)
         output_data_norm = self._MLP_Evaluation(input_data_tf).numpy()
         output_data_dim = self.scaler_function_y.inverse_transform(output_data_norm)
         output_data_dim_transformed = self.TransformData_Inv(output_data_dim)
@@ -1007,6 +1019,9 @@ class CustomTrainer(MLPTrainer):
     def TrainingLoss_error(self, x_norm:tf.constant, y_label_norm:tf.constant):
         pred_error_outputs = self.Compute_Direct_Error(x_norm, y_label_norm)
         mean_pred_error = tf.reduce_mean(pred_error_outputs)
+        if self._include_regularization:
+            reg_error = self.RegularizationLoss()
+            mean_pred_error += reg_error
         return mean_pred_error 
     
     @tf.function
@@ -1113,9 +1128,10 @@ class CustomTrainer(MLPTrainer):
             self.val_loss_history[iVar].append(val_loss[iVar])
         return val_loss
     
+    @tf.function
     def RegularizationLoss(self):
         reg_loss = 0.0
-        for w in self._weights:
+        for w in self._trainable_hyperparams:
             reg_loss += self._regularization_param*tf.reduce_sum(tf.pow(w, 2))
         
         return reg_loss 
@@ -1257,7 +1273,7 @@ class PhysicsInformedTrainer(CustomTrainer):
         if y_vars == None:
             y_vars = self._train_vars
         # Load controlling and train variables from boundary data.
-        X_boundary, Y_boundary = GetReferenceData(self._boundary_data_file, x_vars=self._controlling_vars, train_variables=y_vars)
+        X_boundary, Y_boundary = GetReferenceData(self._boundary_data_file, x_vars=self._controlling_vars, train_variables=y_vars,dtype=self._dt_np)
         
         
         # Normalize controlling and labeled data with respect to domain data.
