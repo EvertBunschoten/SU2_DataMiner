@@ -42,49 +42,98 @@ import matplotlib.pyplot as plt
 from matplotlib import ticker
 from enum import Enum 
 
+import CoolProp as CoolP
+import CoolProp.CoolProp as CP 
+
 from Common.DataDrivenConfig import EntropicAIConfig
 from Common.CommonMethods import GetReferenceData
 from Common.Properties import DefaultSettings_NICFD, EntropicVars
 from Manifold_Generation.MLP.Trainer_Base import MLPTrainer, TensorFlowFit,PhysicsInformedTrainer,EvaluateArchitecture
 
-# class EntropicVars(Enum):
-#     T=0
-#     P=1
-#     C2=2
-#     dTdRHO_E=3
-#     dTdE_RHO=4
-#     dPdRHO_E=5
-#     dPdE_RHO=6
-#     dHdRHO_E=7
-#     dHdE_RHO=8
-#     dHdP_RHO=9
-#     dHdRHO_P=10
-#     dSdP_RHO=11
-#     dSdRHO_P=12
-#     N_STATE_VARS=13
-    
-
-# EntropicVarPairing = {"T":EntropicVars.T.value,\
-#                       "p":EntropicVars.P.value,\
-#                       "c2":EntropicVars.C2.value,\
-#                       "dTdrho_e":EntropicVars.dTdRHO_E.value,\
-#                       "dTde_rho":EntropicVars.dTdE_RHO.value,\
-#                       "dpdrho_e":EntropicVars.dPdRHO_E.value,\
-#                       "dpde_rho":EntropicVars.dPdE_RHO.value,\
-#                       "dhdrho_e":EntropicVars.dHdRHO_E.value,\
-#                       "dhde_rho":EntropicVars.dHdE_RHO.value,\
-#                       "dhdp_rho":EntropicVars.dHdP_RHO.value,\
-#                       "dhdrho_p":EntropicVars.dHdRHO_P.value,\
-#                       "dsdp_rho":EntropicVars.dSdP_RHO.value,\
-#                       "dsdrho_p":EntropicVars.dSdRHO_P.value}
-
-LabelPairing = {EntropicVars.T.name:r"Temperature $(T)[K]$",\
+LabelPairing = {EntropicVars.s.name:r"Entropy $(s)[J/kg]$",\
+                EntropicVars.T.name:r"Temperature $(T)[K]$",\
                 EntropicVars.p.name:r"Pressure $(p)[Pa]$",\
                 EntropicVars.c2.name:r"Squared speed of sound $(c^2)[m/s]$",\
                 EntropicVars.dTdrho_e.name:r"Temperature-density derivative $\left(\left.\frac{\partial T}{\partial \rho}\right|_e\right)$",\
                 EntropicVars.dTde_rho.name:r"Temperature-energy derivative $\left(\left.\frac{\partial T}{\partial e}\right|_\rho\right)$",\
                 EntropicVars.dpdrho_e.name:r"Pressure-density derivative $\left(\left.\frac{\partial p}{\partial \rho}\right|_e\right)$",\
                 EntropicVars.dpde_rho.name:r"Pressure-energy derivative $\left(\left.\frac{\partial p}{\partial e}\right|_\rho\right)$"}
+
+def GetStateVector(fluid:CP.AbstractState):
+    """Extract the fluid thermodynamic properties from the CoolProp abstract state object.
+
+    :param fluid: CoolProp abstract state of the equation of state.
+    :type fluid: CoolProp.CoolProp.AbstractState
+    :return: thermodynamic state properties, phase
+    :rtype: np.ndarray, bool
+    """
+    state_vector_vals = np.ones(EntropicVars.N_STATE_VARS.value)
+    correct_phase = True 
+    accepted_phases:list[int] = [CoolP.iphase_gas, CoolP.iphase_supercritical_gas, CoolP.iphase_supercritical]
+    if fluid.phase() in accepted_phases:
+        state_vector_vals[EntropicVars.s.value] = fluid.smass()
+        state_vector_vals[EntropicVars.dsde_rho.value] = fluid.first_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass)
+        state_vector_vals[EntropicVars.dsdrho_e.value] = fluid.first_partial_deriv(CP.iSmass, CP.iDmass, CP.iUmass)
+        state_vector_vals[EntropicVars.d2sde2.value] = fluid.second_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass, CP.iUmass, CP.iDmass)
+        state_vector_vals[EntropicVars.d2sdrhode.value] = fluid.second_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass, CP.iDmass, CP.iUmass)
+        state_vector_vals[EntropicVars.d2sdrho2.value] = fluid.second_partial_deriv(CP.iSmass, CP.iDmass, CP.iUmass, CP.iDmass, CP.iUmass)
+        state_vector_vals[EntropicVars.Density.value] = fluid.rhomass()
+        state_vector_vals[EntropicVars.Energy.value] = fluid.umass()
+        state_vector_vals[EntropicVars.T.value] = fluid.T()
+        state_vector_vals[EntropicVars.p.value] = fluid.p()
+        state_vector_vals[EntropicVars.c2.value] = fluid.speed_sound()**2
+        state_vector_vals[EntropicVars.dTde_rho.value] = fluid.first_partial_deriv(CP.iT, CP.iUmass, CP.iDmass)
+        state_vector_vals[EntropicVars.dTdrho_e.value] = fluid.first_partial_deriv(CP.iT, CP.iDmass, CP.iUmass)
+        state_vector_vals[EntropicVars.dpde_rho.value] = fluid.first_partial_deriv(CP.iP, CP.iUmass, CP.iDmass)
+        state_vector_vals[EntropicVars.dpdrho_e.value] = fluid.first_partial_deriv(CP.iP, CP.iDmass, CP.iUmass)
+        state_vector_vals[EntropicVars.dhde_rho.value] = fluid.first_partial_deriv(CP.iHmass, CP.iUmass, CP.iDmass)
+        state_vector_vals[EntropicVars.dhdrho_e.value] = fluid.first_partial_deriv(CP.iHmass, CP.iDmass, CP.iUmass)
+        state_vector_vals[EntropicVars.dhdp_rho.value] = fluid.first_partial_deriv(CP.iHmass, CP.iP, CP.iDmass)
+        state_vector_vals[EntropicVars.dhdrho_p.value] = fluid.first_partial_deriv(CP.iHmass, CP.iDmass, CP.iP)
+        state_vector_vals[EntropicVars.dsdp_rho.value] = fluid.first_partial_deriv(CP.iSmass, CP.iP, CP.iDmass)
+        state_vector_vals[EntropicVars.dsdrho_p.value] = fluid.first_partial_deriv(CP.iSmass, CP.iDmass, CP.iP)
+        state_vector_vals[EntropicVars.cp.value] = fluid.cpmass()
+    else:
+        correct_phase = False
+        state_vector_vals[:] = None 
+    return state_vector_vals, correct_phase
+
+def ComputeRhoEGridData(config:EntropicAIConfig):
+    """Compute the fluid thermodynamic properties for a coarse rho-e grid for visualization purposes.
+
+    :param config: EntropicAI configuration for the current problem.
+    :type config: EntropicAIConfig
+    :return: fluid thermodynamic properties on a Cartesian rho-e grid.
+    :rtype: np.ndarray[float]
+    """
+    rho_min, rho_max = config.GetDensityBounds()[0], config.GetDensityBounds()[1]
+    e_min, e_max = config.GetEnergyBounds()[0], config.GetEnergyBounds()[1]
+    
+    Np_x = 200
+    Np_y = 200
+    rho_range = (rho_min - rho_max) * np.cos(np.linspace(0, 0.5*np.pi, Np_x)) + rho_max
+    e_range = np.linspace(e_min, e_max, Np_y)
+
+    xx, yy = np.meshgrid(rho_range, e_range)
+
+    state_cp = np.empty([Np_x, Np_y, EntropicVars.N_STATE_VARS.value])
+    state_cp[:] = np.nan
+    fluid = CP.AbstractState(config.GetEquationOfState(), config.GetFluid())
+    for i in range(Np_x):
+        for j in range(Np_y):
+            rho = xx[i,j]
+            e = yy[i,j]
+            state_cp[i,j,EntropicVars.Density.value] = rho 
+            state_cp[i,j,EntropicVars.Energy.value] = e 
+            try:
+                fluid.update(CP.DmassUmass_INPUTS, rho, e)
+                state_vector_vals, correct_phase = GetStateVector(fluid)
+                if correct_phase:
+                    state_cp[i,j,:] = state_vector_vals
+            except:
+                pass 
+    return state_cp 
+
 
 class Train_Entropic_Direct(TensorFlowFit):
 
@@ -97,7 +146,7 @@ class Train_Entropic_Direct(TensorFlowFit):
         for NN in DefaultSettings_NICFD.hidden_layer_architecture:
             self._hidden_layers.append(NN)
 
-        self._train_vars = ["s"]
+        self._train_vars = [EntropicVars.s.name]
         return                
 
 class Train_Entropic_Derivatives(PhysicsInformedTrainer):
@@ -628,6 +677,9 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     _rho_scale:float = None 
     _e_scale:float = None 
 
+    __custom_state_grid:bool = False
+    __state_grid_ref:np.ndarray[float] = None 
+
     def __init__(self):
         PhysicsInformedTrainer.__init__(self)
         self.callback_every = 10
@@ -638,14 +690,20 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
             
         self._train_vars = [EntropicVars.s.name]
 
-        self._state_vars = [EntropicVars.T.name,\
+        self._state_vars = [EntropicVars.s.name,\
+                            EntropicVars.T.name,\
                             EntropicVars.p.name,\
                             EntropicVars.c2.name]
 
         self._train_step_type="Gauss-Seidel"
         self._enable_boundary_loss = False
         self.scaler_function_name="minmax"
+        self.weights_initializer = "random_uniform"
+        
+        self._include_regularization = False
 
+        self._dt = tf.float64
+        self._dt_np = np.float64
         return 
     
     def GetTrainData(self):
@@ -659,14 +717,18 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         self._s_offset = tf.cast(self._Y_offset[0], self._dt)
         self._Y_state_scale_tf = tf.cast(self._Y_state_scale, self._dt)
         self._Y_state_offset_tf = tf.cast(self._Y_state_offset, self._dt)
+
         return 
     
     def SetStateVars(self, state_vars_in:list[str]):
-        # if any((v not in DefaultSettings_NICFD.supported_state_vars) for v in state_vars_in):
-        #     raise Exception("Only the following state variables are supported: "+ ",".join((v for v in DefaultSettings_NICFD.supported_state_vars)))
         self._state_vars = state_vars_in.copy()
         return 
 
+    def SetStateGrid_ref(self, state_grid_in:np.ndarray[float]):
+        self.__custom_state_grid = True
+        self.__state_grid_ref = state_grid_in.copy()
+        return 
+    
     def CollectPIVars(self):
         val_lambda_default = super().CollectPIVars()
         self.lamba_labels = []
@@ -733,7 +795,7 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         self._trainable_hyperparams = []
         for W in self._weights:
             self._trainable_hyperparams.append(W)
-        for b in self._biases[:-1]:
+        for b in self._biases:
             self._trainable_hyperparams.append(b)
         return 
     
@@ -821,6 +883,10 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         Y_state_pred = self.EvaluateState(X_label_norm)
         Y_state_pred_norm = (Y_state_pred - self._Y_state_offset_tf)/self._Y_state_scale_tf
         pred_error = tf.reduce_mean(tf.pow(Y_state_pred_norm - Y_state_label_norm, 2), axis=0)
+        if self._include_regularization:
+            reg_loss = self.RegularizationLoss()
+            pred_error += reg_loss 
+
         return pred_error
     
     
@@ -866,7 +932,17 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
     def __Generate_Error_Plots(self):
         """Make nice plots of the interpolated test data.
         """
-        state_test_pred = self.EvaluateState(self._X_test_norm).numpy()
+
+        if self.__custom_state_grid:
+            rhoe_state_grid = np.hstack((self.__state_grid_ref[:, :, EntropicVars.Density.value].flatten()[:,np.newaxis],\
+                                        self.__state_grid_ref[:, :, EntropicVars.Energy.value].flatten()[:,np.newaxis]))
+            rhoe_state_norm = self.scaler_function_x.transform(rhoe_state_grid)
+            state_test_pred = self.EvaluateState(tf.constant(rhoe_state_norm,self._dt)).numpy()
+            state_test_pred = np.reshape(state_test_pred, [np.shape(self.__state_grid_ref)[0], np.shape(self.__state_grid_ref)[1], len(self._state_vars)])#np.shape(self.__state_grid_ref[:,:,0]))
+            state_test_pred[np.isnan(self.__state_grid_ref[:, :, EntropicVars.s.value]), :] = None
+        else:
+            state_test_pred = self.EvaluateState(self._X_test_norm).numpy()
+
         plot_fontsize = 20
         label_fontsize=18
         markevery=10
@@ -884,8 +960,16 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
             Y_pred = state_test_pred[:, self._state_vars.index(var)]
             fig = plt.figure(figsize=[10,10])
             ax = plt.axes(projection='3d')
-            ax.plot3D(rho_test[::markevery], e_test[::markevery], Y_ref[::markevery], 'ko')
-            ax.plot3D(rho_test[::markevery], e_test[::markevery], Y_pred[::markevery], 'ro')
+            if self.__custom_state_grid:
+                ax.plot_surface(self.__state_grid_ref[:, :, EntropicVars.Density.value],\
+                                self.__state_grid_ref[:, :, EntropicVars.Energy.value],\
+                                self.__state_grid_ref[:, :, EntropicVars[var].value],color='k',alpha=0.7,label="Reference")
+                ax.plot_surface(self.__state_grid_ref[:, :, EntropicVars.Density.value],\
+                                self.__state_grid_ref[:, :, EntropicVars.Energy.value],\
+                                state_test_pred[:, :, self._state_vars.index(var)],color='r',label="Predicted")
+            else:
+                ax.plot3D(rho_test[::markevery], e_test[::markevery], Y_ref[::markevery], 'ko',label="Reference")
+                ax.plot3D(rho_test[::markevery], e_test[::markevery], Y_pred[::markevery], 'ro',label="Predicted")
             ax.set_xlabel(r"Density $(\rho)[kg m^{-3}]$",fontsize=20)
             ax.set_ylabel(r"Static Energy $(e)[J kg^{-1}]$",fontsize=20)
             ax.set_zlabel(LabelPairing[var],fontsize=20)
@@ -896,18 +980,23 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
             ax.yaxis.labelpad=val_pad
             ax.zaxis.labelpad=val_pad
             ax.tick_params(which='both',labelsize=18)
+            ax.legend(fontsize=20,ncol=2,bbox_to_anchor=(0.5, -0.12),loc='upper center',fancybox=True,shadow=True)
             plt.tight_layout()
             fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+"/"+var+"_prediction."+self._figformat,format=self._figformat,bbox_inches='tight')
             plt.close(fig)
 
-            e = 100*np.abs((Y_pred - Y_ref)/(Y_ref+1e-6))
             fig = plt.figure(figsize=[10,10])
             ax = plt.axes() 
-            cax = ax.scatter(rho_test, e_test, c=e)
+            if self.__custom_state_grid:
+                state_grid_error = 100*np.abs((state_test_pred[:, :, self._state_vars.index(var)] - self.__state_grid_ref[:, :, EntropicVars[var].value])/\
+                                              (self.__state_grid_ref[:, :, EntropicVars[var].value]+1e-6))
+                cax = ax.contourf(self.__state_grid_ref[:, :, EntropicVars.Density.value], self.__state_grid_ref[:, :, EntropicVars.Energy.value], state_grid_error)
+            else:   
+                e = 100*np.abs((Y_pred - Y_ref)/(Y_ref+1e-6))
+                cax = ax.scatter(rho_test, e_test, c=e)
+            ax.set_xscale('log')
             cbar = fig.colorbar(cax, ax=ax)
             cbar.set_label(r'Interpolation error $(e)[\%]$', rotation=270,fontsize=label_fontsize)
-            # cbar.set_ticks([0, int(max(e))])
-            # cbar.ax.set_yticklabels([0, max(e)], fontsize=label_fontsize)
             ax.set_xlabel(r"Density $(\rho)[kg m^{-3}]$",fontsize=plot_fontsize)
             ax.set_ylabel(r"Static energy $(e)[J kg^{-1}]$",fontsize=plot_fontsize)
             ax.set_title(("%s prediction error" % var),fontsize=plot_fontsize)
@@ -957,7 +1046,7 @@ class Train_Entropic_Segregated(TensorFlowFit):
         d2sdrho2_untransformed = Y_untransformed[:,idx_d2sdrho2]
         dsdrho_transformed = transform_dsdrho(dsdrho_untransformed)
         d2sdrho2_transformed = transform_d2sdrho2(d2sdrho2_untransformed)
-        Y_transformed = Y_untransformed
+        Y_transformed = Y_untransformed.copy()
         Y_transformed[:, idx_dsdrho_e] = dsdrho_transformed
         Y_transformed[:, idx_d2sdrho2] = d2sdrho2_transformed
 
@@ -970,11 +1059,15 @@ class Train_Entropic_Segregated(TensorFlowFit):
         d2sdrho2_transformed = Y_transformed[:,idx_d2sdrho2]
         dsdrho_untransformed = -np.exp(dsdrho_transformed)
         d2sdrho2_untransformed = np.exp(d2sdrho2_transformed)
-        Y_untransformed = Y_transformed
+        Y_untransformed = Y_transformed.copy()
         Y_untransformed[:, idx_dsdrho_e] = dsdrho_untransformed
         Y_untransformed[:, idx_d2sdrho2] = d2sdrho2_untransformed
         return Y_untransformed
     
+    def CustomCallback(self):
+        super().CustomCallback()
+        self.PlotR2Data()
+        return 
     def add_additional_header_info(self, fid):
         fid.write("Inverse transform dsdrho_e: -exp(dsdrho_e)\nInverse transform d2sdrho2: exp(d2sdrho2)\n")
         return 
@@ -983,7 +1076,7 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
     """Class for training MLP architectures
     """
     __trainer_PINN:Train_Entropic_PINN      # MLP trainer object responsible for training itself.
-    _state_vars:list[str] = [EntropicVars.T.name, EntropicVars.p.name, EntropicVars.c2.name]
+    _state_vars:list[str] = [EntropicVars.s.name, EntropicVars.T.name, EntropicVars.p.name, EntropicVars.c2.name]
 
     def __init__(self, Config_in:EntropicAIConfig):
         """Define EvaluateArchitecture instance and prepare MLP trainer with
@@ -1058,6 +1151,8 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
         """
 
         self.PrepareOutputDir()
+
+        
         self._trainer_direct.SetMLPFileHeader("MLP_direct")
         self._trainer_direct.Train_MLP()
         super().TrainPostprocessing()
@@ -1068,6 +1163,8 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
         weights_entropy = self._trainer_direct.GetWeights()
         biases_entropy = self._trainer_direct.GetBiases()
 
+        state_grid_ref = ComputeRhoEGridData(self._Config)
+        self.__trainer_PINN.SetStateGrid_ref(state_grid_ref)
         self.__trainer_PINN.SetMLPFileHeader("MLP_PINN")
         self.__trainer_PINN.SetWeights(weights_entropy)
         self.__trainer_PINN.SetBiases(biases_entropy)
@@ -1087,7 +1184,10 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
         self.__trainer_PINN.Save_Relevant_Data()
         return           
     
-
+    def SetTrainStepType(self, train_step_type:str="Gauss-Seidel"):
+        self.__trainer_PINN.SetTrainStepType(train_step_type)
+        return 
+    
 class EvaluateArchitecture_NICFD_Segregated(EvaluateArchitecture):
     """Driver class for training a segregated entropic MLP.
     """
