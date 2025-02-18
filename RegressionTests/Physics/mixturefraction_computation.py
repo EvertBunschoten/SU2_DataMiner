@@ -30,7 +30,7 @@
 
 import cantera as ct 
 import numpy as np
-from Common.DataDrivenConfig import FlameletAIConfig 
+from Common.DataDrivenConfig import Config_FGM 
 np.random.seed(0)
 
 # Reaction mechanism, temperature, pressure, and equivalence ratio.
@@ -40,7 +40,7 @@ p = ct.one_atm
 phi = 0.5 
 
 # Initiate empty FlameletAI.
-Config = FlameletAIConfig()
+Config = Config_FGM()
 Config.SetFuelDefinition(["H2"], [1.0])
 Config.SetReactionMechanism(reaction_mechanism)
 
