@@ -697,12 +697,12 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
         is_lean = False
         if self.__define_equivalence_ratio:
             gas_eq.set_equivalence_ratio(mix_status, self.__fuel_string, self.__oxidizer_string)
-            if mix_status < 1.0:
+            if mix_status <= 1.0:
                 is_lean = True
         else:
             gas_eq.set_equivalence_ratio(1.0, self.__fuel_string, self.__oxidizer_string)
             z_stoch = gas_eq.mixture_fraction(self.__fuel_string, self.__oxidizer_string)
-            if mix_status < z_stoch:
+            if mix_status <= z_stoch:
                 is_lean = True
             gas_eq.set_mixture_fraction(mix_status, self.__fuel_string, self.__oxidizer_string)
 
