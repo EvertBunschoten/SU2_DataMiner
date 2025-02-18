@@ -130,10 +130,10 @@ class DefaultSettings_NICFD(DefaultProperties):
     name_density:str = EntropicVars.Density.name
     name_energy:str = EntropicVars.Energy.name
 
-    hidden_layer_architecture:list[int] = [95]
+    hidden_layer_architecture:list[int] = [12,12]
 
-    init_learning_rate_expo:float = -1.64126
-    learning_rate_decay:float = 9.87211e-01
+    init_learning_rate_expo:float = -3.0
+    learning_rate_decay:float = 0.98985
     activation_function:str = "exponential"
     config_type:str = "EntropicAI"
     supported_state_vars:list[str] = ["s","T","p","c2","dTdrho_e","dTde_rho","dpdrho_e","dpde_rho"]
