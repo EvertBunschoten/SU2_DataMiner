@@ -31,18 +31,16 @@ import csv
 import numpy as np
 import matplotlib.pyplot as plt 
 from paretoset import paretoset
-from scipy.optimize import minimize, Bounds
 from multiprocessing import current_process
-from pymoo.indicators.gd import GD
 from pymoo.indicators.gd_plus import GDPlus
 from pymoo.indicators.hv import HV
 
 from Common.Properties import DefaultProperties, DefaultSettings_NICFD
 from Common.Config_base import Config 
-from Common.DataDrivenConfig import FlameletAIConfig, EntropicAIConfig
-from Manifold_Generation.MLP.Trainer_Base import EvaluateArchitecture
-from Manifold_Generation.MLP.Trainers_NICFD.Trainers import EvaluateArchitecture_NICFD
-from Manifold_Generation.MLP.Trainers_FGM.Trainers import EvaluateArchitecture_FGM
+from Common.DataDrivenConfig import Config_FGM, Config_NICFD
+from Manifold_Generation.MLP.Trainer_Base import TrainMLP
+from Manifold_Generation.MLP.Trainers_NICFD.Trainers import TrainMLP_NICFD
+from Manifold_Generation.MLP.Trainers_FGM.Trainers import TrainMLP_FGM
 
 from Common.Properties import ActivationFunctionOptions
 
@@ -631,13 +629,13 @@ class MLPOptimizer:
         ga_instance = pygad.load(self.save_dir+"/optimizer_instance_"+self._history_extension)
         return ga_instance
     
-    def _translateGene(self, x:np.ndarray[float], Evaluator:EvaluateArchitecture):
+    def _translateGene(self, x:np.ndarray[float], Evaluator:TrainMLP):
         """Translate gene to hyper-parameters
 
         :param x: gene as passed from genetic algorithm.
         :type x: np.ndarray[float]
         :param Evaluator: MLP evaluation class instance.
-        :type Evaluator: EvaluateArchitecture
+        :type Evaluator: TrainMLP
         """
 
         # Set default hyper-parameters.
@@ -790,7 +788,7 @@ class MLPOptimizer:
                 worker_idx = p._identity[0]
             else:
                 worker_idx = 0
-        Evaluator:EvaluateArchitecture = self._prepare_evaluator()
+        Evaluator:TrainMLP = self._prepare_evaluator()
 
         # Set CPU index.
         Evaluator.SetTrainHardware("CPU", worker_idx)
@@ -804,9 +802,9 @@ class MLPOptimizer:
         return objective_function
 
     def _prepare_evaluator(self):
-        return EvaluateArchitecture(self._Config)
+        return TrainMLP(self._Config)
     
-    def _evaluate_MLP_performance(self, x:np.ndarray, MLP_evaluator:EvaluateArchitecture):
+    def _evaluate_MLP_performance(self, x:np.ndarray, MLP_evaluator:TrainMLP):
 
         self._translateGene(x, Evaluator=MLP_evaluator)
 
@@ -825,7 +823,7 @@ class MLPOptimizer:
         MLP_evaluator.TrainPostprocessing()
         return 
     
-    def _extract_objective_function(self, MLP_evaluator:EvaluateArchitecture):
+    def _extract_objective_function(self, MLP_evaluator:TrainMLP):
         test_score = MLP_evaluator.GetTestScore() 
         cost_parameter = MLP_evaluator.GetCostParameter()
 
@@ -847,11 +845,11 @@ class MLPOptimizer_NICFD(MLPOptimizer):
     _activation_function:str = "exponential"
 
     def _prepare_evaluator(self):
-        return EvaluateArchitecture_NICFD(self._Config)
+        return TrainMLP_NICFD(self._Config)
     
     def _postprocess_optimization(self, x):
 
-        Config:EntropicAIConfig = EntropicAIConfig(self._Config.GetConfigName() + ".cfg")
+        Config:Config_NICFD = Config_NICFD(self._Config.GetConfigName() + ".cfg")
         idx_x = 0
         if self._optimizeLR:
             alpha_expo = x[idx_x]
@@ -889,7 +887,7 @@ class MLPOptimizer_NICFD(MLPOptimizer):
 class MLPOptimizer_FGM(MLPOptimizer):
     __output_group:int = 0 
     _activation_function:str="gelu"
-    def __init__(self, Config_in:FlameletAIConfig):
+    def __init__(self, Config_in:Config_FGM):
         MLPOptimizer.__init__(self, Config_in)
         return
     
@@ -912,11 +910,11 @@ class MLPOptimizer_FGM(MLPOptimizer):
         return 
     
     def _prepare_evaluator(self):
-        return EvaluateArchitecture_FGM(self._Config, self.__output_group)
+        return TrainMLP_FGM(self._Config, self.__output_group)
     
     def _postprocess_optimization(self, x):
 
-        Config:FlameletAIConfig = FlameletAIConfig(self._Config.GetConfigName() + ".cfg")
+        Config:Config_FGM = Config_FGM(self._Config.GetConfigName() + ".cfg")
 
         print("Optimized hyper-parameters:")
         idx_x = 0
@@ -963,12 +961,12 @@ class MLPOptimizer_FGM(MLPOptimizer):
     
 class MLPOptimizer_NICFD(MLPOptimizer):
 
-    def __init__(self, Config_in:EntropicAIConfig):
+    def __init__(self, Config_in:Config_NICFD):
         MLPOptimizer.__init__(self, Config_in)
         return
     
     def _prepare_evaluator(self):
-        return EvaluateArchitecture_NICFD(self._Config)
+        return TrainMLP_NICFD(self._Config)
     
 class PlotHPOResults:
     _Config:Config = None 
@@ -1407,7 +1405,7 @@ class PlotHPOResults:
 class PlotHPOResults_FGM(PlotHPOResults):
     __group_idx:int = None 
 
-    def __init__(self, Config:FlameletAIConfig, group_idx:int=0):
+    def __init__(self, Config:Config_FGM, group_idx:int=0):
         PlotHPOResults.__init__(self, Config)
         self.__group_idx = group_idx
         return 

@@ -41,17 +41,17 @@ config.gpu_options.allow_growth = True
 import matplotlib.pyplot as plt 
 import cantera as ct 
 
-from Common.DataDrivenConfig import FlameletAIConfig
-from Manifold_Generation.MLP.Trainer_Base import MLPTrainer, TensorFlowFit,PhysicsInformedTrainer,EvaluateArchitecture, CustomTrainer
+from Common.DataDrivenConfig import Config_FGM
+from Manifold_Generation.MLP.Trainer_Base import MLPTrainer, TensorFlowFit,PhysicsInformedTrainer,TrainMLP, CustomTrainer
 from Common.CommonMethods import GetReferenceData
 from Common.Properties import DefaultSettings_FGM as DefaultProperties
 from Common.Properties import FGMVars
 
 class Train_Flamelet_Direct(TensorFlowFit):
-    __Config:FlameletAIConfig
+    __Config:Config_FGM
     _train_name:str 
 
-    def __init__(self, Config_in:FlameletAIConfig, group_idx:int=0):
+    def __init__(self, Config_in:Config_FGM, group_idx:int=0):
         TensorFlowFit.__init__(self)
         # Set train variables based on what kind of network is trained
         self.__Config = Config_in
@@ -98,13 +98,13 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
     """Physics-informed trainer class for flamelet manifold applications.
     """
 
-    __Config:FlameletAIConfig = None    # FlameletAI configuration class to read output variables and hyper-parameters from.
+    __Config:Config_FGM = None    # FlameletAI configuration class to read output variables and hyper-parameters from.
 
-    def __init__(self, Config_in:FlameletAIConfig, group_idx:int=0):
+    def __init__(self, Config_in:Config_FGM, group_idx:int=0):
         """Class constructor. Initialize a physics-informed trainer object for a given output group.
 
         :param Config_in: FlameletAI configuration class.
-        :type Config_in: FlameletAIConfig
+        :type Config_in: Config_FGM
         :param group_idx: MLP output group index, defaults to 0
         :type group_idx: int, optional
         """
@@ -595,12 +595,12 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         return super().PostProcessing()
     
 class NullMLP(CustomTrainer):
-    __Config:FlameletAIConfig = None 
-    def __init__(self, Config_in:FlameletAIConfig):
+    __Config:Config_FGM = None 
+    def __init__(self, Config_in:Config_FGM):
         """Empty MLP to output zero for the NULL variable in SU2 simulations.
 
         :param Config_in: FlameletAI configuration for the current manifold
-        :type Config_in: FlameletAIConfig
+        :type Config_in: Config_FGM
         """
 
         self.__Config = Config_in 
@@ -670,11 +670,11 @@ class NullMLP(CustomTrainer):
         self.write_SU2_MLP(self._save_dir + "/Model_"+str(self._model_index)+"/MLP_"+self._train_name)
         return 
     
-class EvaluateArchitecture_FGM(EvaluateArchitecture):
+class TrainMLP_FGM(TrainMLP):
     """Class for training MLP architectures
     """
 
-    __Config:FlameletAIConfig = None  # FlameletAI configuration describing the manifold.
+    __Config:Config_FGM = None  # FlameletAI configuration describing the manifold.
     __output_group:int = 0      # MLP output group index for which to train MLP.
     __group_name:str = "Group1" # MLP output group name.
     __trainer_PINN:Train_FGM_PINN = None # Physics-informed trainer object.
@@ -689,12 +689,12 @@ class EvaluateArchitecture_FGM(EvaluateArchitecture):
                                   FGMVars.Beta_Enth.name,\
                                   FGMVars.MolarWeightMix.name]
 
-    def __init__(self, Config:FlameletAIConfig, group_idx:int=0):
-        """Define EvaluateArchitecture instance and prepare MLP trainer with
+    def __init__(self, Config:Config_FGM, group_idx:int=0):
+        """Define TrainMLP instance and prepare MLP trainer with
         default settings.
 
-        :param Config: FlameletAIConfig object describing the flamelet data manifold.
-        :type Config: FlameletAIConfig
+        :param Config: Config_FGM object describing the flamelet data manifold.
+        :type Config: Config_FGM
         :param group_idx: MLP output group index, defaults to 0
         :type group_idx: int, optional
         :raises Exception: if MLP output group index is undefined by flameletAI configuration.
@@ -703,7 +703,7 @@ class EvaluateArchitecture_FGM(EvaluateArchitecture):
         self.__Config = Config 
         self.__output_group=group_idx
         self.CheckPINNVars()
-        EvaluateArchitecture.__init__(self, Config_in=Config)
+        TrainMLP.__init__(self, Config_in=Config)
         self.SetOutputGroup(group_idx)
         pass
 
@@ -720,7 +720,7 @@ class EvaluateArchitecture_FGM(EvaluateArchitecture):
 
         :param iGroup: MLP output group index.
         :type iGroup: int
-        :raises Exception: if group is not supported by loaded flameletAIConfig class.
+        :raises Exception: if group is not supported by loaded Config_FGM class.
         """
         if iGroup < 0 or iGroup >= self._Config.GetNMLPOutputGroups():
             raise Exception("MLP output group index should be between 0 and %i" % self._Config.GetNMLPOutputGroups())
@@ -739,6 +739,9 @@ class EvaluateArchitecture_FGM(EvaluateArchitecture):
         self.CheckPINNVars()
         self.SynchronizeTrainer()
         return 
+    
+    def GetOutputGroup(self):
+        return self.__output_group
     
     def EnableBCLoss(self, enable_bc_loss:bool=True):
         if self.__kind_trainer == "physicsinformed":
@@ -791,7 +794,7 @@ class EvaluateArchitecture_FGM(EvaluateArchitecture):
 
         return super().TrainPostprocessing()
     
-def PlotFlameletData(Trainer:MLPTrainer, Config:FlameletAIConfig, train_name:str):
+def PlotFlameletData(Trainer:MLPTrainer, Config:Config_FGM, train_name:str):
     N_plot = 3
 
     flamelet_dir = Config.GetOutputDir()
