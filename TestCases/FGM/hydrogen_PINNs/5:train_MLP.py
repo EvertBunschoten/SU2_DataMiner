@@ -23,15 +23,18 @@
 # Version: 1.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
-from Common.DataDrivenConfig import FlameletAIConfig 
-from Manifold_Generation.MLP.Trainers_FGM.Trainers import EvaluateArchitecture_FGM
+from su2dataminer.config import Config_FGM 
+from su2dataminer.manifold import TrainMLP_FGM
 
 # Load FlameletAI configuration
-Config = FlameletAIConfig("Hydrogen_PINNs.cfg")
+Config = Config_FGM("Hydrogen_PINNs.cfg")
 
 # For every output group, train an MLP
 for iGroup in range(Config.GetNMLPOutputGroups()):
-    Eval = EvaluateArchitecture_FGM(Config, iGroup)
+    Eval = TrainMLP_FGM(Config, iGroup)
     Eval.SetVerbose(1)
     Eval.CommenceTraining()
+    Config.UpdateMLPHyperParams(Eval)
+    Config.SaveConfig()
+
     

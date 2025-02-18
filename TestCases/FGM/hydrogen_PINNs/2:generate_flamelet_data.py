@@ -23,14 +23,14 @@
 # Version: 1.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
-from Common.DataDrivenConfig import FlameletAIConfig 
-from Data_Generation.DataGenerator_FGM import ComputeFlameletData, ComputeBoundaryData
+from su2dataminer.config import Config_FGM
+from su2dataminer.generate_data import ComputeFlameletData, ComputeBoundaryData
 
 # Load FlameletAI configuration
-Config = FlameletAIConfig("Hydrogen_PINNs.cfg")
+Config = Config_FGM("Hydrogen_PINNs.cfg")
 
 # Distribute flamelet data generation process over 20 cores.
-ComputeFlameletData(Config, run_parallel=True, N_processors=20)
+ComputeFlameletData(Config, run_parallel=True, N_processors=4)
 
 # Compute boundary data for PINN training
 ComputeBoundaryData(Config)
