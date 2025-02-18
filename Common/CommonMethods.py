@@ -90,3 +90,97 @@ def GetReferenceData(dataset_file, x_vars, train_variables,dtype=np.float32):
     Y_data = D[:, iVar_y]
 
     return X_data, Y_data
+
+def write_SU2_MLP(file_out:str, weights:list[np.ndarray], \
+                                biases:list[np.ndarray], \
+                                activation_function_name:str,\
+                                train_vars:list[str], \
+                                controlling_vars:list[str], \
+                                scaler_function:str,\
+                                scaler_function_vals_in:list[list[float]],\
+                                scaler_function_vals_out:list[float],
+                                additional_header_info_function=None):
+        """Write the network to ASCII format readable by the MLPCpp module in SU2.
+
+        :param file_out: MLP output path and file name.
+        :type file_out: str
+        """
+
+        n_layers = len(weights)+1
+
+        # Select trimmed weight matrices for output.
+        weights_for_output = weights
+        biases_for_output = biases
+
+        # Opening output file
+        fid = open(file_out+'.mlp', 'w+')
+        fid.write("<header>\n\n")
+        
+        if additional_header_info_function:
+            additional_header_info_function(fid)
+
+        # Writing number of neurons per layer
+        fid.write('[number of layers]\n%i\n\n' % n_layers)
+        fid.write('[neurons per layer]\n')
+        activation_functions = []
+
+        for iLayer in range(n_layers-1):
+            if iLayer == 0:
+                activation_functions.append('linear')
+            else:
+                activation_functions.append(activation_function_name)
+            n_neurons = np.shape(weights_for_output[iLayer])[0]
+            fid.write('%i\n' % n_neurons)
+        fid.write('%i\n' % len(train_vars))
+
+        activation_functions.append('linear')
+
+        # Writing the activation function for each layer
+        fid.write('\n[activation function]\n')
+        for iLayer in range(n_layers):
+            fid.write(activation_functions[iLayer] + '\n')
+
+        # Writing the input and output names
+        fid.write('\n[input names]\n')
+        for input in controlling_vars:
+                fid.write(input + '\n')
+        
+        fid.write('\n[input regularization method]\n%s\n' % scaler_function)
+
+        fid.write('\n[input normalization]\n')
+        for i in range(len(controlling_vars)):
+            fid.write('%+.16e\t%+.16e\n' % (scaler_function_vals_in[i][0], scaler_function_vals_in[i][1]))
+
+        fid.write('\n[output names]\n')
+        for output in train_vars:
+            fid.write(output+'\n')
+        
+        fid.write('\n[output regularization method]\n%s\n' % scaler_function)
+
+        fid.write('\n[output normalization]\n')
+        for i in range(len(train_vars)):
+            fid.write('%+.16e\t%+.16e\n' % (scaler_function_vals_out[i][0], scaler_function_vals_out[i][1]))
+        fid.write("\n</header>\n")
+        # Writing the weights of each layer
+        fid.write('\n[weights per layer]\n')
+        for W in weights_for_output:
+            fid.write("<layer>\n")
+            for i in range(np.shape(W)[0]):
+                fid.write("\t".join("%+.16e" % float(w) for w in W[i, :]) + "\n")
+            fid.write("</layer>\n")
+        
+        # Writing the biases of each layer
+        fid.write('\n[biases per layer]\n')
+        
+        # Input layer biases are set to zero
+        fid.write("\t".join("%+.16e" % 0 for _ in controlling_vars) + "\n")
+
+        #for B in self.biases:
+        for B in biases_for_output:
+            #try:
+            fid.write("\t".join("%+.16e" % float(b) for b in B) + "\n")
+            # except:
+            #     fid.write("\t".join("%+.16e" % float(B)) + "\n")
+
+        fid.close()
+        return 
