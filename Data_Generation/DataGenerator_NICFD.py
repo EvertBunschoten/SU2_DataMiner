@@ -38,7 +38,7 @@ np.random.seed(2)
 #---------------------------------------------------------------------------------------------#
 # Importing DataMiner classes and functions
 #---------------------------------------------------------------------------------------------#
-from Common.DataDrivenConfig import EntropicAIConfig
+from Common.DataDrivenConfig import Config_NICFD
 from Common.Properties import DefaultSettings_NICFD, EntropicVars
 from Data_Generation.DataGenerator_Base import DataGenerator_Base
 
@@ -46,7 +46,7 @@ from Data_Generation.DataGenerator_Base import DataGenerator_Base
 class DataGenerator_CoolProp(DataGenerator_Base):
     """Class for generating fluid data using CoolProp
     """
-    _Config:EntropicAIConfig
+    _Config:Config_NICFD
     fluid = None 
     __accepted_phases:list[int] = [CoolP.iphase_gas, CoolP.iphase_supercritical_gas, CoolP.iphase_supercritical]
     # Pressure and temperature limits
@@ -75,12 +75,12 @@ class DataGenerator_CoolProp(DataGenerator_Base):
     __success_locations:np.ndarray[bool] = None 
     __mixture:bool = False 
 
-    def __init__(self, Config_in:EntropicAIConfig=None):
+    def __init__(self, Config_in:Config_NICFD=None):
         DataGenerator_Base.__init__(self, Config_in=Config_in)
 
         if Config_in is None:
             print("Initializing NICFD data generator with default settings.")
-            self._Config = EntropicAIConfig()
+            self._Config = Config_NICFD()
         else:
             # Load configuration and set default properties.
             self.__use_PT = self._Config.GetPTGrid()

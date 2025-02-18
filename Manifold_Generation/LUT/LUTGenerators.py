@@ -28,7 +28,7 @@ from sklearn.preprocessing import MinMaxScaler,RobustScaler,StandardScaler, Quan
 import matplotlib.pyplot as plt 
 from tqdm import tqdm
 import sys,os
-from Common.DataDrivenConfig import EntropicAIConfig
+from Common.DataDrivenConfig import Config_NICFD
 import cantera as ct
 import gmsh 
 import pickle
@@ -39,7 +39,7 @@ from random import sample
 
 class SU2TableGenerator:
 
-    _Config:EntropicAIConfig = None # FlameletAIConfig class from which to read settings.
+    _Config:Config_NICFD = None # Config_FGM class from which to read settings.
     _savedir:str
 
     _mixfrac_min:float = None     # Minimum mixture fraction value of the flamelet data.
@@ -80,12 +80,12 @@ class SU2TableGenerator:
     _n_near:int = 9     # Number of nearest neighbors from which to evaluate flamelet data.
     _p_fac:int = 3      # Power by which to weigh distances from query point.
 
-    def __init__(self, Config:EntropicAIConfig, load_file:str=None):
+    def __init__(self, Config:Config_NICFD, load_file:str=None):
         """
         Initiate table generator class.
 
-        :param Config: FlameletAIConfig object.
-        :type Config: FlameletAIConfig
+        :param Config: Config_FGM object.
+        :type Config: Config_FGM
         """
 
         if load_file:
@@ -321,7 +321,7 @@ class SU2TableGenerator:
     
     def WriteTableFile(self, output_filepath:str=None):
         """
-        Save the table data and connectivity as a Dragon library file. If no file name is provided, the table file will be named according to the FlameletAIConfig class name.
+        Save the table data and connectivity as a Dragon library file. If no file name is provided, the table file will be named according to the Config_FGM class name.
 
         :param output_filepath: optional output filepath for table file.
         :type output_filepath: str
