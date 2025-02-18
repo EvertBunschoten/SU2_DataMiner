@@ -31,7 +31,7 @@ import sys
 # Importing DataMiner classes and functions
 #---------------------------------------------------------------------------------------------#
 from Common.Properties import DefaultSettings_FGM
-from Common.DataDrivenConfig import FlameletAIConfig 
+from Common.DataDrivenConfig import Config_FGM 
 from Data_Processing.DataPlotters import DataPlotter_FGM
 
 #---------------------------------------------------------------------------------------------#
@@ -51,7 +51,7 @@ args = parser.parse_args(args=None if sys.argv[1:] else ['--help'])
 #---------------------------------------------------------------------------------------------#
 # Load FlameletAI configuration
 #---------------------------------------------------------------------------------------------#
-Config = FlameletAIConfig(args.config_name)
+Config = Config_FGM(args.config_name)
 Config.PrintBanner()
 
 

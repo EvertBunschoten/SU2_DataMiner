@@ -41,9 +41,9 @@ parser.add_argument('--t', dest='type', type=int, help='Data type to generate: (
 args = parser.parse_args(args=None if sys.argv[1:] else ['--help']) 
 
 if args.type == 1:
-    config = FlameletAIConfig(args.config_name)
+    config = Config_FGM(args.config_name)
 elif args.type == 2:
-    config = EntropicAIConfig(args.config_name)
+    config = Config_NICFD(args.config_name)
 else:
     raise Exception("Config type should be 1 or 2")
 config.PrintBanner()
