@@ -59,7 +59,7 @@ class EntropicAIConfig(Config):
     __fluid_mole_fractions:list[float] = [1.0]          # Mole fractions for components in fluid mixture.
     __use_PT:bool = DefaultSettings_NICFD.use_PT_grid   # Use a pressure-temperature based grid for fluid training data.
 
-
+    __use_auto_range:bool = True   # Automatically determine fluid data bounds.
     __T_lower:float = DefaultSettings_NICFD.T_min   # Lower temperature bound.
     __T_upper:float = DefaultSettings_NICFD.T_max   # Upper temperature bound.
     __Np_T:int = DefaultSettings_NICFD.Np_temp      # Number of temperature/energy samples between bounds.
@@ -73,7 +73,7 @@ class EntropicAIConfig(Config):
     __Energy_lower:float = DefaultSettings_NICFD.Energy_min # Lower energy bound.
     __Energy_upper:float = DefaultSettings_NICFD.Energy_max # Upper energy bound.
     
-    _state_vars:list[str] = ["T","p","c2"]  # State variable names for which the physics-informed MLP is trained.
+    _state_vars:list[str] = ["s", "T","p","c2"]  # State variable names for which the physics-informed MLP is trained.
 
     # Table Generation Settings
 
@@ -129,15 +129,23 @@ class EntropicAIConfig(Config):
         print("Fluid name(s): " + ",".join(self.__fluid_names))
         print("")
         if self.__use_PT:
-            print("Temperature range: %.2f K -> %.2f K (%i steps)" % (self.__T_lower, self.__T_upper, self.__Np_T))
-            print("Pressure range: %.3e Pa -> %.3e Pa (%i steps)" % (self.__P_lower, self.__P_upper, self.__Np_P))
-        else:
-            print("Energy range: %.2e J/kg -> %.2e J/kg (%i steps)" % (self.__Energy_lower, self.__Energy_upper, self.__Np_T))
-            print("Density range: %.2f kg/m3 -> %.2f kg/m3 (%i steps)" % (self.__Rho_lower, self.__Rho_upper, self.__Np_P))
-        if self.__use_PT:
             print("Data generation grid: pressure-based")
         else:
             print("Data generation grid: density-based")
+        if self.__use_PT:
+            if self.__use_auto_range:
+                print("Temperature range: Auto (%i steps)" % self.__Np_T)
+                print("Pressure range: Auto (%i steps)" % self.__Np_P)
+            else:
+                print("Temperature range: %.2f K -> %.2f K (%i steps)" % (self.__T_lower, self.__T_upper, self.__Np_T))
+                print("Pressure range: %.3e Pa -> %.3e Pa (%i steps)" % (self.__P_lower, self.__P_upper, self.__Np_P))
+        else:
+            if self.__use_auto_range:
+                print("Energy range: Auto (%i steps)" % self.__Np_T)
+                print("Density range: Auto (%i steps)" % self.__Np_P)
+            else:
+                print("Energy range: %.2e J/kg -> %.2e J/kg (%i steps)" % (self.__Energy_lower, self.__Energy_upper, self.__Np_T))
+                print("Density range: %.2f kg/m3 -> %.2f kg/m3 (%i steps)" % (self.__Rho_lower, self.__Rho_upper, self.__Np_P))
         print("")
         print("State variables considered during physics-informed learning: "+", ".join((v for v in self._state_vars)))
         return 
@@ -171,7 +179,7 @@ class EntropicAIConfig(Config):
         fluid_string = "&".join(f for f in self.__fluid_names)
         self.__fluid_string=fluid_string
         try:
-            CoolProp.AbstractState("HEOS", fluid_string)
+            CoolProp.AbstractState(self.__EOS_type, fluid_string)
         except:
             raise Exception("Specified fluid name not found or mixture is not supported.")
         return 
@@ -219,6 +227,18 @@ class EntropicAIConfig(Config):
     
     def GetMoleFractions(self):
         return self.__fluid_mole_fractions.copy()
+    
+    def UseAutoRange(self, use_auto_range:bool=True):
+        """Automatically determine fluid data range based on available fluid properties.
+
+        :param use_auto_range: automatically set fluid data range, defaults to True
+        :type use_auto_range: bool, optional
+        """
+        self.__use_auto_range = use_auto_range
+        return 
+    
+    def GetAutoRange(self):
+        return self.__use_auto_range 
     
     def UsePTGrid(self, PT_grid:bool=DefaultSettings_NICFD.use_PT_grid):
         """Define fluid data grid in the pressure-temperature space. If not, the fluid data grid is defined in the density-energy space.
@@ -586,6 +606,13 @@ class FlameletAIConfig(Config):
     __batch_expo:list[float] = [DefaultSettings_FGM.batch_size_exponent]
     __NN:list[list[int]] = [DefaultSettings_FGM.hidden_layer_architecture]
     __activation_function:list[str] = [DefaultSettings_FGM.activation_function]
+    __network_weights:list[list[np.ndarray[float]]] = []
+    __network_biases:list[list[np.ndarray[float]]] = []
+    __network_input_scalers:list[str] = []
+    __network_output_scalers:list[str] = []
+    __network_input_scale_vals:list[list[float]] = []
+    __network_output_scale_vals:list[list[float]] = []
+    
     # Table Generation Settings
 
     __Table_base_cell_size:float = None     # Table base cell size per table level.
