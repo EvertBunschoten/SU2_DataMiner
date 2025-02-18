@@ -104,7 +104,7 @@ class MLPOptimizer:
     # Optimization history.
     __population_history:list = []
     __fitness_history:list = []
-    _history_extenstion:str = ""
+    _history_extension:str = ""
 
     # Optimized solution
     __x_optim:np.ndarray = None 
@@ -417,7 +417,6 @@ class MLPOptimizer:
     
     def _postprocess_optimization(self, x):
 
-        
         print("Optimized hyper-parameters:")
         idx_x = 0
         if self._optimizeLR:
@@ -843,55 +842,50 @@ class MLPOptimizer:
         return -self.fitnessFunction(x=x)
     
     
-    # def SaveOptimizer(self, file_name:str):
-    #     """Save optimizer instance.
-
-    #     :param file_name: file name under which to save the optimizer instance.
-    #     :type file_name: str
-    #     """
-
-    #     file = open(self._Config.GetOutputDir()+"/"+file_name+'.hpo','wb')
-    #     pickle.dump(self, file)
-    #     file.close()
-    #     return 
     
 class MLPOptimizer_NICFD(MLPOptimizer):
     _activation_function:str = "exponential"
 
     def _prepare_evaluator(self):
         return EvaluateArchitecture_NICFD(self._Config)
+    
     def _postprocess_optimization(self, x):
 
         Config:EntropicAIConfig = EntropicAIConfig(self._Config.GetConfigName() + ".cfg")
         idx_x = 0
-        print("Optimized hyper-parameters:")
+        if self._optimizeLR:
+            alpha_expo = x[idx_x]
+            Config.SetAlphaExpo(alpha_expo)
+            print("- initial learning rate exponent: %.5e" % (alpha_expo))
+            idx_x += 1 
+            lr_decay = x[idx_x]
+            Config.SetLRDecay(lr_decay)
+            print("- learning rate decay parameter: %.5e" % lr_decay)
+            idx_x += 1 
         if self._optimizebatch:
             batch_expo = int(x[idx_x])
             Config.SetBatchExpo(batch_expo)
             idx_x += 1 
             print("- mini-batch exponent: %i" % batch_expo)
-        if self._optimizeLR:
-            alpha_expo = x[idx_x]
-            idx_x += 1 
-            print("- initial learning rate exponent: %.5e" % (alpha_expo))
-            Config.SetAlphaExpo(alpha_expo)
-            lr_decay = x[idx_x]
-            print("- learning rate decay parameter: %.5e" % lr_decay)
-            Config.SetLRDecay(lr_decay)
-            idx_x += 1 
-        if self._optimizeNN:
-            architecture = [int(x[idx_x])]
-            idx_x += 1 
-            print("- hidden layer architecture: "+ " ".join(("%i" % n) for n in architecture))
-            Config.SetHiddenLayerArchitecture(architecture)
         if self._optimizephi:
             phi = self.__activation_function_options[int(x[idx_x])]
-            idx_x += 1
-            print("- hidden layer activation function: %s" % phi)
             Config.SetActivationFunction(phi)
-        
+            print("- hidden layer activation function: %s" % phi)
+            idx_x += 1
+        if self._optimizeNN:
+            architecture = [int(x[idx_x])]
+            architecture = []
+            for i in range(idx_x, idx_x + self.NLayers_min):
+                architecture.append(x[i])
+            for i in range(idx_x + self.NLayers_min, len(x)-1, 2):
+                if x[i] > 0:
+                    architecture.append(x[i+1])
+            print("- hidden layer architecture: "+ " ".join(("%i" % n) for n in architecture))
+            Config.SetHiddenLayerArchitecture(architecture)
+            idx_x += 1 
         Config.SaveConfig()
         return
+    
 class MLPOptimizer_FGM(MLPOptimizer):
     __output_group:int = 0 
     _activation_function:str="gelu"
@@ -908,11 +902,11 @@ class MLPOptimizer_FGM(MLPOptimizer):
         return 
     
     def _initialize_history_file(self):
-        self.opt_history_filepath = self.save_dir + "/history_optim_Group"+str(self.__output_group+1)+"_"+self._history_extension+".csv"
+        self.opt_history_filepath = "%s/history_optim_Group%i_%s.csv" % (self.save_dir, (self.__output_group+1),self._history_extension)
         return 
     
     def SetOutputFolder(self):
-        self.save_dir = self._Config.GetOutputDir()+"/Architectures_Group"+str(self.__output_group+1)+"_Optim"+self._history_extension
+        self.save_dir = "%s/Architectures_Group%i_Optim%s" % (self._Config.GetOutputDir(), (self.__output_group+1), self._history_extension)
         if not os.path.isdir(self.save_dir):
             os.mkdir(self.save_dir)
         return 
@@ -928,30 +922,37 @@ class MLPOptimizer_FGM(MLPOptimizer):
         idx_x = 0
         if self._optimizeLR:
             alpha_expo = x[idx_x]
-            idx_x += 1 
+            Config.SetAlphaExpo(alpha_expo, self.__output_group)
             print("- initial learning rate exponent: %.5e" % (alpha_expo))
-            Config.SetAlphaExpo(alpha_expo)
+            idx_x += 1 
             lr_decay = x[idx_x]
+            Config.SetLRDecay(lr_decay, self.__output_group)
             print("- learning rate decay parameter: %.5e" % lr_decay)
-            self._Config.SetLRDecay(lr_decay)
             idx_x += 1 
         if self._optimizebatch:
             batch_expo = int(x[idx_x])
-            Config.SetBatchExpo(batch_expo)
+            Config.SetBatchExpo(batch_expo, self.__output_group)
             idx_x += 1 
             print("- mini-batch exponent: %i" % batch_expo)
+        if self._optimizephi:
             phi = self.__activation_function_options[int(x[idx_x])]
-            idx_x += 1
+            Config.SetActivationFunction(phi, self.__output_group)
             print("- hidden layer activation function: %s" % phi)
-            Config.SetActivationFunction(phi)
+            idx_x += 1
         if self._optimizeNN:
             architecture = [int(x[idx_x])]
-            idx_x += 1 
+            architecture = []
+            for i in range(idx_x, idx_x + self.NLayers_min):
+                architecture.append(x[i])
+            for i in range(idx_x + self.NLayers_min, len(x)-1, 2):
+                if x[i] > 0:
+                    architecture.append(x[i+1])
             print("- hidden layer architecture: "+ " ".join(("%i" % n) for n in architecture))
-            Config.SetHiddenLayerArchitecture(architecture)
-        
+            Config.SetHiddenLayerArchitecture(architecture, self.__output_group)
+            idx_x += 1 
         Config.SaveConfig()
         return
+    
     def SaveOptimizer(self, ga_instance:pygad.GA):
         ga_instance.save("%s/optimizer_instance_Group%i_%s" % (self.save_dir, self.__output_group+1, self._history_extension))
         return
@@ -1038,7 +1039,6 @@ class PlotHPOResults:
             validation_loss = float(lines[1].strip().split(":")[-1])
             if np.isnan(validation_loss):
                 validation_loss = 1e1
-            NN = [int(s) for s in lines[-1].strip().split(":")[-1].split()]
             cost_param = float(lines[4].strip().split(':')[-1])
             alpha_expo = float(lines[5].strip().split(':')[-1])
             lr_decay = float(lines[6].strip().split(':')[-1])
