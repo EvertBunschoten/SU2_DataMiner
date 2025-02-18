@@ -26,7 +26,10 @@
 import os 
 import pyfiglet
 import pickle
+import numpy as np 
+
 from Common.Properties import DefaultProperties, ActivationFunctionOptions
+from Common.CommonMethods import write_SU2_MLP
 
 class Config:
     """Base class for the SU2 DataMiner configuration.
@@ -48,6 +51,14 @@ class Config:
     _batch_expo:int = DefaultProperties.batch_size_exponent             # Mini-batch size exponent (base 2).
     _hidden_layer_architecture:list[int] = DefaultProperties.hidden_layer_architecture  # Hidden layer perceptron count.
     _activation_function:str = DefaultProperties.activation_function    # Hidden layer activation function name.
+
+    _scaler_function_name:str = "minmax"
+    _scaler_function_vals_in:list[list[float]]
+    _scaler_function_vals_out:list[list[float]]
+    _train_vars:list[str]
+    _control_vars:list[str]
+    _MLP_weights:list[np.ndarray[float]]
+    _MLP_biases:list[np.ndarray[float]]
 
     _config_type:str= None  # SU2 DataMiner configuration type.
     
@@ -301,6 +312,31 @@ class Config:
         """
         return self._activation_function
     
+    def UpdateMLPHyperParams(self, trainer):
+        self._alpha_expo = trainer.alpha_expo
+        self._lr_decay = trainer.lr_decay
+        self._batch_expo = trainer.batch_expo
+        self._hidden_layer_architecture = trainer.architecture.copy()
+        self._activation_function = trainer.activation_function
+
+        self._train_vars = trainer.GetTrainVars().copy()
+        self._control_vars = trainer.GetControlVars().copy()
+        self._scaler_function_name, self._scaler_function_vals_in,self._scaler_function_vals_out = trainer.GetScalerFunctionParams()
+        self._MLP_weights = trainer.GetWeights().copy()
+        self._MLP_biases = trainer.GetBiases().copy()
+        return 
+    
+    def WriteSU2MLP(self, file_name_out:str):
+        return write_SU2_MLP(file_name_out,\
+                             weights=self._MLP_weights,\
+                             biases=self._MLP_biases,\
+                             activation_function_name=self._activation_function,\
+                             train_vars=self._train_vars,\
+                             controlling_vars=self._control_vars,\
+                             scaler_function=self._scaler_function_name,\
+                             scaler_function_vals_in=self._scaler_function_vals_in,\
+                             scaler_function_vals_out=self._scaler_function_vals_out)
+
     def SaveConfig(self):
         """
         Save the current SU2 DataMiner configuration.
