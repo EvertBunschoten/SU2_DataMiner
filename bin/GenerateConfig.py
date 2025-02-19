@@ -21,12 +21,12 @@
 #  Initiate a configuration object through the interactive terminal for the SU2 DataMiner     |
 #  workflow.                                                                                  |
 #                                                                                             |  
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
 import pyfiglet
-from Common.DataDrivenConfig import FlameletAIConfig, EntropicAIConfig
+from Common.DataDrivenConfig import Config_FGM, Config_NICFD
 
 from manual_configuration import *
 customfig = pyfiglet.Figlet(font="slant")
@@ -46,7 +46,7 @@ while not correct_config_type:
     else:
         correct_config_type = True 
 
-Config_in:FlameletAIConfig = None 
+Config_in:Config_FGM = None 
 if configuration_type=="1":
     ManualFlameletConfiguration()
 elif configuration_type == "2":

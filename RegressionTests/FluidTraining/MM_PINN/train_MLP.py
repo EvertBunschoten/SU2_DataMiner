@@ -2,11 +2,11 @@
 
 import os 
 import sys 
-from Manifold_Generation.MLP.Trainers_NICFD.Trainers import Train_Entropic_PINN, EvaluateArchitecture_NICFD
+from Manifold_Generation.MLP.Trainers_NICFD.Trainers import Train_Entropic_PINN, TrainMLP_NICFD
 
-from Common.DataDrivenConfig import EntropicAIConfig 
+from Common.DataDrivenConfig import Config_NICFD 
 
-C = EntropicAIConfig(sys.argv[-1])
+C = Config_NICFD(sys.argv[-1])
 
 M = Train_Entropic_PINN()
 M.SetTrainFileHeader(os.getcwd()+"/"+C.GetConcatenationFileHeader())

@@ -20,7 +20,7 @@
 # Description:                                                                                |
 #  Optimize the progress variable definition and weights.                                     |
 #                                                                                             |  
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -31,7 +31,7 @@ import sys
 # Importing DataMiner classes and functions
 #---------------------------------------------------------------------------------------------#
 from Common.Properties import DefaultSettings_FGM
-from Common.DataDrivenConfig import FlameletAIConfig 
+from Common.DataDrivenConfig import Config_FGM 
 from Data_Processing.OptimizeProgressVariable import PVOptimizer
 
 #---------------------------------------------------------------------------------------------#
@@ -48,7 +48,7 @@ if args.Np <= 0:
 #---------------------------------------------------------------------------------------------#
 # Load FlameletAI configuration
 #---------------------------------------------------------------------------------------------#
-Config = FlameletAIConfig(args.config_name)
+Config = Config_FGM(args.config_name)
 Config.PrintBanner()
 
 #---------------------------------------------------------------------------------------------#

@@ -21,7 +21,7 @@
 #  homogeneous distribution of flamelet data along the progress variable, enthalpy, and       |
 #  mixture fraction direction.                                                                |
 #                                                                                             |
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -37,14 +37,14 @@ import matplotlib.pyplot as plt
 prop_cycle = plt.rcParams["axes.prop_cycle"]
 colors = prop_cycle.by_key()['color']
 
-from Common.DataDrivenConfig import FlameletAIConfig
+from Common.DataDrivenConfig import Config_FGM
 from Common.Properties import DefaultSettings_FGM, FGMVars
 
 class FlameletConcatenator:
     """Read, regularize, and concatenate flamelet data for MLP training or LUT generation.
 
     """
-    __Config:FlameletAIConfig = None # FlameletAI configuration for current workflow.
+    __Config:Config_FGM = None # FlameletAI configuration for current workflow.
 
     __Np_per_flamelet:int = 2**DefaultSettings_FGM.batch_size_exponent          # Number of data points to extract per flamelet.
     __custom_resolution:bool = False    # Overwrite average number of data points per flamelet with a specified value.
@@ -114,11 +114,11 @@ class FlameletConcatenator:
 
     __verbose:int=1
 
-    def __init__(self, Config:FlameletAIConfig,verbose_level:int=1):
+    def __init__(self, Config:Config_FGM,verbose_level:int=1):
         """Class constructor
 
-        :param Config: loaded FlameletAIConfig class for the current workflow.
-        :type Config: FlameletAIConfig
+        :param Config: loaded Config_FGM class for the current workflow.
+        :type Config: Config_FGM
         """
         self.__verbose = verbose_level
         if self.__verbose >0:
@@ -806,7 +806,7 @@ class GroupOutputs:
     """Class which groups flamelet data variables into MLP outputs based on their affinity.
     """
 
-    __Config:FlameletAIConfig = None    # FlameletAI configuration for the current problem.
+    __Config:Config_FGM = None    # FlameletAI configuration for the current problem.
     __controlling_variables:list[str] = DefaultSettings_FGM.controlling_variables
     __vars_to_exclude:list[str] = DefaultSettings_FGM.controlling_variables + ["FlameletID"]   # Variables to exclude from grouping; controlling variables by default.
     __flamelet_variables:list[str]  # Flamelet data variable names.
@@ -832,11 +832,11 @@ class GroupOutputs:
     __most_interesting_groups:list[list[list[str]]] = []    # Combinations of groups with highest affinity for a certain group count.
 
     __best_group:int = 0
-    def __init__(self, Config_in:FlameletAIConfig):
+    def __init__(self, Config_in:Config_FGM):
         """Class constructor, load flamelet data.
 
         :param Config_in: FlameletAI configuration for the current problem.
-        :type Config_in: FlameletAIConfig
+        :type Config_in: Config_FGM
         """
         self.__Config = Config_in 
         self.__flamelet_data_filepath = self.__Config.GetOutputDir()+"/"+self.__Config.GetConcatenationFileHeader()+"_full.csv"

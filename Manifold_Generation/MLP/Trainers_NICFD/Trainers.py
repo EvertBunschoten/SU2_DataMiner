@@ -19,7 +19,7 @@
 # Description:                                                                                |
 #  Classes for training multi-layer perceptrons on fluid data.                                |
 #                                                                                             |
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -45,10 +45,10 @@ from enum import Enum
 import CoolProp as CoolP
 import CoolProp.CoolProp as CP 
 
-from Common.DataDrivenConfig import EntropicAIConfig
+from Common.DataDrivenConfig import Config_NICFD
 from Common.CommonMethods import GetReferenceData
 from Common.Properties import DefaultSettings_NICFD, EntropicVars
-from Manifold_Generation.MLP.Trainer_Base import MLPTrainer, TensorFlowFit,PhysicsInformedTrainer,EvaluateArchitecture
+from Manifold_Generation.MLP.Trainer_Base import MLPTrainer, TensorFlowFit,PhysicsInformedTrainer,TrainMLP
 
 LabelPairing = {EntropicVars.s.name:r"Entropy $(s)[J/kg]$",\
                 EntropicVars.T.name:r"Temperature $(T)[K]$",\
@@ -98,11 +98,11 @@ def GetStateVector(fluid:CP.AbstractState):
         state_vector_vals[:] = None 
     return state_vector_vals, correct_phase
 
-def ComputeRhoEGridData(config:EntropicAIConfig):
+def ComputeRhoEGridData(config:Config_NICFD):
     """Compute the fluid thermodynamic properties for a coarse rho-e grid for visualization purposes.
 
     :param config: EntropicAI configuration for the current problem.
-    :type config: EntropicAIConfig
+    :type config: Config_NICFD
     :return: fluid thermodynamic properties on a Cartesian rho-e grid.
     :rtype: np.ndarray[float]
     """
@@ -1072,18 +1072,18 @@ class Train_Entropic_Segregated(TensorFlowFit):
         fid.write("Inverse transform dsdrho_e: -exp(dsdrho_e)\nInverse transform d2sdrho2: exp(d2sdrho2)\n")
         return 
     
-class EvaluateArchitecture_NICFD(EvaluateArchitecture):
+class TrainMLP_NICFD(TrainMLP):
     """Class for training MLP architectures
     """
     __trainer_PINN:Train_Entropic_PINN      # MLP trainer object responsible for training itself.
     _state_vars:list[str] = [EntropicVars.s.name, EntropicVars.T.name, EntropicVars.p.name, EntropicVars.c2.name]
 
-    def __init__(self, Config_in:EntropicAIConfig):
-        """Define EvaluateArchitecture instance and prepare MLP trainer with
+    def __init__(self, Config_in:Config_NICFD):
+        """Define TrainMLP instance and prepare MLP trainer with
         default settings.
 
-        :param Config: FlameletAIConfig object describing the flamelet data manifold.
-        :type Config: FlameletAIConfig
+        :param Config: Config_FGM object describing the flamelet data manifold.
+        :type Config: Config_FGM
         :param group_idx: MLP output group index, defaults to 0
         :type group_idx: int, optional
         :raises Exception: if MLP output group index is undefined by flameletAI configuration.
@@ -1098,7 +1098,7 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
         for n in DefaultSettings_NICFD.hidden_layer_architecture:
             self.architecture.append(n)
 
-        EvaluateArchitecture.__init__(self, Config_in=Config_in)
+        TrainMLP.__init__(self, Config_in=Config_in)
         self._scaler = "minmax"
         self._state_vars = Config_in.GetStateVars().copy()
 
@@ -1187,11 +1187,22 @@ class EvaluateArchitecture_NICFD(EvaluateArchitecture):
     def SetTrainStepType(self, train_step_type:str="Gauss-Seidel"):
         self.__trainer_PINN.SetTrainStepType(train_step_type)
         return 
+    def GetWeights(self):
+        return self.__trainer_PINN.GetWeights()
+    def GetBiases(self):
+        return self.__trainer_PINN.GetBiases()
     
-class EvaluateArchitecture_NICFD_Segregated(EvaluateArchitecture):
+    def GetScalerFunctionParams(self):
+        return self.__trainer_PINN.GetScalerFunctionParams()
+    def GetControlVars(self):
+        return self.__trainer_PINN._controlling_vars
+    def GetTrainVars(self):
+        return self.__trainer_PINN._train_vars
+    
+class TrainMLP_NICFD_Segregated(TrainMLP):
     """Driver class for training a segregated entropic MLP.
     """
-    def __init__(self, Config_in:EntropicAIConfig):
+    def __init__(self, Config_in:Config_NICFD):
 
         # Use segregated MLP trainer
         self._trainer_direct = Train_Entropic_Segregated()
@@ -1202,6 +1213,7 @@ class EvaluateArchitecture_NICFD_Segregated(EvaluateArchitecture):
         for n in DefaultSettings_NICFD.hidden_layer_architecture:
             self.architecture.append(n)
 
-        EvaluateArchitecture.__init__(self, Config_in=Config_in)
+        TrainMLP.__init__(self, Config_in=Config_in)
         self.SynchronizeTrainer()
         return 
+    

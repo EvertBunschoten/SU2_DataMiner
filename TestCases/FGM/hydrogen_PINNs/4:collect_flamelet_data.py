@@ -20,15 +20,15 @@
 # Description:                                                                                |
 #  Concatenate flamelet data and group outputs for training physics-informed neural networks. |
 #                                                                                             |  
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
-from Common.DataDrivenConfig import FlameletAIConfig 
-from Data_Processing.collectFlameletData import FlameletConcatenator, GroupOutputs
+from su2dataminer.config import Config_FGM 
+from su2dataminer.process_data import FlameletConcatenator, GroupOutputs
 
 # Load FlameletAI configuration
-Config = FlameletAIConfig("Hydrogen_PINNs.cfg")
+Config = Config_FGM("Hydrogen_PINNs.cfg")
 
 # Initiate flamelet data concatenator
 Concat = FlameletConcatenator(Config)

@@ -19,7 +19,7 @@
 # Description:                                                                                |
 #   Base class for the various MLP trainer types and MLP evaluator class.                     |
 #                                                                                             |
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -50,7 +50,7 @@ import csv
 
 from Common.Config_base import Config
 from Common.Properties import DefaultProperties 
-from Common.CommonMethods import GetReferenceData
+from Common.CommonMethods import GetReferenceData, write_SU2_MLP
 
 # Activation function options
 activation_function_names_options:list[str] = ["linear","elu","relu","tanh","exponential","gelu","sigmoid", "swish"]
@@ -416,7 +416,7 @@ class MLPTrainer:
         :return: list of weight arrays.
         :rtype: list[np.ndarray]
         """
-        return self._weights
+        return [w.numpy() for w in self._weights]
     
     def GetBiases(self):
         """Get the trainable biases from the network.
@@ -424,7 +424,7 @@ class MLPTrainer:
         :return: list of bias arrays.
         :rtype: list[np.ndarray]
         """
-        return self._biases 
+        return [b.numpy() for b in self._biases] 
     
     def PlotR2Data(self):
         """Plot the MLP prediction in the form of R2-plots w.r.t. the reference data, and along each of the 
@@ -567,97 +567,122 @@ class MLPTrainer:
             Y_val_norm = scaler_y.transform(Y_val)
 
             return X_train_norm, X_test_norm, X_val_norm, Y_train_norm, Y_test_norm, Y_val_norm
-        
+    
+    def GetScalerFunctionParams(self):
+        if self.scaler_function_name == "minmax":
+            scaler_function_vals_in = [[mi,ma] for mi, ma in zip(self.scaler_function_x.data_min_, self.scaler_function_x.data_max_)]
+            scaler_function_vals_out = [[mi,ma] for mi, ma in zip(self.scaler_function_y.data_min_, self.scaler_function_y.data_max_)]
+        else:
+            scaler_function_vals_in = [[mi,ma] for mi, ma in zip(self._X_offset, self._X_scale)]
+            scaler_function_vals_out = [[mi,ma] for mi, ma in zip(self._Y_offset, self._Y_scale)]
+        return self.scaler_function_name, scaler_function_vals_in, scaler_function_vals_out
+    
     def write_SU2_MLP(self, file_out:str):
         """Write the network to ASCII format readable by the MLPCpp module in SU2.
 
         :param file_out: MLP output path and file name.
         :type file_out: str
         """
+        weights = [w.numpy() for w in self._weights]
+        biases = [b.numpy() for b in self._biases]
+        if self.scaler_function_name == "minmax":
+            scaler_function_vals_in = [[mi,ma] for mi, ma in zip(self.scaler_function_x.data_min_, self.scaler_function_x.data_max_)]
+            scaler_function_vals_out = [[mi,ma] for mi, ma in zip(self.scaler_function_y.data_min_, self.scaler_function_y.data_max_)]
+        else:
+            scaler_function_vals_in = [[mi,ma] for mi, ma in zip(self._X_offset, self._X_scale)]
+            scaler_function_vals_out = [[mi,ma] for mi, ma in zip(self._Y_offset, self._Y_scale)]
+        return write_SU2_MLP(file_out, weights=weights,\
+                                       biases=biases, \
+                                       activation_function_name=self._activation_function_name,\
+                                       train_vars=self._train_vars,\
+                                       controlling_vars=self._controlling_vars,\
+                                       scaler_function=self.scaler_function_name,\
+                                       scaler_function_vals_in=scaler_function_vals_in,\
+                                       scaler_function_vals_out=scaler_function_vals_out,\
+                                       additional_header_info_function=self.add_additional_header_info)
+        # n_layers = len(self._weights)+1
 
-        n_layers = len(self._weights)+1
+        # # Select trimmed weight matrices for output.
+        # weights_for_output = self._weights
+        # biases_for_output = self._biases
 
-        # Select trimmed weight matrices for output.
-        weights_for_output = self._weights
-        biases_for_output = self._biases
-
-        # Opening output file
-        fid = open(file_out+'.mlp', 'w+')
-        fid.write("<header>\n\n")
+        # # Opening output file
+        # fid = open(file_out+'.mlp', 'w+')
+        # fid.write("<header>\n\n")
         
-        self.add_additional_header_info(fid)
-        # Writing number of neurons per layer
-        fid.write('[number of layers]\n%i\n\n' % n_layers)
-        fid.write('[neurons per layer]\n')
-        activation_functions = []
+        # self.add_additional_header_info(fid)
+        # # Writing number of neurons per layer
+        # fid.write('[number of layers]\n%i\n\n' % n_layers)
+        # fid.write('[neurons per layer]\n')
+        # activation_functions = []
 
-        for iLayer in range(n_layers-1):
-            if iLayer == 0:
-                activation_functions.append('linear')
-            else:
-                activation_functions.append(self._activation_function_name)
-            n_neurons = np.shape(weights_for_output[iLayer])[0]
-            fid.write('%i\n' % n_neurons)
-        fid.write('%i\n' % len(self._train_vars))
+        # for iLayer in range(n_layers-1):
+        #     if iLayer == 0:
+        #         activation_functions.append('linear')
+        #     else:
+        #         activation_functions.append(self._activation_function_name)
+        #     n_neurons = np.shape(weights_for_output[iLayer])[0]
+        #     fid.write('%i\n' % n_neurons)
+        # fid.write('%i\n' % len(self._train_vars))
 
-        activation_functions.append('linear')
+        # activation_functions.append('linear')
 
-        # Writing the activation function for each layer
-        fid.write('\n[activation function]\n')
-        for iLayer in range(n_layers):
-            fid.write(activation_functions[iLayer] + '\n')
+        # # Writing the activation function for each layer
+        # fid.write('\n[activation function]\n')
+        # for iLayer in range(n_layers):
+        #     fid.write(activation_functions[iLayer] + '\n')
 
-        # Writing the input and output names
-        fid.write('\n[input names]\n')
-        for input in self._controlling_vars:
-                fid.write(input + '\n')
+        # # Writing the input and output names
+        # fid.write('\n[input names]\n')
+        # for input in self._controlling_vars:
+        #         fid.write(input + '\n')
         
-        fid.write('\n[input regularization method]\n%s\n' % self.scaler_function_name)
+        # fid.write('\n[input regularization method]\n%s\n' % self.scaler_function_name)
 
-        fid.write('\n[input normalization]\n')
-        for i in range(len(self._controlling_vars)):
-            if self.scaler_function_name == "minmax":
-                fid.write('%+.16e\t%+.16e\n' % (self.scaler_function_x.data_min_[i], self.scaler_function_x.data_max_[i]))
-            else:
-                fid.write('%+.16e\t%+.16e\n' % (self._X_offset[i], self._X_scale[i]))
+        # fid.write('\n[input normalization]\n')
+        # for i in range(len(self._controlling_vars)):
+        #     if self.scaler_function_name == "minmax":
+        #         fid.write('%+.16e\t%+.16e\n' % (self.scaler_function_x.data_min_[i], self.scaler_function_x.data_max_[i]))
+        #     else:
+        #         fid.write('%+.16e\t%+.16e\n' % (self._X_offset[i], self._X_scale[i]))
 
-        fid.write('\n[output names]\n')
-        for output in self._train_vars:
-            fid.write(output+'\n')
+        # fid.write('\n[output names]\n')
+        # for output in self._train_vars:
+        #     fid.write(output+'\n')
         
-        fid.write('\n[output regularization method]\n%s\n' % self.scaler_function_name)
+        # fid.write('\n[output regularization method]\n%s\n' % self.scaler_function_name)
 
-        fid.write('\n[output normalization]\n')
-        for i in range(len(self._train_vars)):
-            if self.scaler_function_name == "minmax":
-                fid.write('%+.16e\t%+.16e\n' % (self.scaler_function_y.data_min_[i], self.scaler_function_y.data_max_[i]))
-            else:
-                fid.write('%+.16e\t%+.16e\n' % (self._Y_offset[i], self._Y_scale[i]))
+        # fid.write('\n[output normalization]\n')
+        # for i in range(len(self._train_vars)):
+        #     if self.scaler_function_name == "minmax":
+        #         fid.write('%+.16e\t%+.16e\n' % (self.scaler_function_y.data_min_[i], self.scaler_function_y.data_max_[i]))
+        #     else:
+        #         fid.write('%+.16e\t%+.16e\n' % (self._Y_offset[i], self._Y_scale[i]))
 
-        fid.write("\n</header>\n")
-        # Writing the weights of each layer
-        fid.write('\n[weights per layer]\n')
-        for W in weights_for_output:
-            fid.write("<layer>\n")
-            for i in range(np.shape(W)[0]):
-                fid.write("\t".join("%+.16e" % float(w) for w in W[i, :]) + "\n")
-            fid.write("</layer>\n")
+        # fid.write("\n</header>\n")
+        # # Writing the weights of each layer
+        # fid.write('\n[weights per layer]\n')
+        # for W in weights_for_output:
+        #     fid.write("<layer>\n")
+        #     for i in range(np.shape(W)[0]):
+        #         fid.write("\t".join("%+.16e" % float(w) for w in W[i, :]) + "\n")
+        #     fid.write("</layer>\n")
         
-        # Writing the biases of each layer
-        fid.write('\n[biases per layer]\n')
+        # # Writing the biases of each layer
+        # fid.write('\n[biases per layer]\n')
         
-        # Input layer biases are set to zero
-        fid.write("\t".join("%+.16e" % 0 for _ in self._controlling_vars) + "\n")
+        # # Input layer biases are set to zero
+        # fid.write("\t".join("%+.16e" % 0 for _ in self._controlling_vars) + "\n")
 
-        #for B in self.biases:
-        for B in biases_for_output:
-            try:
-                fid.write("\t".join("%+.16e" % float(b) for b in B.numpy()) + "\n")
-            except:
-                fid.write("\t".join("%+.16e" % float(B.numpy())) + "\n")
+        # #for B in self.biases:
+        # for B in biases_for_output:
+        #     try:
+        #         fid.write("\t".join("%+.16e" % float(b) for b in B.numpy()) + "\n")
+        #     except:
+        #         fid.write("\t".join("%+.16e" % float(B.numpy())) + "\n")
 
-        fid.close()
-        return 
+        # fid.close()
+        # return 
     
     def add_additional_header_info(self, fid):
         return 
@@ -1636,7 +1661,7 @@ class PhysicsInformedTrainer(CustomTrainer):
         self._enable_boundary_loss = enable_bc_loss
         return 
     
-class EvaluateArchitecture:
+class TrainMLP:
     """Class for training MLP architectures
     """
 
@@ -1667,11 +1692,11 @@ class EvaluateArchitecture:
     _scaler:str = "robust"
 
     def __init__(self, Config_in:Config):
-        """Define EvaluateArchitecture instance and prepare MLP trainer with
+        """Define TrainMLP instance and prepare MLP trainer with
         default settings.
 
-        :param Config: FlameletAIConfig object describing the flamelet data manifold.
-        :type Config: FlameletAIConfig
+        :param Config: Config_FGM object describing the flamelet data manifold.
+        :type Config: Config_FGM
         :param group_idx: MLP output group index, defaults to 0
         :type group_idx: int, optional
         :raises Exception: if MLP output group index is undefined by flameletAI configuration.
@@ -1887,6 +1912,18 @@ class EvaluateArchitecture:
         :rtype: float
         """
         return self._test_score
+    
+    def GetWeights(self):
+        return self._trainer_direct.GetWeights()
+    def GetBiases(self):
+        return self._trainer_direct.GetBiases()
+    
+    def GetScalerFunctionParams(self):
+        return self._trainer_direct.GetScalerFunctionParams()
+    def GetControlVars(self):
+        return self._trainer_direct._controlling_vars
+    def GetTrainVars(self):
+        return self._trainer_direct._train_vars
     
     def SetTrainFileHeader(self, fileheader:str):
         """Set a custom training data file header.

@@ -20,7 +20,7 @@
 #  Class for optimizing the definition for the progress variable for a given set of flamelet  |
 #  data.                                                                                      |
 #                                                                                             |
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -34,14 +34,14 @@ from scipy.optimize import differential_evolution, Bounds, LinearConstraint, min
 from sklearn.decomposition import PCA
 
 from Common.Properties import FGMVars, DefaultProperties
-from Common.DataDrivenConfig import FlameletAIConfig
+from Common.DataDrivenConfig import Config_FGM
 
 class PVOptimizer:
     """Optimize the progress variable weights for all flamelets in the manifold given relevant species in the mixture.
     """
     # Class for optimizing the progress variable weights for monotonicity
 
-    _Config:FlameletAIConfig = None  # FlameletAIConfig class.
+    _Config:Config_FGM = None  # Config_FGM class.
 
     _pv_definition_optim = None # Optimized progress variable definition.
     _pv_weights_optim = None    # Optimized progress variable weights.
@@ -83,10 +83,10 @@ class PVOptimizer:
 
     _output_dir:str = None 
 
-    def __init__(self, Config:FlameletAIConfig):
+    def __init__(self, Config:Config_FGM):
         """Progress variable optimization class constructor
-        :param Config: FlameletAIConfig class containing manifold info.
-        :type Config: FlameletAIConfig
+        :param Config: Config_FGM class containing manifold info.
+        :type Config: Config_FGM
         """
 
         self._Config = Config 
@@ -770,7 +770,7 @@ class PVOptimizer:
         return I
 
 class PVOptimizer_Niu(PVOptimizer):
-    def __init__(self, Config:FlameletAIConfig):
+    def __init__(self, Config:Config_FGM):
         super().__init__(Config)
         return 
     
@@ -961,7 +961,7 @@ class PVOptimizer_Niu(PVOptimizer):
         return
     
 class PVOptimizer_Prufert(PVOptimizer):
-    def __init__(self, Config:FlameletAIConfig):
+    def __init__(self, Config:Config_FGM):
         super().__init__(Config)
         return 
     
@@ -998,7 +998,7 @@ class PVOptimizer_Prufert(PVOptimizer):
         return
 
 class PVOptimizer_PCA(PVOptimizer):
-    def __init__(self, Config:FlameletAIConfig):
+    def __init__(self, Config:Config_FGM):
         super().__init__(Config)
         return 
     def RunOptimizer(self):
@@ -1020,6 +1020,6 @@ class PVOptimizer_PCA(PVOptimizer):
     
 if __name__ == "__main__":
     config_input_file = sys.argv[-1]
-    Config = FlameletAIConfig(config_input_file)
+    Config = Config_FGM(config_input_file)
     PVO = PVOptimizer_Niu(Config)
     PVO.OptimizePV()

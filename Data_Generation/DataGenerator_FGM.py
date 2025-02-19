@@ -19,7 +19,7 @@
 # Description:                                                                                |
 #  Class for generating fluid data for Flamelet-Generated Manifold data mining operations.    |
 #                                                                                             |
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -36,19 +36,19 @@ np.random.seed(2)
 #---------------------------------------------------------------------------------------------#
 # Importing DataMiner classes and functions
 #---------------------------------------------------------------------------------------------#
-from Common.DataDrivenConfig import FlameletAIConfig
+from Common.DataDrivenConfig import Config_FGM
 from Data_Generation.DataGenerator_Base import DataGenerator_Base
 from Common.CommonMethods import ComputeLewisNumber
 from Common.Properties import DefaultSettings_FGM
 
-class FlameletGenerator_Cantera(DataGenerator_Base):
+class DataGenerator_Cantera(DataGenerator_Base):
     """Generate flamelet data using Cantera.
 
-    :param Config: FlameletAIConfig class describing the flamelet generation settings.
-    :type: FlameletAIConfig
+    :param Config: Config_FGM class describing the flamelet generation settings.
+    :type: Config_FGM
     """
     # Generate flamelet data from Cantera computation.
-    _Config:FlameletAIConfig
+    _Config:Config_FGM
 
     # Save directory for computed flamelet data
     __matlab__output_dir:str = "./"
@@ -86,20 +86,20 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
 
     __fuzzy_delta:float = 0.1
 
-    def __init__(self, Config:FlameletAIConfig=None):
+    def __init__(self, Config:Config_FGM=None):
         DataGenerator_Base.__init__(self, Config_in=Config)
 
-        """Constructur, load flamelet generation settings from FlameletAIConfig.
+        """Constructur, load flamelet generation settings from Config_FGM.
 
-        :param Config: FlameletAIConfig containing respective settings.
-        :type Config: FlameletAIConfig
+        :param Config: Config_FGM containing respective settings.
+        :type Config: Config_FGM
         """
 
         if Config is None:
             print("Initializing flamelet generator with default settings")
-            self._Config = FlameletAIConfig()
+            self._Config = Config_FGM()
         else:
-            print("Initializing flamelet generator from FlameletAIConfig with name " + self._Config.GetConfigName())
+            print("Initializing flamelet generator from Config_FGM with name " + self._Config.GetConfigName())
             self.__SynchronizeSettings()
         
         return 
@@ -1110,11 +1110,11 @@ class FlameletGenerator_Cantera(DataGenerator_Base):
             csvWriter = csv.writer(fid)
             csvWriter.writerows(total_data)
 
-def ComputeFlameletData(Config:FlameletAIConfig, run_parallel:bool=False, N_processors:int=2):
-    """Generate flamelet data according to FlameletAIConfig settings either in serial or parallel.
+def ComputeFlameletData(Config:Config_FGM, run_parallel:bool=False, N_processors:int=2):
+    """Generate flamelet data according to Config_FGM settings either in serial or parallel.
 
-    :param Config: FlameletAIConfig class containing manifold and flamelet generation settings.
-    :type Config: FlameletAIConfig
+    :param Config: Config_FGM class containing manifold and flamelet generation settings.
+    :type Config: Config_FGM
     :param run_parallel: Generate flamelet data in parallel, defaults to False
     :type run_parallel: bool, optional
     :param N_processors: Number of parallel jobs when generating flamelet data in parallel, defaults to 0
@@ -1145,20 +1145,20 @@ def ComputeFlameletData(Config:FlameletAIConfig, run_parallel:bool=False, N_proc
 
     def ComputeFlameletData(mix_input):
 
-        F = FlameletGenerator_Cantera(Config)
+        F = DataGenerator_Cantera(Config)
         F.ComputeFlameletsOnMixStatus(mix_input)
 
     if run_parallel:
         Parallel(n_jobs=N_processors)(delayed(ComputeFlameletData)(mix_status) for mix_status in mixture_range)
     else:
-        F = FlameletGenerator_Cantera(Config)
+        F = DataGenerator_Cantera(Config)
         F.SetMixtureValues(mixture_range)
         F.ComputeFlamelets()
 
-def ComputeBoundaryData(Config:FlameletAIConfig, run_parallel:bool=False, N_processors:int=2):
+def ComputeBoundaryData(Config:Config_FGM, run_parallel:bool=False, N_processors:int=2):
 
     def ComputeEquilibriumData(mix_input):
-        F = FlameletGenerator_Cantera(Config)
+        F = DataGenerator_Cantera(Config)
         F.RunMixtureFraction()
         F.RunEquilibrium(True)
         F.RunFreeFlames(False)

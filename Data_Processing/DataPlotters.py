@@ -3,13 +3,13 @@ import tkinter as tk
 from tkinter.filedialog import askopenfilenames
 import os 
 
-from Common.DataDrivenConfig import FlameletAIConfig,EntropicAIConfig
+from Common.DataDrivenConfig import Config_FGM,Config_NICFD
 from Common.Properties import DefaultSettings_FGM
 from Data_Processing.DataPlotter_Base import DataPlotter_Base
 
 class DataPlotter_FGM(DataPlotter_Base):
 
-    _Config:FlameletAIConfig = None 
+    _Config:Config_FGM = None 
 
     __data_dir:str = None 
     __plot_freeflames:bool = DefaultSettings_FGM.include_freeflames
@@ -44,10 +44,10 @@ class DataPlotter_FGM(DataPlotter_Base):
                   "Beta_Enth" : r"Enthalpy Prefertial Diffusion Term $(\beta_{h,2})[J kg^{-1}]$",\
                   "Beta_MixFrac" : r"Mixture Fraction Preferential Diffusion Term $(\beta_Z)[-]$"}
     
-    def __init__(self, Config_in:FlameletAIConfig=None):
+    def __init__(self, Config_in:Config_FGM=None):
         DataPlotter_Base.__init__(self,Config_in)
         if Config_in is None:
-            self._Config = FlameletAIConfig()
+            self._Config = Config_FGM()
 
         self.__data_dir = self._Config.GetOutputDir()
         self.__plot_freeflames = self._Config.GenerateFreeFlames()
@@ -328,13 +328,13 @@ class DataPlotter_FGM(DataPlotter_Base):
     
 class DataPlotter_NICFD(DataPlotter_Base):
 
-    _Config:EntropicAIConfig=None
+    _Config:Config_NICFD=None
 
-    def __init__(self, Config_in:EntropicAIConfig=None):
+    def __init__(self, Config_in:Config_NICFD=None):
         DataPlotter_Base.__init__(self, Config_in)
 
         if Config_in is None:
-            self._Config = EntropicAIConfig()
+            self._Config = Config_NICFD()
         return 
     
     
