@@ -20,7 +20,7 @@
 #  Derived DataMiner configuration classes for flamelet-generated manifold and NI-CFD         |
 #  applications.                                                                              |
 #                                                                                             |  
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -598,9 +598,7 @@ class Config_FGM(Config):
 
     # MLP output groups and architecture information.
     __MLP_output_groups:list[list[str]] = None  # Output variables for each MLP.
-    __MLP_architectures:list[list[int]] = None  # Hidden layer architecture for each MLP.
-    __MLP_trainparams:list[list[float]] = None  # Training parameters and activation function information for each MLP.
-
+    
     __alpha_expo:list[float] = [DefaultSettings_FGM.init_learning_rate_expo]
     __lr_decay:list[float] = [DefaultSettings_FGM.learning_rate_decay]
     __batch_expo:list[float] = [DefaultSettings_FGM.batch_size_exponent]
@@ -647,7 +645,7 @@ class Config_FGM(Config):
             with open(load_file, "rb") as fid:
                 loaded_config:Config_FGM = pickle.load(fid)
             if loaded_config._config_type != self._config_type:
-                raise Exception("Improper configuration file for FlameletAI configuration.")
+                raise Exception("Improper configuration file for SU2 DataMiner FGM configuration.")
             self.__dict__ = loaded_config.__dict__.copy()
             print("Loaded configuration file with name " + loaded_config.GetConfigName())
         else:
@@ -657,7 +655,7 @@ class Config_FGM(Config):
             self.SetHiddenLayerArchitecture(DefaultSettings_FGM.hidden_layer_architecture)
             self.SetControllingVariables(DefaultSettings_FGM.controlling_variables)
 
-            print("Generating empty flameletAI config")
+            print("Generating empty SU2 DataMiner configuration for FGM")
         
         self.__SynchronizeSettings()
 
@@ -714,21 +712,22 @@ class Config_FGM(Config):
             pv_sp_default, pv_w_default = self.SetDefaultProgressVariable()
             self.SetProgressVariableDefinition(pv_sp_default, pv_w_default)
             self.__custom_pv_set = False
-        #print(self.__pv_definition, self.__pv_weights)
+
         if not self.__custom_Le_av_set:
             self.SetAverageLewisNumbers()
 
         return 
     
-    # def SetConstSpecieLewisNumber(self, sp_name:str, Lewis_number:float):
-    #     self.__Le_const_sp[self.gas.species_index(sp_name)] = Lewis_number 
-    #     return 
-    
     def GetConstSpecieLewisNumbers(self):
+        """Retrieve constant species Lewis numbers used to calculate the preferential diffusion scalars.
+
+        :return: array with species Lewis number values
+        :rtype: np.ndarray[float]
+        """
         return self.__Le_const_sp 
     
     def PrintBanner(self):
-        """Print banner visualizing FlameletAI configuration settings."""
+        """Print banner visualizing the SU2 DataMiner configuration settings."""
         super().PrintBanner()
         
         print("Config_FGMuration: " + self._config_name)
@@ -928,6 +927,7 @@ class Config_FGM(Config):
         :rtype: list[str]
         """
         return self.__fuel_species
+    
     def GetFuelWeights(self):
         """
         Get a list of the molar fractions of the fuel species.
@@ -938,6 +938,11 @@ class Config_FGM(Config):
         return self.__fuel_weights
     
     def GetFuelString(self):
+        """Retrieve the Cantera input string of the fuel definition
+
+        :return: Cantera input string defining the fuel
+        :rtype: str
+        """
         return self.__fuel_string 
     
     def GetOxidizerDefinition(self):
@@ -959,6 +964,11 @@ class Config_FGM(Config):
         return self.__oxidizer_weights
 
     def GetOxidizerString(self):
+        """Retrieve the Cantera input string of the oxidizer definition
+
+        :return: Cantera input string defining the oxidizer
+        :rtype: str
+        """
         return self.__oxidizer_string
     
     def GetMixtureSpecies(self):
@@ -1119,7 +1129,8 @@ class Config_FGM(Config):
             raise Exception("Flamelets should be generated for at least one mixture status value.")
         else:
             self.__Np_mix_unb = input 
-
+        return 
+    
     def GetNpMix(self):
         """
         Get the number of divisions between the lean and rich mixture status for flamelet generation.
@@ -1330,6 +1341,8 @@ class Config_FGM(Config):
         return 
     
     def ResetProgressVariableDefinition(self):
+        """Reset progress variable definition to default (weighted reactants and major products).
+        """
         self.__pv_definition = []
         self.__pv_weights = []
         self.__custom_pv_set = False 
@@ -1542,7 +1555,7 @@ class Config_FGM(Config):
         """
         return self.__preferential_diffusion
     
-    def SetAveragingMethod(self, avg_method=avg_Le_arythmic):
+    def SetAveragingMethod(self, avg_method=avg_Le_const):
         self.__Le_avg_method = avg_method 
         return 
     
@@ -1659,8 +1672,6 @@ class Config_FGM(Config):
         :rtype: mixfrac_unb: float
         """
 
-        # if equivalence_ratio < 0:
-        #     raise Exception("Equivalence ratio should be positive.")
         if temperature < 200:
             raise Exception("Temperature should be above 200 degrees Kelvin.")
         
@@ -2020,7 +2031,20 @@ class Config_FGM(Config):
                              scaler_function_vals_in=self._scaler_function_vals_in[iGroup],\
                              scaler_function_vals_out=self._scaler_function_vals_out[iGroup],\
                              additional_header_info_function=self.__write_progress_variable_definition)
+        self.__writeNULLMLP(file_name_out)
         return
+    def __writeNULLMLP(self, header):
+        weights = [np.zeros([len(self._control_vars[0]),len(self._control_vars[0])]),\
+                   np.zeros([len(self._control_vars[0]),1])]
+        biases = [np.zeros(len(self._control_vars[0])), np.zeros(1)]
+        activation_function="linear"
+        train_vars=["NULL"]
+        control_vars=self._control_vars[0]
+        scaler_function="robust"
+        scaler_function_vals_in = self._scaler_function_vals_in[0]
+        scaler_function_vals_out = np.zeros([1,2])
+        write_SU2_MLP(header+"_NULL",weights=weights,biases=biases,activation_function_name=activation_function,controlling_vars=control_vars,train_vars=train_vars,scaler_function=scaler_function,scaler_function_vals_in=scaler_function_vals_in,scaler_function_vals_out=scaler_function_vals_out,additional_header_info_function=self.__write_progress_variable_definition)
+        return 
     def __write_progress_variable_definition(self, fid):
         fid.write("Progress variable definition: " + "+".join(("%+.6e*%s" % (w, s)) for w, s in zip(self.__pv_weights, self.__pv_definition)))
         fid.write("\n\n")

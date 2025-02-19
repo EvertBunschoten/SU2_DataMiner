@@ -19,7 +19,7 @@
 # Description:                                                                                |
 #  Base class for DataMiner configuration                                                     |
 #                                                                                             |
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -52,13 +52,13 @@ class Config:
     _hidden_layer_architecture:list[int] = DefaultProperties.hidden_layer_architecture  # Hidden layer perceptron count.
     _activation_function:str = DefaultProperties.activation_function    # Hidden layer activation function name.
 
-    _scaler_function_name:str = "minmax"
-    _scaler_function_vals_in:list[list[float]]
-    _scaler_function_vals_out:list[list[float]]
-    _train_vars:list[str]
-    _control_vars:list[str]
-    _MLP_weights:list[np.ndarray[float]]
-    _MLP_biases:list[np.ndarray[float]]
+    _scaler_function_name:str = "minmax"        # Scaler function by which MLP train data is scaled.
+    _scaler_function_vals_in:list[list[float]]  # Linear scaling function values for controlling variable data.
+    _scaler_function_vals_out:list[list[float]] # Linear scaling function values for dependent variable data.
+    _train_vars:list[str]                       # Dependent variables.
+    _control_vars:list[str]                     # Controlling variables.
+    _MLP_weights:list[np.ndarray[float]]        # MLP weights values.
+    _MLP_biases:list[np.ndarray[float]]         # MLP biases values.
 
     _config_type:str= None  # SU2 DataMiner configuration type.
     
@@ -313,12 +313,20 @@ class Config:
         return self._activation_function
     
     def UpdateMLPHyperParams(self, trainer):
+        """Retrieve the weights and biases from the MLP trainer class and store them in the configuration class.
+
+        :param trainer: reference to trainer class used to train the network.
+        :type trainer: TrainMLP
+        """
+
+        # Store train parameters
         self._alpha_expo = trainer.alpha_expo
         self._lr_decay = trainer.lr_decay
         self._batch_expo = trainer.batch_expo
         self._hidden_layer_architecture = trainer.architecture.copy()
         self._activation_function = trainer.activation_function
 
+        # Retrieve MLP definition data
         self._train_vars = trainer.GetTrainVars().copy()
         self._control_vars = trainer.GetControlVars().copy()
         self._scaler_function_name, self._scaler_function_vals_in,self._scaler_function_vals_out = trainer.GetScalerFunctionParams()
@@ -327,6 +335,11 @@ class Config:
         return 
     
     def WriteSU2MLP(self, file_name_out:str):
+        """Write ASCII MLP file containing the network weights and biases from the data stored in the configuration.
+
+        :param file_name_out: MLP file name
+        :type file_name_out: str
+        """
         return write_SU2_MLP(file_name_out,\
                              weights=self._MLP_weights,\
                              biases=self._MLP_biases,\
