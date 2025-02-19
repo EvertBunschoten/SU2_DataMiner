@@ -19,7 +19,7 @@
 # Description:                                                                                |
 #  Interpolator functions used during data processing steps.                                  |
 #                                                                                             |
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 

@@ -19,7 +19,7 @@
 # Description:                                                                                |
 #  Class for generating fluid data for Flamelet-Generated Manifold data mining operations.    |
 #                                                                                             |
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 

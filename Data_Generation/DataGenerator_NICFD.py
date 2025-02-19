@@ -19,7 +19,7 @@
 # Description:                                                                                |
 #  Class for generating fluid data for NI-CFD data mining operations.                         |                                                               
 #                                                                                             |  
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 

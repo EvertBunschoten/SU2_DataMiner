@@ -18,7 +18,7 @@
 #                                                                                             |
 # Description:                                                                                |
 #   Table generator class for generating SU2-supported tables of flamelet data.               |
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
