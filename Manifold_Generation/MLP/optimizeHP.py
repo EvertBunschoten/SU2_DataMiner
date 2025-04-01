@@ -1129,6 +1129,20 @@ class PlotHPOResults:
         plt.show()
         return 
     
+    def GetParetoLocations(self):
+        plot_data = np.hstack((np.array(self._hidden_layer_neurons)[:,np.newaxis],np.array(self._val_score)[:,np.newaxis]))
+        mask = paretoset(plot_data, sense=["min","min"])
+        ix_sorted = np.argsort(plot_data[:, 0][mask])
+        workers_pareto, models_pareto = np.array(self._completed_workers)[mask], np.array(self._completed_models)[mask]
+        
+        optim_header = self.SetFolderHeader()
+
+        optim_directory = self._Config.GetOutputDir()+"/"+optim_header
+        pareto_locs = []
+        for w, m in zip(workers_pareto[ix_sorted], models_pareto[ix_sorted]):
+            pareto_locs.append("%s/Worker_%i/Model_%i/" % (optim_directory, w, m))
+        return pareto_locs
+    
     def PlotLossPhi(self):
 
         plt.figure(figsize=[9,9])
