@@ -1972,6 +1972,9 @@ class Config_FGM(Config):
     def GetHiddenLayerArchitecture(self, i_group:int=0):
         return self.__NN[i_group]
     
+    def GetWeightsBiases(self, i_group:int=0):
+        return self._MLP_weights[i_group], self._MLP_biases[i_group]
+    
     def UpdateMLPHyperParams(self, trainer):
         group_idx = trainer.GetOutputGroup()
         train_vars = trainer.GetTrainVars().copy()

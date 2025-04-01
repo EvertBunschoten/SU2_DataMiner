@@ -334,6 +334,14 @@ class Config:
         self._MLP_biases = trainer.GetBiases().copy()
         return 
     
+    def GetWeightsBiases(self):
+        """Return values for weights and biases for the hidden layers in the MLP.
+
+        :return: weight arrays, biases arrays
+        :rtype: list[np.ndarray[float]]
+        """
+        return self._MLP_weights, self._MLP_biases
+    
     def WriteSU2MLP(self, file_name_out:str):
         """Write ASCII MLP file containing the network weights and biases from the data stored in the configuration.
 
