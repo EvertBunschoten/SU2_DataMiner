@@ -981,7 +981,7 @@ class GroupOutputs:
         group_variables, group_indices, group_affinity, _, free_vars_orig = self.__UpdateGroupLeaders(self.__group_leaders_orig)
 
         # Repeat 1000 times to come up with plenty of potential groups.
-        for _ in tqdm(range(1000)):
+        for _ in tqdm(range(10000)):
             repeat = True 
 
             while repeat:
@@ -1016,7 +1016,9 @@ class GroupOutputs:
                 min_affinity = min(min_affinity, min(g))
             n_groups = len(group_leaders)
             self.__n_groups.append(n_groups)
-            self.__group_variables.append(group_variables)
+            for igroup, g in enumerate(group_variables):
+                group_variables[igroup] = sorted(g)
+            self.__group_variables.append(sorted(group_variables))
             self.__group_affinity.append(min_affinity)
 
         self.PostProcessGroups()
