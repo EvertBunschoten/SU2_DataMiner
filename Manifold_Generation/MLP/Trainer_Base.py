@@ -45,7 +45,6 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 from keras.initializers import HeUniform,RandomUniform
-from kerastuner.tuners import BayesianOptimization
 import csv 
 
 from Common.Config_base import Config
@@ -150,6 +149,10 @@ class MLPTrainer:
 
     weights_initializer:str = "he_uniform"
 
+    _loaded_custom_weights:bool = False
+    _custom_weights:list[np.ndarray[float]] = None 
+    _custom_biases:list[np.ndarray[float]] = None 
+    
     def __init__(self):
         """Initiate MLP trainer object.
         """
@@ -357,21 +360,6 @@ class MLPTrainer:
             raise Exception("Number of input variables ("+str(np.shape(input_data_norm)[1]) + ") \
                             does not equal the MLP input dimension ("+str(len(self._controlling_vars))+")")
         return np.zeros(1)
-    
-    def LoadWeights(self, weights_in:list[np.ndarray], biases_in:list[np.ndarray]):
-        """Set custom weights and biases upon initializing the network.
-
-        :param weights_in: list with hidden layer weight matrices.
-        :type weights_in: list[np.ndarray]
-        :param biases_in: list with hidden layer bias arrays.
-        :type biases_in: list[np.ndarray]
-        """
-        self._weights = []
-        self._biases = []
-        for w, b in zip(weights_in, biases_in):
-            self._weights.append(tf.Variable(tf.cast(w,self._dt), dtype=self._dt))
-            self._biases.append(tf.Variable(tf.cast(b,self._dt),dtype=self._dt))
-        return 
     
     def SaveWeights(self):
         """Save the weights of the current network as numpy arrays.
@@ -727,26 +715,20 @@ class MLPTrainer:
     def Plot_and_Save_History(self):
         return
     
+    def SetWeightsBiases(self, custom_weights:list[np.ndarray[float]], custom_biases:list[np.ndarray[float]]):
+        self._custom_weights = custom_weights.copy()
+        self._custom_biases = custom_biases.copy()
+        self._loaded_custom_weights = True
+        return 
+    
 class TensorFlowFit(MLPTrainer):
     _model:keras.models.Sequential
     history_epochs = []
     history_loss = []
     history_val_loss = []
 
-    __loaded_custom_weights:bool = False
-    __custom_model_weights = []
     def __init__(self):
         MLPTrainer.__init__(self)
-        return 
-    
-    def LoadWeights(self, weights_in: list[np.ndarray], biases_in: list[np.ndarray]):
-        super().LoadWeights(weights_in, biases_in)
-        self.__loaded_custom_weights = True 
-        self.__custom_model_weights = []
-        for w, b in zip(self._weights, self._biases):
-            self.__custom_model_weights.append(w)
-            self.__custom_model_weights.append(b)
-            
         return 
     
     # Construct MLP based on architecture information
@@ -771,8 +753,13 @@ class TensorFlowFit(MLPTrainer):
             # Add output layer
             self._model.add(keras.layers.Dense(len(self._train_vars), activation='linear'))
 
-            if self.__loaded_custom_weights:
-                self._model.set_weights(self.__custom_model_weights)
+            if self._loaded_custom_weights:
+                weights_and_biases = []
+                for w,b in zip(self._custom_weights,self._custom_biases):
+                    weights_and_biases.append(w)
+                    weights_and_biases.append(b)
+                self._model.set_weights(weights_and_biases)
+
             # Define learning rate schedule and optimizer
             self.SetDecaySteps()
             #self._decay_steps = 1e4
@@ -954,23 +941,18 @@ class CustomTrainer(MLPTrainer):
             initializer = HeUniform()
         elif self.weights_initializer == "random_uniform":
             initializer = RandomUniform()
-        for i in range(len(NN)-1):
-            self._weights.append(tf.Variable(tf.cast((initializer(shape=(NN[i],NN[i+1]))),self._dt),self._dt))
-            self._biases.append(tf.Variable(tf.cast((initializer(shape=(NN[i+1],))),self._dt),self._dt))             
+        if self._loaded_custom_weights:
+            for i in range(len(self._custom_weights)):
+                if self._loaded_custom_weights:
+                    self._weights.append(tf.Variable(tf.cast(self._custom_weights[i], self._dt),self._dt))
+                    self._biases.append(tf.Variable(tf.cast(self._custom_biases[i], self._dt),self._dt))
+        else:     
+            for i in range(len(NN)-1):
+                self._weights.append(tf.Variable(tf.cast((initializer(shape=(NN[i],NN[i+1]))),self._dt),self._dt))
+                self._biases.append(tf.Variable(tf.cast((initializer(shape=(NN[i+1],))),self._dt),self._dt))             
             
         return 
     
-
-    def LoadWeights(self):
-        """Load weights from saved numpy arrays.
-        """
-
-        for i in range(len(self._weights)):
-            loaded_W = np.load(self._save_dir + "/Model_"+str(self._model_index) + "/W_"+self._train_name+"_"+str(i)+".npy", allow_pickle=True)
-            loaded_b = np.load(self._save_dir + "/Model_"+str(self._model_index) + "/b_"+self._train_name+"_"+str(i)+".npy", allow_pickle=True)
-            self._weights[i] = tf.Variable(loaded_W, self._dt)
-            self._biases[i]= tf.Variable(loaded_b, self._dt)
-        return 
     
     @tf.function
     def CollectVariables(self):
@@ -1690,7 +1672,10 @@ class TrainMLP:
 
     _fig_format:str = "png"
     _scaler:str = "robust"
-
+    __set_custom_weights:bool = False
+    __weights_custom:list[np.ndarray[float]] = None 
+    __biases_custom:list[np.ndarray[float]] = None 
+    
     def __init__(self, Config_in:Config):
         """Define TrainMLP instance and prepare MLP trainer with
         default settings.
@@ -1734,6 +1719,8 @@ class TrainMLP:
         self._trainer_direct.SetLRDecay(self.lr_decay)
         self._trainer_direct.SetBatchExpo(self.batch_expo)
         self._trainer_direct.SetHiddenLayers(self.architecture)
+        if self.__set_custom_weights:
+            self._trainer_direct.SetWeightsBiases(self.__weights_custom,self.__biases_custom)
         self._trainer_direct.SetTrainFileHeader(self._train_file_header)
         self._trainer_direct.SetVerbose(self.verbose)
         self._trainer_direct.SetFigFormat(self._fig_format)
@@ -1777,6 +1764,7 @@ class TrainMLP:
             if NN <= 0:
                 raise Exception("Number of neurons in hidden layers should be higher than zero.")
             self.architecture.append(NN)
+        self.__set_custom_weights = False
         self.SynchronizeTrainer()
         return 
     
@@ -1852,7 +1840,18 @@ class TrainMLP:
         self.process_index = process
         self.SynchronizeTrainer()
         return
-     
+    
+    def SetWeightsBiases(self, weights_input_custom:list[np.ndarray[float]],biases_input_custom:list[np.ndarray[float]]):
+        if len(weights_input_custom) != len(biases_input_custom):
+            raise Exception("Weights and biases should be same size.")
+        if len(weights_input_custom) != (len(self.architecture)+1):
+            raise Exception("Weights should be compatible with hidden layer architecture.")
+        self.__weights_custom = weights_input_custom.copy()
+        self.__biases_custom = biases_input_custom.copy()
+        self.__set_custom_weights = True 
+        self.SynchronizeTrainer()
+        return 
+    
     def PrepareOutputDir(self):
         """Prepare output directory in which to save trained MLP data.
         """

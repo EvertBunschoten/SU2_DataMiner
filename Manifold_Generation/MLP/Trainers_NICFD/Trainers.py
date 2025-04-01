@@ -839,10 +839,6 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         T = tf.pow(dsde_rho, -1)
         rho2 = rho*rho
         P = -rho2 * T * dsdrho_e
-        blue_term = (dsdrho_e * (2 - rho * T * d2sdedrho) + rho*d2sdrho2)
-        green_term = (-T * d2sde2 * dsdrho_e + d2sdedrho)
-        c2 = -rho *T * (blue_term - rho * green_term * (dsdrho_e / dsde_rho))
-
         dTde_rho = -T*T * d2sde2 
         dTdrho_e = -T*T * d2sdedrho 
 
@@ -861,6 +857,8 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         dhde_p = dhde_rho + drhode_p*dhdrho_e
         Cp = dhde_p / dTde_p
         
+        c2 = dPdrho_e - dsdrho_e * dPde_rho / dsde_rho
+
         Y_state = tf.stack((rho, e, T, P, c2, s, dsdrho_e, dsde_rho, d2sdrho2, d2sdedrho, d2sde2, dTdrho_e, dTde_rho, dPdrho_e, dPde_rho, dhdrho_e, dhde_rho, dhdP_rho, dhdrho_P, dsdP_rho, dsdrho_P, Cp),axis=1)
         Y_state_selected = tf.stack(tf.tuple(Y_state[:,EntropicVars[var].value] for var in self._state_vars),axis=1)
         return Y_state_selected
