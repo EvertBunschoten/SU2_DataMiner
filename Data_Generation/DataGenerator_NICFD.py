@@ -400,7 +400,7 @@ class DataGenerator_CoolProp(DataGenerator_Base):
                     state_vector_vals[EntropicVars.dsde_rho.value] = self.fluid.first_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass)
                     state_vector_vals[EntropicVars.dsdrho_e.value] = self.fluid.first_partial_deriv(CP.iSmass, CP.iDmass, CP.iUmass)
                     state_vector_vals[EntropicVars.d2sde2.value] = self.fluid.second_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass, CP.iUmass, CP.iDmass)
-                    state_vector_vals[EntropicVars.d2sdrhode.value] = self.fluid.second_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass, CP.iDmass, CP.iUmass)
+                    state_vector_vals[EntropicVars.d2sdedrho.value] = self.fluid.second_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass, CP.iDmass, CP.iUmass)
                     state_vector_vals[EntropicVars.d2sdrho2.value] = self.fluid.second_partial_deriv(CP.iSmass, CP.iDmass, CP.iUmass, CP.iDmass, CP.iUmass)
             state_vector_vals[EntropicVars.Density.value] = self.fluid.rhomass()
             state_vector_vals[EntropicVars.Energy.value] = self.fluid.umass()
@@ -483,7 +483,7 @@ class DataGenerator_CoolProp(DataGenerator_Base):
                              EntropicVars.dsdrho_e, \
                              EntropicVars.dsde_rho, \
                              EntropicVars.d2sdrho2, \
-                             EntropicVars.d2sdrhode, \
+                             EntropicVars.d2sdedrho, \
                              EntropicVars.d2sde2]
         TD_vars = [EntropicVars.T, EntropicVars.p, EntropicVars.c2]
         secondary_vars = [EntropicVars.dTdrho_e, EntropicVars.dTde_rho, EntropicVars.dpdrho_e, EntropicVars.dpde_rho,\

@@ -52,7 +52,7 @@ class EntropicVars(Enum):
     dsdrho_e=auto()
     dsde_rho=auto()
     d2sdrho2=auto()
-    d2sdrhode=auto()
+    d2sdedrho=auto()
     d2sde2=auto()
     dTdrho_e=auto()
     dTde_rho=auto()

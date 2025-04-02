@@ -75,7 +75,7 @@ def GetStateVector(fluid:CP.AbstractState):
         state_vector_vals[EntropicVars.dsde_rho.value] = fluid.first_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass)
         state_vector_vals[EntropicVars.dsdrho_e.value] = fluid.first_partial_deriv(CP.iSmass, CP.iDmass, CP.iUmass)
         state_vector_vals[EntropicVars.d2sde2.value] = fluid.second_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass, CP.iUmass, CP.iDmass)
-        state_vector_vals[EntropicVars.d2sdrhode.value] = fluid.second_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass, CP.iDmass, CP.iUmass)
+        state_vector_vals[EntropicVars.d2sdedrho.value] = fluid.second_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass, CP.iDmass, CP.iUmass)
         state_vector_vals[EntropicVars.d2sdrho2.value] = fluid.second_partial_deriv(CP.iSmass, CP.iDmass, CP.iUmass, CP.iDmass, CP.iUmass)
         state_vector_vals[EntropicVars.Density.value] = fluid.rhomass()
         state_vector_vals[EntropicVars.Energy.value] = fluid.umass()
@@ -816,13 +816,13 @@ class Train_Entropic_PINN(PhysicsInformedTrainer):
         dsde_rho_norm = tf.gather(ds_norm, indices=1,axis=1)
         d2sde2_norm = tf.gather(d2s_norm_e, indices=1,axis=1)
         d2sdrho2_norm = tf.gather(d2s_norm_rho,indices=0,axis=1)
-        d2sdrhode_norm = tf.gather(d2s_norm_e, indices=0, axis=1)
+        d2sdedrho_norm = tf.gather(d2s_norm_e, indices=0, axis=1)
 
         s_dim = self._s_scale * s_norm + self._s_offset
         dsdrho_e = tf.math.multiply((self._s_scale / self._rho_scale), dsdrho_e_norm)
         dsde_rho = tf.math.multiply((self._s_scale / self._e_scale), dsde_rho_norm)
         d2sdrho2 = tf.math.multiply((self._s_scale / tf.pow(self._rho_scale, 2)),d2sdrho2_norm)
-        d2sdedrho = tf.math.multiply((self._s_scale / (self._rho_scale * self._e_scale)), d2sdrhode_norm)
+        d2sdedrho = tf.math.multiply((self._s_scale / (self._rho_scale * self._e_scale)), d2sdedrho_norm)
         d2sde2 = tf.math.multiply((self._s_scale / tf.pow(self._e_scale, 2)), d2sde2_norm)
 
         dsdrhoe = [dsdrho_e, dsde_rho]
@@ -1026,7 +1026,7 @@ class Train_Entropic_Segregated(TensorFlowFit):
                             EntropicVars.dsdrho_e.name,\
                             EntropicVars.dsde_rho.name,\
                             EntropicVars.d2sdrho2.name,\
-                            EntropicVars.d2sdrhode.name,\
+                            EntropicVars.d2sdedrho.name,\
                             EntropicVars.d2sde2.name]
         return 
     
