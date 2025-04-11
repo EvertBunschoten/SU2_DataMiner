@@ -1975,6 +1975,18 @@ class Config_FGM(Config):
     def GetWeightsBiases(self, i_group:int=0):
         return self._MLP_weights[i_group], self._MLP_biases[i_group]
     
+    def SetWeights(self, weights: list[np.ndarray[float]], i_group:int=0):
+        self._MLP_weights[i_group] = []
+        for w in weights:
+            self._MLP_weights[i_group].append(w)
+        return 
+    
+    def SetBiases(self, biases:list[np.ndarray[float]], i_group:int=0):
+        self._MLP_biases[i_group] = []
+        for w in biases:
+            self._MLP_biases[i_group].append(w)
+        return 
+    
     def UpdateMLPHyperParams(self, trainer):
         group_idx = trainer.GetOutputGroup()
         train_vars = trainer.GetTrainVars().copy()
