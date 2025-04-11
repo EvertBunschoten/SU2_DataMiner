@@ -100,6 +100,8 @@ class FlameletConcatenator:
         __Sources_vars.append("Y_dot_pos-"+s)
         __Sources_vars.append("Y_dot_neg-"+s)
         __Sources_vars.append("Y_dot_net-"+s)
+        __Sources_vars.append("Y-"+s)
+
     __Sources_flamelet_data = None
 
     __CV_flamelet_data:np.ndarray = None    # Flamelet controlling variables
@@ -222,6 +224,7 @@ class FlameletConcatenator:
             self.__Sources_vars.append("Y_dot_pos-"+s)
             self.__Sources_vars.append("Y_dot_neg-"+s)
             self.__Sources_vars.append("Y_dot_net-"+s)
+            self.__Sources_vars.append("Y-"+s)
         return 
 
     def SetControllingVariables(self, controlling_variables:list[str]=DefaultSettings_FGM.controlling_variables):
@@ -619,7 +622,7 @@ class FlameletConcatenator:
         self.__TD_flamelet_data = np.zeros([n_flamelets_total * self.__Np_per_flamelet, len(self.__TD_train_vars)])
         if self.__Config.PreferentialDiffusion():
             self.__PD_flamelet_data = np.zeros([n_flamelets_total * self.__Np_per_flamelet, len(self.__PD_train_vars)])
-        self.__Sources_flamelet_data = np.zeros([n_flamelets_total * self.__Np_per_flamelet, 1 + 3 * len(self.__Species_in_FGM)])
+        self.__Sources_flamelet_data = np.zeros([n_flamelets_total * self.__Np_per_flamelet, 1 + 4 * len(self.__Species_in_FGM)])
         self.__LookUp_flamelet_data = np.zeros([n_flamelets_total * self.__Np_per_flamelet, len(self.__LookUp_vars)])
         self.__flamelet_ID = np.zeros([n_flamelets_total * self.__Np_per_flamelet, len(self.__flamelet_ID_vars)],dtype=int)
 
@@ -706,6 +709,7 @@ class FlameletConcatenator:
                             LookUp_data[sourceterm_zero_line_numbers, iVar_LookUp] = 0.0
                 
                 # Load species sources data
+                species_mass_fraction = np.zeros([len(D), len(self.__Species_in_FGM)])
                 species_production_rate = np.zeros([len(D), len(self.__Species_in_FGM)])
                 species_destruction_rate = np.zeros([len(D), len(self.__Species_in_FGM)])
                 species_net_rate = np.zeros([len(D), len(self.__Species_in_FGM)])
@@ -715,24 +719,28 @@ class FlameletConcatenator:
                             species_production_rate[:, iSp] = np.zeros(len(D))
                             species_destruction_rate[:, iSp] = np.zeros(len(D))
                             species_net_rate[:, iSp] = np.zeros(len(D))
+                            species_mass_fraction[:, iSp] = np.zeros(len(D))
                             for NOsp in ["NO2","NO","N2O"]:
                                 species_production_rate[:, iSp] += D[:, variables.index("Y_dot_pos-"+NOsp)]
                                 species_destruction_rate[:, iSp] += D[:, variables.index("Y_dot_neg-"+NOsp)]
                                 species_net_rate[:, iSp] += D[:, variables.index("Y_dot_net-"+NOsp)]
+                                species_mass_fraction[:, iSp] += D[:, variables.index("Y-"+Sp)]
                         else:
+                            species_mass_fraction[:, iSp] = D[:, variables.index("Y-"+Sp)]
                             species_production_rate[:, iSp] = D[:, variables.index("Y_dot_pos-"+Sp)]
                             species_destruction_rate[:, iSp] = D[:, variables.index("Y_dot_neg-"+Sp)]
                             species_net_rate[:, iSp] = D[:, variables.index("Y_dot_net-"+Sp)]
 
-                Sources_data = np.zeros([len(D), 1 + 3 * len(self.__Species_in_FGM)])
+                Sources_data = np.zeros([len(D), 1 + 4 * len(self.__Species_in_FGM)])
                 if BurningFlamelet:
                     ppv_flamelet = self.__Config.ComputeProgressVariable_Source(variables, D)
                     Sources_data[:, 0] = ppv_flamelet
 
                     for iSp in range(len(self.__Species_in_FGM)):
-                        Sources_data[:, 1 + 3*iSp] = species_production_rate[:, iSp]
-                        Sources_data[:, 1 + 3*iSp + 1] = species_destruction_rate[:, iSp]
-                        Sources_data[:, 1 + 3*iSp + 2] = species_net_rate[:, iSp]
+                        Sources_data[:, 1 + 4*iSp] = species_production_rate[:, iSp]
+                        Sources_data[:, 1 + 4*iSp + 1] = species_destruction_rate[:, iSp]
+                        Sources_data[:, 1 + 4*iSp + 2] = species_net_rate[:, iSp]
+                        Sources_data[:, 1 + 4*iSp + 3] = species_mass_fraction[:, iSp]
 
                     Sources_data[sourceterm_zero_line_numbers, :] = 0.0
 
@@ -765,7 +773,7 @@ class FlameletConcatenator:
                             if self.__Config.PreferentialDiffusion():
                                 PD_sampled = PD_data*np.ones([self.__Np_per_flamelet, np.shape(CV_flamelet)[1]])
                             lookup_sampled = LookUp_data*np.ones([self.__Np_per_flamelet, np.shape(CV_flamelet)[1]])
-                            sources_sampled = np.zeros([self.__Np_per_flamelet, 1 + 3*len(self.__Species_in_FGM)])
+                            sources_sampled = np.zeros([self.__Np_per_flamelet, 1 + 4*len(self.__Species_in_FGM)])
                         else:
                             if is_equilibrium:
                                 S_q = np.linspace(0, 1.0, self.__Np_per_flamelet)
@@ -776,7 +784,7 @@ class FlameletConcatenator:
                             if self.__Config.PreferentialDiffusion():
                                 PD_sampled = np.zeros([self.__Np_per_flamelet, np.shape(PD_data)[1]])
                             lookup_sampled = np.zeros([self.__Np_per_flamelet, np.shape(LookUp_data)[1]])
-                            sources_sampled = np.zeros([self.__Np_per_flamelet, 1 + 3*len(self.__Species_in_FGM)])
+                            sources_sampled = np.zeros([self.__Np_per_flamelet, 1 + 4*len(self.__Species_in_FGM)])
                             for i_CV in range(self.__N_control_vars):
                                 CV_sampled[:, i_CV] = np.interp(S_q, S_flamelet_norm, CV_flamelet[:, i_CV])
                             for iVar_TD in range(len(self.__TD_train_vars)):
@@ -787,7 +795,7 @@ class FlameletConcatenator:
 
                             for iVar_LU in range(len(self.__LookUp_vars)):
                                 lookup_sampled[:, iVar_LU] = np.interp(S_q, S_flamelet_norm, LookUp_data[:, iVar_LU])
-                            for iVar_Source in range(1 + 3*len(self.__Species_in_FGM)):
+                            for iVar_Source in range(1 + 4*len(self.__Species_in_FGM)):
                                 sources_sampled[:, iVar_Source] = np.interp(S_q, S_flamelet_norm, Sources_data[:, iVar_Source])
 
                     start = (i_start + i_flamelet + i_flamelet_total) * self.__Np_per_flamelet
