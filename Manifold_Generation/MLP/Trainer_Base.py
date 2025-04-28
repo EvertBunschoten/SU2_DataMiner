@@ -135,7 +135,8 @@ class MLPTrainer:
     history_plot_axes = None
     history_epochs = []
     history_loss = []
-    history_val_loss = []
+    val_loss_history = []
+    history_learningrate = []
 
     _stagnation_tolerance:float = 1e-11 
     _stagnation_patience:int = 200
@@ -370,7 +371,10 @@ class MLPTrainer:
         return
     
     def SetDecaySteps(self):
-        self._decay_steps = int(float(self._Np_train) / (2**self._batch_expo))
+        """Set the number of steps in the exponential decay algorithm. The number of steps scale are proportioned based on the number of epochs, 
+        and training data size and mini batch size.
+        """
+        self._decay_steps = int(1e-3 * self._n_epochs * self._Np_train / (2**self._batch_expo))
         return 
     
     def RestartTraining(self):
@@ -588,89 +592,6 @@ class MLPTrainer:
                                        scaler_function_vals_in=scaler_function_vals_in,\
                                        scaler_function_vals_out=scaler_function_vals_out,\
                                        additional_header_info_function=self.add_additional_header_info)
-        # n_layers = len(self._weights)+1
-
-        # # Select trimmed weight matrices for output.
-        # weights_for_output = self._weights
-        # biases_for_output = self._biases
-
-        # # Opening output file
-        # fid = open(file_out+'.mlp', 'w+')
-        # fid.write("<header>\n\n")
-        
-        # self.add_additional_header_info(fid)
-        # # Writing number of neurons per layer
-        # fid.write('[number of layers]\n%i\n\n' % n_layers)
-        # fid.write('[neurons per layer]\n')
-        # activation_functions = []
-
-        # for iLayer in range(n_layers-1):
-        #     if iLayer == 0:
-        #         activation_functions.append('linear')
-        #     else:
-        #         activation_functions.append(self._activation_function_name)
-        #     n_neurons = np.shape(weights_for_output[iLayer])[0]
-        #     fid.write('%i\n' % n_neurons)
-        # fid.write('%i\n' % len(self._train_vars))
-
-        # activation_functions.append('linear')
-
-        # # Writing the activation function for each layer
-        # fid.write('\n[activation function]\n')
-        # for iLayer in range(n_layers):
-        #     fid.write(activation_functions[iLayer] + '\n')
-
-        # # Writing the input and output names
-        # fid.write('\n[input names]\n')
-        # for input in self._controlling_vars:
-        #         fid.write(input + '\n')
-        
-        # fid.write('\n[input regularization method]\n%s\n' % self.scaler_function_name)
-
-        # fid.write('\n[input normalization]\n')
-        # for i in range(len(self._controlling_vars)):
-        #     if self.scaler_function_name == "minmax":
-        #         fid.write('%+.16e\t%+.16e\n' % (self.scaler_function_x.data_min_[i], self.scaler_function_x.data_max_[i]))
-        #     else:
-        #         fid.write('%+.16e\t%+.16e\n' % (self._X_offset[i], self._X_scale[i]))
-
-        # fid.write('\n[output names]\n')
-        # for output in self._train_vars:
-        #     fid.write(output+'\n')
-        
-        # fid.write('\n[output regularization method]\n%s\n' % self.scaler_function_name)
-
-        # fid.write('\n[output normalization]\n')
-        # for i in range(len(self._train_vars)):
-        #     if self.scaler_function_name == "minmax":
-        #         fid.write('%+.16e\t%+.16e\n' % (self.scaler_function_y.data_min_[i], self.scaler_function_y.data_max_[i]))
-        #     else:
-        #         fid.write('%+.16e\t%+.16e\n' % (self._Y_offset[i], self._Y_scale[i]))
-
-        # fid.write("\n</header>\n")
-        # # Writing the weights of each layer
-        # fid.write('\n[weights per layer]\n')
-        # for W in weights_for_output:
-        #     fid.write("<layer>\n")
-        #     for i in range(np.shape(W)[0]):
-        #         fid.write("\t".join("%+.16e" % float(w) for w in W[i, :]) + "\n")
-        #     fid.write("</layer>\n")
-        
-        # # Writing the biases of each layer
-        # fid.write('\n[biases per layer]\n')
-        
-        # # Input layer biases are set to zero
-        # fid.write("\t".join("%+.16e" % 0 for _ in self._controlling_vars) + "\n")
-
-        # #for B in self.biases:
-        # for B in biases_for_output:
-        #     try:
-        #         fid.write("\t".join("%+.16e" % float(b) for b in B.numpy()) + "\n")
-        #     except:
-        #         fid.write("\t".join("%+.16e" % float(B.numpy())) + "\n")
-
-        # fid.close()
-        # return 
     
     def add_additional_header_info(self, fid):
         return 
@@ -713,7 +634,21 @@ class MLPTrainer:
         return 
     
     def Plot_and_Save_History(self):
+        self.PlotLearningRate()
         return
+    
+    def PlotLearningRate(self):
+        fig = plt.figure(figsize=[10,10])
+        ax = plt.axes()
+        ax.plot(self.history_learningrate,'k')
+        ax.grid()
+        ax.set_yscale('log')
+        ax.set_xlabel("Epoch",fontsize=20)
+        ax.set_ylabel("Learning rate [-]",fontsize=20)
+        ax.tick_params(which='both',labelsize=18)
+        fig.savefig(self._save_dir +"/Model_"+str(self._model_index) + "/LearningRate."+self._figformat,format=self._figformat, bbox_inches='tight')
+        plt.close(fig)
+        return 
     
     def SetWeightsBiases(self, custom_weights:list[np.ndarray[float]], custom_biases:list[np.ndarray[float]]):
         self._custom_weights = custom_weights.copy()
@@ -725,8 +660,8 @@ class TensorFlowFit(MLPTrainer):
     _model:keras.models.Sequential
     history_epochs = []
     history_loss = []
-    history_val_loss = []
-
+    val_loss_history = []
+    history_learningrate = []
     def __init__(self):
         MLPTrainer.__init__(self)
         return 
@@ -785,7 +720,7 @@ class TensorFlowFit(MLPTrainer):
 
         self.history_epochs = []
         self.history_loss=[]
-        self.history_val_loss=[]
+        self.val_loss_history=[]
         
         # Read train,test, and validation data.
         self.GetTrainData()
@@ -847,12 +782,12 @@ class TensorFlowFit(MLPTrainer):
         with open(self._save_dir + "/Model_"+str(self._model_index)+"/TrainingHistory.csv", "w+") as fid:
             fid.write("epoch,loss,validation_loss\n")
             csvWriter = csv.writer(fid, delimiter=',')
-            csvWriter.writerows(np.array([self.history_epochs, self.history_loss, self.history_val_loss]).T)
+            csvWriter.writerows(np.array([self.history_epochs, self.history_loss, self.val_loss_history]).T)
 
         fig = plt.figure(figsize=[10,10])
         ax = plt.axes()
         ax.plot(self.history_loss, 'b', linewidth=2,label=r'Training score')
-        ax.plot(self.history_val_loss, 'r', linewidth=2,label=r"Validation score")
+        ax.plot(self.val_loss_history, 'r', linewidth=2,label=r"Validation score")
         ax.grid()
         ax.set_yscale('log')
         ax.legend(fontsize=20)
@@ -862,7 +797,8 @@ class TensorFlowFit(MLPTrainer):
         ax.tick_params(axis='both', which='major', labelsize=18)
         fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+ "/History_Plot_Direct."+self._figformat, format=self._figformat, bbox_inches='tight')
         plt.close(fig)
-        return 
+        return super().Plot_and_Save_History()
+    
         
     class PlotCallback(tf.keras.callbacks.Callback):
             FitClass = None
@@ -872,7 +808,7 @@ class TensorFlowFit(MLPTrainer):
             def on_epoch_end(self, epoch, logs=None):
                 self.FitClass.history_epochs.append(epoch)
                 self.FitClass.history_loss.append(logs["loss"])
-                self.FitClass.history_val_loss.append(logs["val_loss"])
+                self.FitClass.val_loss_history.append(logs["val_loss"])
                 
                 if (epoch+1) % self.FitClass.callback_every == 0:
                     self.FitClass.CustomCallback()
@@ -1088,6 +1024,7 @@ class CustomTrainer(MLPTrainer):
         return 
     
     def PrepareValidationHistory(self):
+        self.history_learningrate = []
         self.val_loss_history=[]
         for _ in self._train_vars:
             self.val_loss_history.append([])
@@ -1097,12 +1034,14 @@ class CustomTrainer(MLPTrainer):
         train_batches = tf.data.Dataset.from_tensor_slices((self._X_train_norm, self._Y_train_norm)).batch(2**self._batch_expo)
         return train_batches
     
+
     def LoopEpochs(self):
         t_start = time.time()
         worst_error = 1e32
         self._i_epoch = 0
         train_batches = self.SetTrainBatches()
         while (self._i_epoch < self._n_epochs) and self.__keep_training:
+            self.history_learningrate.append(self._optimizer.learning_rate.numpy())
             self.LoopBatches(train_batches=train_batches)
 
             val_loss = self.ValidationLoss()
@@ -1176,16 +1115,20 @@ class CustomTrainer(MLPTrainer):
         plt.close(fig)
 
         with open(self._save_dir + "/Model_"+str(self._model_index)+"/TrainingHistory.csv", "w+") as fid:
-            fid.write("epoch,"+ ",".join(("validation_loss_"+var for var in vars_to_plot))+"\n")
+            fid.write("epoch,learning_rate,"+ ",".join(("validation_loss_"+var for var in vars_to_plot))+"\n")
             epochs = np.arange(np.shape(H)[1])
-            H_concat = np.vstack((epochs, H)).T 
+            lr = np.array(self.history_learningrate)
+            H_concat = np.vstack((epochs, lr, H)).T 
             csvWriter = csv.writer(fid, delimiter=',')
             csvWriter.writerows(H_concat)
 
-        return 
+        return super().Plot_and_Save_History()
     
     def __CheckEarlyStopping(self, val_loss, worst_error):
         current_error = tf.reduce_max(val_loss)
+        if np.isnan(current_error.numpy()):
+            self.__keep_training = False 
+
         if current_error < worst_error - self._stagnation_tolerance:
             self.__keep_training = True 
             self.__stagnation_iter = 0
@@ -1243,6 +1186,8 @@ class PhysicsInformedTrainer(CustomTrainer):
     lambda_history:list = []
     update_lambda_every_iter:int = 10
     def __init__(self):
+        """MLP trainer base class for physics-informed machine learning.
+        """
         CustomTrainer.__init__(self)
         return 
     
@@ -1302,7 +1247,6 @@ class PhysicsInformedTrainer(CustomTrainer):
         return 
     
     def PreprocessPINNVars(self):
-        
         return 
     
     def SetScaler(self, scaler_function: str = "robust"):
@@ -1324,6 +1268,7 @@ class PhysicsInformedTrainer(CustomTrainer):
         return 
     
     def PrepareValidationHistory(self):
+        self.history_learningrate=[]
         self.val_loss_history=[]
         for _ in self._state_vars:
             self.val_loss_history.append([])
@@ -1332,26 +1277,28 @@ class PhysicsInformedTrainer(CustomTrainer):
     def SetTrainBatches(self):
         train_batches_domain = tf.data.Dataset.from_tensor_slices((self._X_train_norm, self._Y_state_train_norm)).batch(2**self._batch_expo)
         domain_batches_list = [b for b in train_batches_domain]
-
+        
         batch_size_train = 2**self._batch_expo
 
-        # Collect projection array data.
-        p_concatenated = tf.stack([tf.constant(p, dtype=self._dt) for p in self.projection_arrays],axis=2)
+        if self._enable_boundary_loss:
+            # Collect projection array data.
+            p_concatenated = tf.stack([tf.constant(p,dtype=self._dt) for p in self.projection_arrays],axis=2)
+            
+            # Collect target projection gradient data.
+            Y_target_concatenated = tf.stack([tf.constant(t,dtype=self._dt) for t in self.target_arrays], axis=1)
+
+            # Collect boundary controlling variable data.
+            X_boundary_tf = tf.constant(self._X_boundary_norm, dtype=self._dt)
         
-        # Collect target projection gradient data.
-        Y_target_concatenated = tf.stack([tf.constant(t, dtype=self._dt) for t in self.target_arrays], axis=1)
+            # Forumulate batches.
+            batches_concat = tf.data.Dataset.from_tensor_slices((X_boundary_tf, p_concatenated, Y_target_concatenated)).batch(batch_size_train)
+            batches_concat_list = [b for b in batches_concat]
 
-        # Collect boundary controlling variable data.
-        X_boundary_tf = tf.constant(self._X_boundary_norm, dtype=self._dt)
-
-        # Forumulate batches.
-        batches_concat = tf.data.Dataset.from_tensor_slices((X_boundary_tf, p_concatenated, Y_target_concatenated)).batch(batch_size_train)
-        batches_concat_list = [b for b in batches_concat]
-
-        # Re-size boundary data batches to that of the domain batches such that both data can be evaluated simultaneously during training.
-        Nb_boundary = len(batches_concat_list)
-        batches_concat_list_resized = [batches_concat_list[i % Nb_boundary] for i in range(len(domain_batches_list))]
-
+            # Re-size boundary data batches to that of the domain batches such that both data can be evaluated simultaneously during training.
+            Nb_boundary = len(batches_concat_list)
+            batches_concat_list_resized = [batches_concat_list[i % Nb_boundary] for i in range(len(domain_batches_list))]
+        else:
+            batches_concat_list_resized = [[None]*len(domain_batches_list),[None]*len(domain_batches_list),[None]*len(domain_batches_list)]
         return (domain_batches_list, batches_concat_list_resized)
     
     @tf.function
@@ -1411,16 +1358,21 @@ class PhysicsInformedTrainer(CustomTrainer):
         domain_batches = train_batches[0]
         boundary_batches = train_batches[1]
         vals_lambda = self.vals_lambda.copy()
-        for batch_domain, batch_boundary in zip(domain_batches, boundary_batches):
-
+        for iBatch, batch_domain in enumerate(domain_batches):
             # Extract domain batch data.
             X_domain_batch = batch_domain[0]
             Y_domain_batch = batch_domain[1]
-            # Extract boundary batch data.
-            X_boundary_batch = batch_boundary[0]
-            P_boundary_batch = batch_boundary[1]
-            Yt_boundary_batch = batch_boundary[2]
-
+            if self._enable_boundary_loss:
+                batch_boundary = boundary_batches[iBatch]
+                # Extract boundary batch data.
+                X_boundary_batch = batch_boundary[0]
+                P_boundary_batch = batch_boundary[1]
+                Yt_boundary_batch = batch_boundary[2]
+            else:
+                X_boundary_batch = None 
+                P_boundary_batch = None 
+                Yt_boundary_batch = None 
+                
             if self._i_epoch > self._boundary_loss_patience and self._enable_boundary_loss:
                 self._include_boundary_loss = True
             else:
