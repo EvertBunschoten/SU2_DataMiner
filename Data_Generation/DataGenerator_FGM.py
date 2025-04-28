@@ -53,11 +53,7 @@ class DataGenerator_Cantera(DataGenerator_Base):
     # Save directory for computed flamelet data
     __matlab__output_dir:str = "./"
 
-    __fuel_definition:list[str] = DefaultSettings_FGM.fuel_definition    # Fuel species
-    __fuel_weights:list[float] = DefaultSettings_FGM.fuel_weights        # Fuel molar weights
     __fuel_string:str = ''
-    __oxidizer_definition:list[str] = DefaultSettings_FGM.oxidizer_definition  # Oxidizer species
-    __oxidizer_weights:list[float] = DefaultSettings_FGM.oxidizer_weights      # Oxidizer molar weights
     __oxidizer_string:str = ''
 
     __n_flamelets:int = DefaultSettings_FGM.Np_temp       # Number of adiabatic and burner flame computations per mixture fraction
@@ -79,12 +75,9 @@ class DataGenerator_Cantera(DataGenerator_Base):
     __run_burnerflames:bool = DefaultSettings_FGM.include_burnerflames    # Run burner stabilized flame computations
     __run_equilibrium:bool = DefaultSettings_FGM.include_equilibrium    # Run chemical equilibrium computations
     __run_counterflames:bool = DefaultSettings_FGM.include_counterflames   # Run counter-flow diffusion flamelet simulations.
-    __run_fuzzy:bool = False           # Add randomized data around flamelet solutions to manifold.
 
     __u_fuel:float = 1.0       # Fuel stream velocity in counter-flow diffusion flame.
     __u_oxidizer:float = None   # Oxidizer stream velocity in counter-flow diffusion flame.
-
-    __fuzzy_delta:float = 0.1
 
     def __init__(self, Config:Config_FGM=None):
         DataGenerator_Base.__init__(self, Config_in=Config)
@@ -486,8 +479,6 @@ class DataGenerator_Cantera(DataGenerator_Base):
 
                 print("Successfull burnerflame simulation at "+folder_header+": "+ str(mix_status)+" mdot: " + str(m_dot_next)+ " ("+str(i_burnerflame+1)+"/"+str(self.__n_flamelets)+")")
                     
-            # else:
-            #     print("delta pv too small at "+folder_header+": "+str(mix_status)+" (" + str(i_burnerflame+1) + "/"+str(self.__n_flamelets)+")")    
             except:
                 print("Unsuccessfull burnerflame simulation at "+folder_header+": "+ str(mix_status)+" mdot: " + str(m_dot_next)+ " ("+str(i_burnerflame+1)+"/"+str(self.__n_flamelets)+")")
                 pass

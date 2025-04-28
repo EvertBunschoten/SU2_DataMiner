@@ -33,7 +33,7 @@ import matplotlib.pyplot as plt
 from scipy.optimize import differential_evolution, Bounds, LinearConstraint, minimize
 from sklearn.decomposition import PCA
 
-from Common.Properties import FGMVars, DefaultProperties
+from Common.Properties import FGMVars
 from Common.DataDrivenConfig import Config_FGM
 
 class PVOptimizer:
@@ -110,15 +110,6 @@ class PVOptimizer:
         self._output_dir = self._Config.GetOutputDir()+"/PV_Optimization/"
 
         self.SetAdditionalProgressVariables([])
-        # self.SetAdditionalProgressVariables([FGMVars.Temperature.name, \
-        #                                      FGMVars.MolarWeightMix.name,\
-        #                                      FGMVars.Conductivity.name,\
-        #                                      FGMVars.Heat_Release.name,\
-        #                                      FGMVars.Cp.name,\
-        #                                      FGMVars.ViscosityDyn.name,\
-        #                                      FGMVars.Beta_Enth_Thermal.name,\
-        #                                      FGMVars.Beta_Enth.name,\
-        #                                      FGMVars.Beta_MixFrac.name])
         return 
     
     def SetOutputDir(self, output_dir:str):

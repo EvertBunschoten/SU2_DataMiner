@@ -32,7 +32,6 @@ import numpy as np
 from tqdm import tqdm
 import csv 
 import matplotlib.pyplot as plt 
-from enum import Enum, auto
 np.random.seed(2)
 
 #---------------------------------------------------------------------------------------------#

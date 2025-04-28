@@ -24,7 +24,6 @@
 #=============================================================================================#
 
 
-import numpy as np 
 import matplotlib.pyplot as plt 
 from matplotlib import ticker
 import os 
@@ -33,7 +32,6 @@ from Common.Config_base import Config
 
 class DataPlotter_Base:
     _Config:Config = None 
-    __plot_vars:list[str] = None 
 
     __plot_title:str = ""
     _x_variable:str = ""
