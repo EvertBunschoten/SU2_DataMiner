@@ -76,11 +76,6 @@ class Train_Flamelet_Direct(TensorFlowFit):
         fid.write("\n\n")
         return super().add_additional_header_info(fid)
     
-
-    def SetDecaySteps(self):
-        self._decay_steps=0.01157 * self._Np_train
-        return 
-
     def GetTrainData(self):
         super().GetTrainData()
         self._X_scale = self.scaler_function_x.scale_
@@ -130,10 +125,6 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
 
         self.SetInitializer("he_uniform")
 
-        return 
-    
-    def SetDecaySteps(self):
-        self._decay_steps=0.01157 * self._Np_train
         return 
     
     def GetTrainData(self):
@@ -264,13 +255,53 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         :rtype: list[np.ndarray], list[np.ndarray], list[str]
         """
         projection_array_h, target_grad_h = self.__SetEnth_projection()
-        is_unb = self.__LocateUnbBoundaryNodes()
-
-        projection_array_h[np.invert(is_unb), :] = 0.0
-        target_grad_h[np.invert(is_unb)] = 0.0
+      
         bc_labels = ["Beta_pv : h"]
         projection_arrays = [projection_array_h]
         target_grad_arrays = [target_grad_h]
+
+        projection_array_pvz, is_unb, is_lean, is_stoch = self.__SetPVZ_projection()
+        beta_pv_scale = self._Y_scale[self._train_vars.index(FGMVars.Beta_ProgVar.name)]
+        Z_scale = self._X_scale[self._controlling_vars.index(FGMVars.MixtureFraction.name)]
+        target_grad_pvz = np.zeros(len(projection_array_pvz))
+        
+        Le_i = self.__Config.GetConstSpecieLewisNumbers()
+
+        pv_species = self.__Config.GetProgressVariableSpecies()
+        pv_weights = self.__Config.GetProgressVariableWeights()
+
+        z_fuel = 1.0
+        self.__Config.gas.set_mixture_fraction(z_fuel, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        Y_fuel = self.__Config.gas.Y 
+        
+        z_ox = 0.0
+        self.__Config.gas.set_mixture_fraction(z_ox, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        Y_ox = self.__Config.gas.Y 
+        
+        self.__Config.gas.set_equivalence_ratio(1.0, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        z_stoch = self.__Config.gas.mixture_fraction(self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        self.__Config.gas.TP = self.__Config.GetUnbTempBounds()[1], ct.one_atm 
+        self.__Config.gas.equilibrate("TP")
+        Y_stoch = self.__Config.gas.Y 
+        
+        beta_pv_fuel = beta_pv_ox = beta_pv_stoch = 0.0
+        for sp, w in zip(pv_species, pv_weights):
+            i_sp = self.__Config.gas.species_index(sp)
+            beta_pv_fuel += (w / Le_i[i_sp]) * Y_fuel[i_sp]
+            beta_pv_ox += (w / Le_i[i_sp]) * Y_ox[i_sp]
+            beta_pv_stoch += (w / Le_i[i_sp]) * Y_stoch[i_sp]
+
+        target_grad_pvz[is_unb] = (beta_pv_fuel - beta_pv_ox) / (z_fuel - z_ox)
+        target_grad_pvz[np.logical_and(np.invert(is_unb), is_lean)] = (beta_pv_stoch - beta_pv_ox) / (z_stoch - z_ox)
+        target_grad_pvz[np.logical_and(np.invert(is_unb), np.invert(is_lean))] = (beta_pv_fuel - beta_pv_stoch) / (z_fuel - z_stoch)
+        target_grad_pvz[np.logical_and(np.invert(is_unb), is_stoch)] = 0.0
+
+        target_grad_pvz *= (Z_scale / beta_pv_scale)
+
+        projection_arrays.append(projection_array_pvz)
+        target_grad_arrays.append(target_grad_pvz)
+        bc_labels.append("Beta_pv : pv-Z")
+
         return projection_arrays, target_grad_arrays, bc_labels 
     
     def __SetBeta_Z_projection(self):
@@ -280,14 +311,47 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         :rtype: list[np.ndarray], list[np.ndarray], list[str]
         """
         projection_array_h, target_grad_h = self.__SetEnth_projection()
-        is_unb = self.__LocateUnbBoundaryNodes()
-        projection_array_h[np.invert(is_unb), :] = 0.0
-        target_grad_h[np.invert(is_unb)] = 0.0
-        
-
         bc_labels = ["Beta_Z : h"]
         projection_arrays = [projection_array_h]
         target_grad_arrays = [target_grad_h]
+
+        projection_array_pvz, is_unb, is_lean, is_stoch = self.__SetPVZ_projection()
+        beta_Z_scale = self._Y_scale[self._train_vars.index(FGMVars.Beta_MixFrac.name)]
+        Z_scale = self._X_scale[self._controlling_vars.index(FGMVars.MixtureFraction.name)]
+        target_grad_pvz = np.zeros(len(projection_array_pvz))
+        
+        Le_i = self.__Config.GetConstSpecieLewisNumbers()
+        z_i = self.__Config.GetMixtureFractionCoefficients()
+        z_Ns = self.__Config.GetMixtureFractionCoeff_Carrier()
+
+        z_fuel = 1.0
+        self.__Config.gas.set_mixture_fraction(z_fuel, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        Y_fuel = self.__Config.gas.Y 
+        beta_Z_fuel = np.sum((z_i - z_Ns) * Y_fuel / Le_i)
+
+        z_ox = 0.0
+        self.__Config.gas.set_mixture_fraction(z_ox, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        Y_ox = self.__Config.gas.Y 
+        beta_Z_ox = np.sum((z_i - z_Ns) * Y_ox / Le_i)
+        
+        self.__Config.gas.set_equivalence_ratio(1.0, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        z_stoch = self.__Config.gas.mixture_fraction(self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        self.__Config.gas.TP = self.__Config.GetUnbTempBounds()[1], ct.one_atm 
+        self.__Config.gas.equilibrate("TP")
+        Y_stoch = self.__Config.gas.Y 
+        beta_Z_stoch = np.sum((z_i - z_Ns) * Y_stoch / Le_i)
+
+        target_grad_pvz[is_unb] = (beta_Z_fuel - beta_Z_ox) / (z_fuel - z_ox)
+        target_grad_pvz[np.logical_and(np.invert(is_unb), is_lean)] = (beta_Z_stoch - beta_Z_ox) / (z_stoch - z_ox)
+        target_grad_pvz[np.logical_and(np.invert(is_unb), np.invert(is_lean))] = (beta_Z_fuel - beta_Z_stoch) / (z_fuel - z_stoch)
+        target_grad_pvz[np.logical_and(np.invert(is_unb), is_stoch)] = 0.0
+
+        target_grad_pvz *= (Z_scale / beta_Z_scale)
+
+        projection_arrays.append(projection_array_pvz)
+        target_grad_arrays.append(target_grad_pvz)
+        bc_labels.append("Beta_Z : pv-Z")
+        
         return projection_arrays, target_grad_arrays, bc_labels 
     
     def __SetMolarWeight_projection(self):
@@ -297,9 +361,7 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         :rtype: list[np.ndarray], list[np.ndarray], list[str]
         """
         projection_array_h, target_grad_array = self.__SetEnth_projection()
-        is_unb = self.__LocateUnbBoundaryNodes()
-        projection_array_h[np.invert(is_unb), :] = 0.0
-        target_grad_array[np.invert(is_unb)] = 0.0
+    
         bc_name = "W_M : h"
         projection_arrays = [projection_array_h]
         target_grad_arrays = [target_grad_array]
@@ -343,7 +405,7 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
 
         # Extract specific heat and beta_h1 from flamelet data.
         _, Y_boundary = GetReferenceData(self._boundary_data_file, x_vars=self._controlling_vars, train_variables=[FGMVars.Cp.name, FGMVars.Beta_Enth_Thermal.name])
-        is_unb = self.__LocateUnbBoundaryNodes()
+        
         Cp_boundary = Y_boundary[:,0]
         Beta_h1_boundary = Y_boundary[:,1]
 
@@ -355,9 +417,6 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         projection_array_train, _ = self.__SetEnth_projection()
         # Normalized projected target gradient.
         target_grad_array = (1 - (Beta_h1_boundary / Cp_boundary)) * h_scale / Beta_h2_scale
-
-        projection_array_train[np.invert(is_unb),:] = 0.0
-        target_grad_array[np.invert(is_unb)] = 0.0
 
         bc_name = "Beta_h2 : 1 - Beta_h1/cp"
         return [projection_array_train], [target_grad_array], [bc_name]
@@ -753,7 +812,9 @@ class TrainMLP_FGM(TrainMLP):
         initiate trainer object accordingly.
         """
         output_vars = self.__Config.GetMLPOutputGroup(self.__output_group)
-
+        self.__trainer_PINN = Train_FGM_PINN(Config_in=self.__Config,group_idx=self.__output_group)
+        self.__kind_trainer = "physicsinformed"
+        self._trainer_direct = self.__trainer_PINN
         # Check for physics-informed variables in the MLP output group.
         if any([((v in self.__PINN_variables) or ("Y_dot" in v)) for v in output_vars]):
             self.__kind_trainer = "physicsinformed"
