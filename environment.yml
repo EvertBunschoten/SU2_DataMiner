@@ -1,0 +1,24 @@
+name: su2dm-env
+channels:
+- conda-forge
+- defaults
+dependencies:
+- python 
+- libstdcxx-ng
+- cantera
+- CoolProp
+- csvkit
+- gmsh
+- joblib
+- keras
+- matplotlib
+- numpy
+- pypickle
+- pyfiglet
+- mkl_random
+- scipy
+- scikit-learn
+- tensorflow
+- time
+- tk
+- tqdm
