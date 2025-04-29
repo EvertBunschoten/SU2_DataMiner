@@ -18,7 +18,6 @@ You require the following modules for this workflow to run:
 - argparse
 - cantera
 - CoolProp
-- csv
 - gmsh
 - joblib
 - keras
@@ -28,11 +27,15 @@ You require the following modules for this workflow to run:
 - pyfiglet
 - random
 - scipy
-- sklearn
+- scikit-learn
 - tensorflow
 - time
 - tkinter
 - tqdm
+Alternatively, a suitable conda environment can be created using the [environment recipe](environment.yml) through the following command:
+```
+conda env create -f environment.yml
+```
 
 After cloning this repository, add the following lines to your ```~/.bashrc``` in order to update your pythonpath accordingly:
 
