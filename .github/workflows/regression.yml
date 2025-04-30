@@ -90,7 +90,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run regression tests
-        uses: docker://ghcr.io/evertbunschoten/su2dataminer:latest
+        uses: docker://ghcr.io/evertbunschoten/su2_dataminer/test_su2_dataminer:3005202
         with:
           args: -b ${{ github.ref }} -s run_regression.py
       
