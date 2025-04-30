@@ -12,6 +12,7 @@ on:
       - 'main'
 
 jobs:
+
   run_regression:
     name: Run tests in container
     runs-on: ubuntu-latest
@@ -21,6 +22,12 @@ jobs:
         with:
           entrypoint: /bin/rm 
           args: -rf src/
+      - name: Prepare python environment
+        uses: docker://ghcr.io/evertbunschoten/su2dataminer_test:latest
+        with:
+          entrypoint: pip
+          args: install src/SU2_DataMiner/required_packages.txt
+
       - name: Run regression tests
         uses: docker://ghcr.io/evertbunschoten/su2dataminer_test:latest
         with:

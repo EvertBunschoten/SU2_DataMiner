@@ -1,0 +1,16 @@
+cantera
+CoolProp
+csvkit
+gmsh
+joblib
+keras
+matplotlib
+numpy
+pypickle
+pyfiglet
+mkl_random
+scipy
+scikit-learn
+tensorflow
+tk
+tqdm
