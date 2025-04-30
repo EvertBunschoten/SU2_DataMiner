@@ -38,14 +38,6 @@ jobs:
   #         tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
   #         labels: latest
 
-  authenticate:
-    runs-on: ubuntu-latest 
-    permissions:
-      packages: write
-    steps:
-      - name: Authenticate to GHCR registry
-        run: docker login --username EvertBunschoten --password ${{ secrets.GHCR_TOKEN }} ghcr.io
-      
   # build:
   #   runs-on: 'ubuntu-latest'
   #   steps:
@@ -85,6 +77,8 @@ jobs:
     name: Push Docker image to Docker Hub
     runs-on: ubuntu-latest
     steps:
+      - name: Authenticate to GHCR registry
+        run: docker login --username EvertBunschoten --password ${{ secrets.GHCR_TOKEN }} ghcr.io
       - name: Run regression tests
         uses: docker://ghcr.io/evertbunschoten/su2_dataminer/test_su2_dataminer:3005202
         with:
