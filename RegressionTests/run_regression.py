@@ -27,6 +27,7 @@ def main():
     unittest_mixturefraction.exec_command = "./mixturefraction_computation.py"
     unittest_mixturefraction.reference_files = ["mixture_fraction_verification.ref"]
     unittest_mixturefraction.test_files = ["mixture_fraction_verification.csv"]
+    test_list.append(unittest_mixturefraction)
     
     # training_MM_direct = TestCase("Training_MM_Direct")
     # training_MM_direct.config_dir = "FluidTraining/MM/"
