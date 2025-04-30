@@ -1,16 +1,21 @@
+name: Hello, World!
+description: Greet someone and record the time
+author: GitHub Actions
 
-# action.yml
-on: [push]
+# Define your inputs here.
+inputs:
+  who-to-greet:
+    description: Who to greet
+    required: true
+    default: World
 
-jobs:
-    hello_world_job:
-        runs-on: ubuntu-latest
-        name: A job to say hello
-        steps:
-            - name: 'Hello World'
-              id: hello
-              uses: EvertBunschoten/SU2_DataMiner@v1
-              with: 
-                who-to-greet: "Mona the Octocat"
-            - name: Get the output time
-              run: echo "The time was ${{ steps.hello.outputs.time }}"
+# Define your outputs here.
+outputs:
+  time:
+    description: The time we greeted you
+
+runs:
+  using: docker
+  image: Dockerfile
+  env:
+    INPUT_WHO_TO_GREET: ${{ inputs.who-to-greet }}
