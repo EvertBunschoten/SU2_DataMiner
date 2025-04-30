@@ -21,11 +21,11 @@
 #  Initiate the FlameletAI configuration for training physics-informed neural networks for    |
 #  FGM applications.                                                                          |
 #                                                                                             |  
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
-from Common.DataDrivenConfig import FlameletAIConfig 
+from su2dataminer.config import Config_FGM
 import os 
 
 # Manifold bounds:
@@ -35,11 +35,11 @@ T_unb_upper = 800.0 # Reactant upper temperature
 phi_lower = 0.25    # Lower equivalence ratio
 phi_upper = 20.0    # Upper equivalence ratio
 
-Np_T = 30   # Number of reactant temperature divisions
-Np_mix = 30 # Number of mixture divisions
+Np_T = 10   # Number of reactant temperature divisions
+Np_mix = 10 # Number of mixture divisions
 
-# Initiate FlameletAIConfig
-Config = FlameletAIConfig()
+# Initiate Config_FGM
+Config = Config_FGM()
 
 Config.SetConfigName("Hydrogen_PINNs")
 

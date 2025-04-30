@@ -20,15 +20,16 @@
 # Description:                                                                                |
 #  Optimize the progress variable definition for hydrogen flamelets.                          |
 #                                                                                             |  
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
-
-from Common.DataDrivenConfig import FlameletAIConfig 
-from Data_Processing.OptimizeProgressVariable import PVOptimizer
+from su2dataminer.config import Config_FGM
+from su2dataminer.process_data import PVOptimizer
+# from Common.DataDrivenConfig import Config_FGM 
+# from Data_Processing.OptimizeProgressVariable import PVOptimizer
 
 # Load FlameletAI configuration
-Config = FlameletAIConfig("Hydrogen_PINNs.cfg")
+Config = Config_FGM("Hydrogen_PINNs.cfg")
 
 # Initiate progress variable definition optimizer
 PVO = PVOptimizer(Config)

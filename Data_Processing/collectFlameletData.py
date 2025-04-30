@@ -21,13 +21,12 @@
 #  homogeneous distribution of flamelet data along the progress variable, enthalpy, and       |
 #  mixture fraction direction.                                                                |
 #                                                                                             |
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
 import numpy as np 
 from os import path, listdir
-import sys
 import csv 
 from tqdm import tqdm
 np.random.seed(0)
@@ -37,14 +36,14 @@ import matplotlib.pyplot as plt
 prop_cycle = plt.rcParams["axes.prop_cycle"]
 colors = prop_cycle.by_key()['color']
 
-from Common.DataDrivenConfig import FlameletAIConfig
-from Common.Properties import DefaultSettings_FGM
+from Common.DataDrivenConfig import Config_FGM
+from Common.Properties import DefaultSettings_FGM, FGMVars
 
 class FlameletConcatenator:
     """Read, regularize, and concatenate flamelet data for MLP training or LUT generation.
 
     """
-    __Config:FlameletAIConfig = None # FlameletAI configuration for current workflow.
+    __Config:Config_FGM = None # FlameletAI configuration for current workflow.
 
     __Np_per_flamelet:int = 2**DefaultSettings_FGM.batch_size_exponent          # Number of data points to extract per flamelet.
     __custom_resolution:bool = False    # Overwrite average number of data points per flamelet with a specified value.
@@ -66,11 +65,21 @@ class FlameletConcatenator:
     __N_control_vars:int = len(DefaultSettings_FGM.controlling_variables)
 
     # Thermodynamic data to search for in flamelet data.
-    __TD_train_vars = ['Temperature', 'MolarWeightMix', 'DiffusionCoefficient', 'Conductivity', 'ViscosityDyn', 'Cp']
+    __TD_train_vars = [FGMVars.Temperature.name, \
+                       FGMVars.MolarWeightMix.name, \
+                       FGMVars.DiffusionCoefficient.name, \
+                       FGMVars.Conductivity.name, \
+                       FGMVars.ViscosityDyn.name, \
+                       FGMVars.Cp.name]
+    
     __TD_flamelet_data:np.ndarray = None 
 
     # Differential diffusion data to search for in flamelet data.
-    __PD_train_vars = ['Beta_ProgVar', 'Beta_Enth_Thermal', 'Beta_Enth', 'Beta_MixFrac']
+    __PD_train_vars = [FGMVars.Beta_ProgVar.name, \
+                       FGMVars.Beta_Enth_Thermal.name, \
+                       FGMVars.Beta_Enth.name, \
+                       FGMVars.Beta_MixFrac.name]
+    
     __PD_flamelet_data:np.ndarray = None 
 
     __flamelet_ID_vars = ['FlameletID']
@@ -84,12 +93,14 @@ class FlameletConcatenator:
     __LookUp_flamelet_data:np.ndarray = None 
 
     # Progress variable source term name.
-    __PPV_train_vars = ['ProdRateTot_PV']
+    __PPV_train_vars = [FGMVars.ProdRateTot_PV.name]
     __Sources_vars = [__PPV_train_vars[0]]
     for s in __Species_in_FGM:
         __Sources_vars.append("Y_dot_pos-"+s)
         __Sources_vars.append("Y_dot_neg-"+s)
         __Sources_vars.append("Y_dot_net-"+s)
+        __Sources_vars.append("Y-"+s)
+
     __Sources_flamelet_data = None
 
     __CV_flamelet_data:np.ndarray = None    # Flamelet controlling variables
@@ -104,11 +115,11 @@ class FlameletConcatenator:
 
     __verbose:int=1
 
-    def __init__(self, Config:FlameletAIConfig,verbose_level:int=1):
+    def __init__(self, Config:Config_FGM,verbose_level:int=1):
         """Class constructor
 
-        :param Config: loaded FlameletAIConfig class for the current workflow.
-        :type Config: FlameletAIConfig
+        :param Config: loaded Config_FGM class for the current workflow.
+        :type Config: Config_FGM
         """
         self.__verbose = verbose_level
         if self.__verbose >0:
@@ -212,6 +223,7 @@ class FlameletConcatenator:
             self.__Sources_vars.append("Y_dot_pos-"+s)
             self.__Sources_vars.append("Y_dot_neg-"+s)
             self.__Sources_vars.append("Y_dot_net-"+s)
+            self.__Sources_vars.append("Y-"+s)
         return 
 
     def SetControllingVariables(self, controlling_variables:list[str]=DefaultSettings_FGM.controlling_variables):
@@ -424,7 +436,7 @@ class FlameletConcatenator:
         """
 
         # Collect all variable names in the manifold.
-        total_variables = "ProgressVariable,EnthalpyTot,MixtureFraction,"
+        total_variables = ",".join(self.__controlling_variables) + ","
         total_variables += ",".join(self.__TD_train_vars)+","
         if self.__Config.PreferentialDiffusion():
             total_variables += ",".join(self.__PD_train_vars)+","
@@ -609,7 +621,7 @@ class FlameletConcatenator:
         self.__TD_flamelet_data = np.zeros([n_flamelets_total * self.__Np_per_flamelet, len(self.__TD_train_vars)])
         if self.__Config.PreferentialDiffusion():
             self.__PD_flamelet_data = np.zeros([n_flamelets_total * self.__Np_per_flamelet, len(self.__PD_train_vars)])
-        self.__Sources_flamelet_data = np.zeros([n_flamelets_total * self.__Np_per_flamelet, 1 + 3 * len(self.__Species_in_FGM)])
+        self.__Sources_flamelet_data = np.zeros([n_flamelets_total * self.__Np_per_flamelet, 1 + 4 * len(self.__Species_in_FGM)])
         self.__LookUp_flamelet_data = np.zeros([n_flamelets_total * self.__Np_per_flamelet, len(self.__LookUp_vars)])
         self.__flamelet_ID = np.zeros([n_flamelets_total * self.__Np_per_flamelet, len(self.__flamelet_ID_vars)],dtype=int)
 
@@ -658,7 +670,7 @@ class FlameletConcatenator:
             if is_valid_flamelet:
                 S_flamelet_norm = S_flamelet / (max(S_flamelet)+1e-32)
 
-                T_flamelet = D[:, variables.index("Temperature")]
+                T_flamelet = D[:, variables.index(FGMVars.Temperature.name)]
                 if np.max(T_flamelet) < DefaultSettings_FGM.T_threshold:
                     BurningFlamelet = False 
 
@@ -677,10 +689,10 @@ class FlameletConcatenator:
                 if BurningFlamelet:
 
                     for iVar_TD, TD_var in enumerate(self.__TD_train_vars):
-                        if TD_var == "DiffusionCoefficient":
-                            idx_cp = variables.index("Cp")
-                            idx_cond = variables.index("Conductivity")
-                            idx_density = variables.index("Density")
+                        if TD_var == FGMVars.DiffusionCoefficient.name:
+                            idx_cp = variables.index(FGMVars.Cp.name)
+                            idx_cond = variables.index(FGMVars.Conductivity.name)
+                            idx_density = variables.index(FGMVars.Density.name)
                             TD_data[:, iVar_TD] = D[:, idx_cond] / (D[:, idx_cp] * D[:, idx_density])
                         else:
                             idx_var_flamelet = variables.index(TD_var)
@@ -692,10 +704,11 @@ class FlameletConcatenator:
                     for iVar_LookUp, LookUp_var in enumerate(self.__LookUp_vars):
                         idx_var_flamelet = variables.index(LookUp_var)
                         LookUp_data[:, iVar_LookUp] = D[:, idx_var_flamelet]
-                        if LookUp_var == "Heat_Release":
+                        if LookUp_var == FGMVars.Heat_Release.name:
                             LookUp_data[sourceterm_zero_line_numbers, iVar_LookUp] = 0.0
                 
                 # Load species sources data
+                species_mass_fraction = np.zeros([len(D), len(self.__Species_in_FGM)])
                 species_production_rate = np.zeros([len(D), len(self.__Species_in_FGM)])
                 species_destruction_rate = np.zeros([len(D), len(self.__Species_in_FGM)])
                 species_net_rate = np.zeros([len(D), len(self.__Species_in_FGM)])
@@ -705,24 +718,28 @@ class FlameletConcatenator:
                             species_production_rate[:, iSp] = np.zeros(len(D))
                             species_destruction_rate[:, iSp] = np.zeros(len(D))
                             species_net_rate[:, iSp] = np.zeros(len(D))
+                            species_mass_fraction[:, iSp] = np.zeros(len(D))
                             for NOsp in ["NO2","NO","N2O"]:
                                 species_production_rate[:, iSp] += D[:, variables.index("Y_dot_pos-"+NOsp)]
                                 species_destruction_rate[:, iSp] += D[:, variables.index("Y_dot_neg-"+NOsp)]
                                 species_net_rate[:, iSp] += D[:, variables.index("Y_dot_net-"+NOsp)]
+                                species_mass_fraction[:, iSp] += D[:, variables.index("Y-"+Sp)]
                         else:
+                            species_mass_fraction[:, iSp] = D[:, variables.index("Y-"+Sp)]
                             species_production_rate[:, iSp] = D[:, variables.index("Y_dot_pos-"+Sp)]
                             species_destruction_rate[:, iSp] = D[:, variables.index("Y_dot_neg-"+Sp)]
                             species_net_rate[:, iSp] = D[:, variables.index("Y_dot_net-"+Sp)]
 
-                Sources_data = np.zeros([len(D), 1 + 3 * len(self.__Species_in_FGM)])
+                Sources_data = np.zeros([len(D), 1 + 4 * len(self.__Species_in_FGM)])
                 if BurningFlamelet:
                     ppv_flamelet = self.__Config.ComputeProgressVariable_Source(variables, D)
                     Sources_data[:, 0] = ppv_flamelet
 
                     for iSp in range(len(self.__Species_in_FGM)):
-                        Sources_data[:, 1 + 3*iSp] = species_production_rate[:, iSp]
-                        Sources_data[:, 1 + 3*iSp + 1] = species_destruction_rate[:, iSp]
-                        Sources_data[:, 1 + 3*iSp + 2] = species_net_rate[:, iSp]
+                        Sources_data[:, 1 + 4*iSp] = species_production_rate[:, iSp]
+                        Sources_data[:, 1 + 4*iSp + 1] = species_destruction_rate[:, iSp]
+                        Sources_data[:, 1 + 4*iSp + 2] = species_net_rate[:, iSp]
+                        Sources_data[:, 1 + 4*iSp + 3] = species_mass_fraction[:, iSp]
 
                     Sources_data[sourceterm_zero_line_numbers, :] = 0.0
 
@@ -755,7 +772,7 @@ class FlameletConcatenator:
                             if self.__Config.PreferentialDiffusion():
                                 PD_sampled = PD_data*np.ones([self.__Np_per_flamelet, np.shape(CV_flamelet)[1]])
                             lookup_sampled = LookUp_data*np.ones([self.__Np_per_flamelet, np.shape(CV_flamelet)[1]])
-                            sources_sampled = np.zeros([self.__Np_per_flamelet, 1 + 3*len(self.__Species_in_FGM)])
+                            sources_sampled = np.zeros([self.__Np_per_flamelet, 1 + 4*len(self.__Species_in_FGM)])
                         else:
                             if is_equilibrium:
                                 S_q = np.linspace(0, 1.0, self.__Np_per_flamelet)
@@ -766,7 +783,7 @@ class FlameletConcatenator:
                             if self.__Config.PreferentialDiffusion():
                                 PD_sampled = np.zeros([self.__Np_per_flamelet, np.shape(PD_data)[1]])
                             lookup_sampled = np.zeros([self.__Np_per_flamelet, np.shape(LookUp_data)[1]])
-                            sources_sampled = np.zeros([self.__Np_per_flamelet, 1 + 3*len(self.__Species_in_FGM)])
+                            sources_sampled = np.zeros([self.__Np_per_flamelet, 1 + 4*len(self.__Species_in_FGM)])
                             for i_CV in range(self.__N_control_vars):
                                 CV_sampled[:, i_CV] = np.interp(S_q, S_flamelet_norm, CV_flamelet[:, i_CV])
                             for iVar_TD in range(len(self.__TD_train_vars)):
@@ -777,7 +794,7 @@ class FlameletConcatenator:
 
                             for iVar_LU in range(len(self.__LookUp_vars)):
                                 lookup_sampled[:, iVar_LU] = np.interp(S_q, S_flamelet_norm, LookUp_data[:, iVar_LU])
-                            for iVar_Source in range(1 + 3*len(self.__Species_in_FGM)):
+                            for iVar_Source in range(1 + 4*len(self.__Species_in_FGM)):
                                 sources_sampled[:, iVar_Source] = np.interp(S_q, S_flamelet_norm, Sources_data[:, iVar_Source])
 
                     start = (i_start + i_flamelet + i_flamelet_total) * self.__Np_per_flamelet
@@ -796,7 +813,7 @@ class GroupOutputs:
     """Class which groups flamelet data variables into MLP outputs based on their affinity.
     """
 
-    __Config:FlameletAIConfig = None    # FlameletAI configuration for the current problem.
+    __Config:Config_FGM = None    # FlameletAI configuration for the current problem.
     __controlling_variables:list[str] = DefaultSettings_FGM.controlling_variables
     __vars_to_exclude:list[str] = DefaultSettings_FGM.controlling_variables + ["FlameletID"]   # Variables to exclude from grouping; controlling variables by default.
     __flamelet_variables:list[str]  # Flamelet data variable names.
@@ -815,18 +832,18 @@ class GroupOutputs:
     __group_affinity:list[list[float]]  # Minimum affinity for each combination of groups.
 
     # Combinations of variables for FGM evaluation. 
-    __evaluations_TD:list[str] = ["Temperature", "ViscosityDyn","MolarWeightMix","Cp","Conductivity","DiffusionCoefficient"]
-    __evaluations_PD:list[str] = ["Beta_ProgVar","Beta_Enth_Thermal","Beta_Enth","Beta_MixFrac"]
-    __evaluations_Sources:list[str] = ["ProdRateTot_PV"]
+    __evaluations_TD:list[str] = [FGMVars.Temperature.name, FGMVars.ViscosityDyn.name, FGMVars.MolarWeightMix.name, FGMVars.Cp.name, FGMVars.Conductivity.name, FGMVars.DiffusionCoefficient.name]
+    __evaluations_PD:list[str] = [FGMVars.Beta_ProgVar.name, FGMVars.Beta_Enth_Thermal.name, FGMVars.Beta_Enth.name, FGMVars.Beta_MixFrac.name]
+    __evaluations_Sources:list[str] = [FGMVars.ProdRateTot_PV.name]
 
     __most_interesting_groups:list[list[list[str]]] = []    # Combinations of groups with highest affinity for a certain group count.
 
     __best_group:int = 0
-    def __init__(self, Config_in:FlameletAIConfig):
+    def __init__(self, Config_in:Config_FGM):
         """Class constructor, load flamelet data.
 
         :param Config_in: FlameletAI configuration for the current problem.
-        :type Config_in: FlameletAIConfig
+        :type Config_in: Config_FGM
         """
         self.__Config = Config_in 
         self.__flamelet_data_filepath = self.__Config.GetOutputDir()+"/"+self.__Config.GetConcatenationFileHeader()+"_full.csv"
@@ -971,7 +988,7 @@ class GroupOutputs:
         group_variables, group_indices, group_affinity, _, free_vars_orig = self.__UpdateGroupLeaders(self.__group_leaders_orig)
 
         # Repeat 1000 times to come up with plenty of potential groups.
-        for _ in tqdm(range(1000)):
+        for _ in tqdm(range(10000)):
             repeat = True 
 
             while repeat:
@@ -1006,7 +1023,9 @@ class GroupOutputs:
                 min_affinity = min(min_affinity, min(g))
             n_groups = len(group_leaders)
             self.__n_groups.append(n_groups)
-            self.__group_variables.append(group_variables)
+            for igroup, g in enumerate(group_variables):
+                group_variables[igroup] = sorted(g)
+            self.__group_variables.append(sorted(group_variables))
             self.__group_affinity.append(min_affinity)
 
         self.PostProcessGroups()

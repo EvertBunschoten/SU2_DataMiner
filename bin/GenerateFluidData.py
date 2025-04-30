@@ -20,7 +20,7 @@
 # Description:                                                                                |
 #  Generate flamelet data as per settings in the SU2 DataMiner configuration.                 |
 #                                                                                             |  
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -52,7 +52,7 @@ if args.type == 1:
     # Load FlameletAI configuration
     #---------------------------------------------------------------------------------------------#
     try:
-        config = FlameletAIConfig(args.config_name)
+        config = Config_FGM(args.config_name)
         config.PrintBanner()
     except:
         raise Exception("Improper configuration file for FlameletAI configuration.")
@@ -78,10 +78,10 @@ elif args.type == 2:
     # Load EntropicAI
     #---------------------------------------------------------------------------------------------#
     try:
-        config = EntropicAIConfig(args.config_name)
+        config = Config_NICFD(args.config_name)
         config.PrintBanner()
     except:
-        raise Exception("Improper configuration file for EntropicAI configuration.")
+        raise Exception("Improper configuration file for SU2 DataMiner (NICFD)")
     
     #---------------------------------------------------------------------------------------------#
     # Initiate NICFD data generator

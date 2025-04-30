@@ -20,7 +20,7 @@
 #  Derived DataMiner configuration classes for flamelet-generated manifold and NI-CFD         |
 #  applications.                                                                              |
 #                                                                                             |  
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -43,10 +43,10 @@ from Common.CommonMethods import *
 #---------------------------------------------------------------------------------------------#
 # NI-CFD DataMiner configuration class
 #---------------------------------------------------------------------------------------------#
-class EntropicAIConfig(Config):
+class Config_NICFD(Config):
     """
-    Define EntropicAIConfig class or load existing configuration. If `load_file` is set, the settings from an existing
-    is loaded. If no file name is provided, a new `EntropicAIConfig` class is created.
+    Define Config_NICFD class or load existing configuration. If `load_file` is set, the settings from an existing
+    is loaded. If no file name is provided, a new `Config_NICFD` class is created.
     
     :param load_file: path to file of configuration to be loaded.
     :type load_file: str
@@ -59,7 +59,7 @@ class EntropicAIConfig(Config):
     __fluid_mole_fractions:list[float] = [1.0]          # Mole fractions for components in fluid mixture.
     __use_PT:bool = DefaultSettings_NICFD.use_PT_grid   # Use a pressure-temperature based grid for fluid training data.
 
-
+    __use_auto_range:bool = True   # Automatically determine fluid data bounds.
     __T_lower:float = DefaultSettings_NICFD.T_min   # Lower temperature bound.
     __T_upper:float = DefaultSettings_NICFD.T_max   # Upper temperature bound.
     __Np_T:int = DefaultSettings_NICFD.Np_temp      # Number of temperature/energy samples between bounds.
@@ -73,7 +73,7 @@ class EntropicAIConfig(Config):
     __Energy_lower:float = DefaultSettings_NICFD.Energy_min # Lower energy bound.
     __Energy_upper:float = DefaultSettings_NICFD.Energy_max # Upper energy bound.
     
-    _state_vars:list[str] = ["T","p","c2"]  # State variable names for which the physics-informed MLP is trained.
+    _state_vars:list[str] = ["s", "T","p","c2"]  # State variable names for which the physics-informed MLP is trained.
 
     # Table Generation Settings
 
@@ -89,7 +89,7 @@ class EntropicAIConfig(Config):
 
         :param load_file: configuration file name to load, defaults to None
         :type load_file: str, optional
-        :raises Exception: if loaded configuration is incompatible with the EntropicAIConfig class.
+        :raises Exception: if loaded configuration is incompatible with the Config_NICFD class.
         """
 
         Config.__init__(self)
@@ -110,12 +110,12 @@ class EntropicAIConfig(Config):
             with open(load_file, "rb") as fid:
                 loaded_config = pickle.load(fid)
             if loaded_config._config_type != self._config_type:
-                raise Exception("Improper configuration file for EntropicAI configuration.")
+                raise Exception("Improper configuration file for NICFD configuration.")
             
             self.__dict__ = loaded_config.__dict__.copy()
             print("Loaded configuration file with name " + loaded_config._config_name)
         else:
-            print("Generating empty EntropicAI config")
+            print("Generating empty SU2 DataMiner configuration for NICFD")
 
         return 
     
@@ -123,22 +123,30 @@ class EntropicAIConfig(Config):
         """Print banner visualizing EntropicAI configuration settings."""
         super().PrintBanner()
 
-        print("EntropicAIConfiguration: " + self._config_name)
+        print("Config_NICFDuration: " + self._config_name)
         print("")
         print("Fluid data generation settings:")
         print("Fluid data output directory: " + self.GetOutputDir())
         print("Fluid name(s): " + ",".join(self.__fluid_names))
         print("")
         if self.__use_PT:
-            print("Temperature range: %.2f K -> %.2f K (%i steps)" % (self.__T_lower, self.__T_upper, self.__Np_T))
-            print("Pressure range: %.3e Pa -> %.3e Pa (%i steps)" % (self.__P_lower, self.__P_upper, self.__Np_P))
-        else:
-            print("Energy range: %.2e J/kg -> %.2e J/kg (%i steps)" % (self.__Energy_lower, self.__Energy_upper, self.__Np_T))
-            print("Density range: %.2f kg/m3 -> %.2f kg/m3 (%i steps)" % (self.__Rho_lower, self.__Rho_upper, self.__Np_P))
-        if self.__use_PT:
             print("Data generation grid: pressure-based")
         else:
             print("Data generation grid: density-based")
+        if self.__use_PT:
+            if self.__use_auto_range:
+                print("Temperature range: Auto (%i steps)" % self.__Np_T)
+                print("Pressure range: Auto (%i steps)" % self.__Np_P)
+            else:
+                print("Temperature range: %.2f K -> %.2f K (%i steps)" % (self.__T_lower, self.__T_upper, self.__Np_T))
+                print("Pressure range: %.3e Pa -> %.3e Pa (%i steps)" % (self.__P_lower, self.__P_upper, self.__Np_P))
+        else:
+            if self.__use_auto_range:
+                print("Energy range: Auto (%i steps)" % self.__Np_T)
+                print("Density range: Auto (%i steps)" % self.__Np_P)
+            else:
+                print("Energy range: %.2e J/kg -> %.2e J/kg (%i steps)" % (self.__Energy_lower, self.__Energy_upper, self.__Np_T))
+                print("Density range: %.2f kg/m3 -> %.2f kg/m3 (%i steps)" % (self.__Rho_lower, self.__Rho_upper, self.__Np_P))
         print("")
         print("State variables considered during physics-informed learning: "+", ".join((v for v in self._state_vars)))
         return 
@@ -172,7 +180,7 @@ class EntropicAIConfig(Config):
         fluid_string = "&".join(f for f in self.__fluid_names)
         self.__fluid_string=fluid_string
         try:
-            CoolProp.AbstractState("HEOS", fluid_string)
+            CoolProp.AbstractState(self.__EOS_type, fluid_string)
         except:
             raise Exception("Specified fluid name not found or mixture is not supported.")
         return 
@@ -220,6 +228,18 @@ class EntropicAIConfig(Config):
     
     def GetMoleFractions(self):
         return self.__fluid_mole_fractions.copy()
+    
+    def UseAutoRange(self, use_auto_range:bool=True):
+        """Automatically determine fluid data range based on available fluid properties.
+
+        :param use_auto_range: automatically set fluid data range, defaults to True
+        :type use_auto_range: bool, optional
+        """
+        self.__use_auto_range = use_auto_range
+        return 
+    
+    def GetAutoRange(self):
+        return self.__use_auto_range 
     
     def UsePTGrid(self, PT_grid:bool=DefaultSettings_NICFD.use_PT_grid):
         """Define fluid data grid in the pressure-temperature space. If not, the fluid data grid is defined in the density-energy space.
@@ -522,10 +542,10 @@ class EntropicAIConfig(Config):
 #---------------------------------------------------------------------------------------------#
 # Flamelet-Generated Manifold DataMiner configuration class
 #---------------------------------------------------------------------------------------------#
-class FlameletAIConfig(Config):
+class Config_FGM(Config):
     """
-    Define FlameletAIConfig class or load existing configuration. If `load_file` is set, the settings from an existing
-    is loaded. If no file name is provided, a new `FlameletAIConfig` class is created.
+    Define Config_FGM class or load existing configuration. If `load_file` is set, the settings from an existing
+    is loaded. If no file name is provided, a new `Config_FGM` class is created.
     
     :param load_file: path to file of configuration to be loaded.
     :type load_file: str
@@ -579,14 +599,21 @@ class FlameletAIConfig(Config):
 
     # MLP output groups and architecture information.
     __MLP_output_groups:list[list[str]] = None  # Output variables for each MLP.
-    __MLP_architectures:list[list[int]] = None  # Hidden layer architecture for each MLP.
-    __MLP_trainparams:list[list[float]] = None  # Training parameters and activation function information for each MLP.
-
+    
     __alpha_expo:list[float] = [DefaultSettings_FGM.init_learning_rate_expo]
     __lr_decay:list[float] = [DefaultSettings_FGM.learning_rate_decay]
     __batch_expo:list[float] = [DefaultSettings_FGM.batch_size_exponent]
     __NN:list[list[int]] = [DefaultSettings_FGM.hidden_layer_architecture]
     __activation_function:list[str] = [DefaultSettings_FGM.activation_function]
+
+    _scaler_function_name:list[str] = None
+    _scaler_function_vals_in:list[list[list[float]]] = None
+    _scaler_function_vals_out:list[list[list[float]]] = None
+    _train_vars:list[list[str]] = None
+    _control_vars:list[list[str]] = None
+    _MLP_weights:list[list[np.ndarray[float]]] = None
+    _MLP_biases:list[list[np.ndarray[float]]] = None
+
     # Table Generation Settings
 
     __Table_base_cell_size:float = None     # Table base cell size per table level.
@@ -602,7 +629,7 @@ class FlameletAIConfig(Config):
     __mixfrac_constant:float = None 
     __mixfrac_coeff_carrier:float = None 
 
-    __Le_avg_method = avg_Le_arythmic
+    __Le_avg_method = avg_Le_const
     __Le_const_sp:np.ndarray[float] = None 
     __custom_Le_av_set:bool = False 
 
@@ -617,9 +644,9 @@ class FlameletAIConfig(Config):
         if load_file:
             print("Loading configuration for flamelet generation")
             with open(load_file, "rb") as fid:
-                loaded_config:FlameletAIConfig = pickle.load(fid)
+                loaded_config:Config_FGM = pickle.load(fid)
             if loaded_config._config_type != self._config_type:
-                raise Exception("Improper configuration file for FlameletAI configuration.")
+                raise Exception("Improper configuration file for SU2 DataMiner FGM configuration.")
             self.__dict__ = loaded_config.__dict__.copy()
             print("Loaded configuration file with name " + loaded_config.GetConfigName())
         else:
@@ -629,7 +656,7 @@ class FlameletAIConfig(Config):
             self.SetHiddenLayerArchitecture(DefaultSettings_FGM.hidden_layer_architecture)
             self.SetControllingVariables(DefaultSettings_FGM.controlling_variables)
 
-            print("Generating empty flameletAI config")
+            print("Generating empty SU2 DataMiner configuration for FGM")
         
         self.__SynchronizeSettings()
 
@@ -653,6 +680,17 @@ class FlameletAIConfig(Config):
         # Re-set cantera solution.
         self.gas = ct.Solution(self.__reaction_mechanism)
         self.__species_in_mixture = self.gas.species_names
+        if any(f not in self.__species_in_mixture for f in self.__fuel_species):
+            default_fuels = ["CH4","H2"]
+            self.__fuel_species = []
+            self.__fuel_weights = []
+            for f in default_fuels:
+                if f in self.__species_in_mixture:
+                    self.__fuel_species.append(f)
+                    self.__fuel_weights.append(1.0)
+            fac_weights = sum(self.__fuel_weights)
+            for iF in range(len(self.__fuel_weights)):
+                self.__fuel_weights[iF] /= fac_weights
 
         n_fuel = len(self.__fuel_species)
         n_ox = len(self.__oxidizer_species)
@@ -675,24 +713,25 @@ class FlameletAIConfig(Config):
             pv_sp_default, pv_w_default = self.SetDefaultProgressVariable()
             self.SetProgressVariableDefinition(pv_sp_default, pv_w_default)
             self.__custom_pv_set = False
-        #print(self.__pv_definition, self.__pv_weights)
+
         if not self.__custom_Le_av_set:
             self.SetAverageLewisNumbers()
 
         return 
     
-    # def SetConstSpecieLewisNumber(self, sp_name:str, Lewis_number:float):
-    #     self.__Le_const_sp[self.gas.species_index(sp_name)] = Lewis_number 
-    #     return 
-    
     def GetConstSpecieLewisNumbers(self):
+        """Retrieve constant species Lewis numbers used to calculate the preferential diffusion scalars.
+
+        :return: array with species Lewis number values
+        :rtype: np.ndarray[float]
+        """
         return self.__Le_const_sp 
     
     def PrintBanner(self):
-        """Print banner visualizing FlameletAI configuration settings."""
+        """Print banner visualizing the SU2 DataMiner configuration settings."""
         super().PrintBanner()
         
-        print("flameletAIConfiguration: " + self._config_name)
+        print("Config_FGMuration: " + self._config_name)
         print("")
         print("Flamelet generation settings:")
         print("Flamelet data output directory: " + self._output_dir)
@@ -889,6 +928,7 @@ class FlameletAIConfig(Config):
         :rtype: list[str]
         """
         return self.__fuel_species
+    
     def GetFuelWeights(self):
         """
         Get a list of the molar fractions of the fuel species.
@@ -899,6 +939,11 @@ class FlameletAIConfig(Config):
         return self.__fuel_weights
     
     def GetFuelString(self):
+        """Retrieve the Cantera input string of the fuel definition
+
+        :return: Cantera input string defining the fuel
+        :rtype: str
+        """
         return self.__fuel_string 
     
     def GetOxidizerDefinition(self):
@@ -920,6 +965,11 @@ class FlameletAIConfig(Config):
         return self.__oxidizer_weights
 
     def GetOxidizerString(self):
+        """Retrieve the Cantera input string of the oxidizer definition
+
+        :return: Cantera input string defining the oxidizer
+        :rtype: str
+        """
         return self.__oxidizer_string
     
     def GetMixtureSpecies(self):
@@ -1080,7 +1130,8 @@ class FlameletAIConfig(Config):
             raise Exception("Flamelets should be generated for at least one mixture status value.")
         else:
             self.__Np_mix_unb = input 
-
+        return 
+    
     def GetNpMix(self):
         """
         Get the number of divisions between the lean and rich mixture status for flamelet generation.
@@ -1164,7 +1215,7 @@ class FlameletAIConfig(Config):
     
     def GetMixtureStatus(self):
         """
-        Get the mixture status definition of the current FlameletAIConfig class.
+        Get the mixture status definition of the current Config_FGM class.
 
         :return: mixture status definition (`True` for mixture fraction, `False` for equivalence ratio)
         :rtype: bool
@@ -1282,6 +1333,8 @@ class FlameletAIConfig(Config):
         """
         if (len(pv_species) != len(pv_weights)):
             raise Exception("Number of species and weights of the progress variable definition should be equal.")
+        if any(sp not in self.__species_in_mixture for sp in pv_species):
+            raise Exception("Not all progress variable species are supported by reaction mechanism.")
         else:
             self.__pv_definition = pv_species.copy()
             self.__pv_weights = pv_weights.copy()
@@ -1289,6 +1342,8 @@ class FlameletAIConfig(Config):
         return 
     
     def ResetProgressVariableDefinition(self):
+        """Reset progress variable definition to default (weighted reactants and major products).
+        """
         self.__pv_definition = []
         self.__pv_weights = []
         self.__custom_pv_set = False 
@@ -1501,7 +1556,7 @@ class FlameletAIConfig(Config):
         """
         return self.__preferential_diffusion
     
-    def SetAveragingMethod(self, avg_method=avg_Le_arythmic):
+    def SetAveragingMethod(self, avg_method=avg_Le_const):
         self.__Le_avg_method = avg_method 
         return 
     
@@ -1618,8 +1673,6 @@ class FlameletAIConfig(Config):
         :rtype: mixfrac_unb: float
         """
 
-        # if equivalence_ratio < 0:
-        #     raise Exception("Equivalence ratio should be positive.")
         if temperature < 200:
             raise Exception("Temperature should be above 200 degrees Kelvin.")
         
@@ -1919,6 +1972,99 @@ class FlameletAIConfig(Config):
     
     def GetHiddenLayerArchitecture(self, i_group:int=0):
         return self.__NN[i_group]
+    
+    def GetWeightsBiases(self, i_group:int=0):
+        return self._MLP_weights[i_group], self._MLP_biases[i_group]
+    
+    def SetWeights(self, weights: list[np.ndarray[float]], i_group:int=0):
+        self._MLP_weights[i_group] = []
+        for w in weights:
+            self._MLP_weights[i_group].append(w)
+        return 
+    
+    def SetBiases(self, biases:list[np.ndarray[float]], i_group:int=0):
+        self._MLP_biases[i_group] = []
+        for w in biases:
+            self._MLP_biases[i_group].append(w)
+        return 
+    
+    def UpdateMLPHyperParams(self, trainer):
+        group_idx = trainer.GetOutputGroup()
+        train_vars = trainer.GetTrainVars().copy()
+        control_vars = trainer.GetControlVars().copy()
+        scaler_function_name, scaler_function_vals_in,scaler_function_vals_out = trainer.GetScalerFunctionParams()
+        MLP_weights = trainer.GetWeights().copy()
+        MLP_biases = trainer.GetBiases().copy()
+
+        if not self._MLP_weights:
+            self._train_vars = []
+            self._control_vars = []
+            self._scaler_function_name = []
+            self._scaler_function_vals_in = []
+            self._scaler_function_vals_out = []
+            self._MLP_weights = []
+            self._MLP_biases = []
+        if (group_idx+1) > len(self._MLP_weights):
+            self._train_vars.append(train_vars)
+            self._control_vars.append(control_vars)
+            self._scaler_function_name.append(scaler_function_name)
+            self._scaler_function_vals_in.append(scaler_function_vals_in)
+            self._scaler_function_vals_out.append(scaler_function_vals_out)
+            self._MLP_weights.append(MLP_weights)
+            self._MLP_biases.append(MLP_biases)
+        else:
+            self._train_vars[group_idx] = train_vars
+            self._control_vars[group_idx] = control_vars 
+            self._scaler_function_name[group_idx] = scaler_function_name
+            self._scaler_function_vals_in[group_idx] = scaler_function_vals_in 
+            self._scaler_function_vals_out[group_idx] = scaler_function_vals_out
+            self._MLP_weights[group_idx] = MLP_weights
+            self._MLP_biases[group_idx] = MLP_biases 
+        return 
+    
+    def WriteSU2MLP(self, file_name_out:str, group_idx:int=-1):
+        if group_idx == -1:
+            for iGroup in range(self.GetNMLPOutputGroups()):
+                write_SU2_MLP(file_name_out+"_"+str(iGroup+1),\
+                             weights=self._MLP_weights[iGroup],\
+                             biases=self._MLP_biases[iGroup],\
+                             activation_function_name=self.__activation_function[iGroup],\
+                             train_vars=self._train_vars[iGroup],\
+                             controlling_vars=self._control_vars[iGroup],\
+                             scaler_function=self._scaler_function_name[iGroup],\
+                             scaler_function_vals_in=self._scaler_function_vals_in[iGroup],\
+                             scaler_function_vals_out=self._scaler_function_vals_out[iGroup],\
+                             additional_header_info_function=self.__write_progress_variable_definition)
+        else:
+            iGroup = group_idx
+            write_SU2_MLP(file_name_out+"_"+str(iGroup+1),\
+                             weights=self._MLP_weights[iGroup],\
+                             biases=self._MLP_biases[iGroup],\
+                             activation_function_name=self.__activation_function[iGroup],\
+                             train_vars=self._train_vars[iGroup],\
+                             controlling_vars=self._control_vars[iGroup],\
+                             scaler_function=self._scaler_function_name[iGroup],\
+                             scaler_function_vals_in=self._scaler_function_vals_in[iGroup],\
+                             scaler_function_vals_out=self._scaler_function_vals_out[iGroup],\
+                             additional_header_info_function=self.__write_progress_variable_definition)
+        self.__writeNULLMLP(file_name_out)
+        return
+    def __writeNULLMLP(self, header):
+        weights = [np.zeros([len(self._control_vars[0]),len(self._control_vars[0])]),\
+                   np.zeros([len(self._control_vars[0]),1])]
+        biases = [np.zeros(len(self._control_vars[0])), np.zeros(1)]
+        activation_function="linear"
+        train_vars=["NULL"]
+        control_vars=self._control_vars[0]
+        scaler_function="robust"
+        scaler_function_vals_in = self._scaler_function_vals_in[0]
+        scaler_function_vals_out = np.zeros([1,2])
+        write_SU2_MLP(header+"_NULL",weights=weights,biases=biases,activation_function_name=activation_function,controlling_vars=control_vars,train_vars=train_vars,scaler_function=scaler_function,scaler_function_vals_in=scaler_function_vals_in,scaler_function_vals_out=scaler_function_vals_out,additional_header_info_function=self.__write_progress_variable_definition)
+        return 
+    def __write_progress_variable_definition(self, fid):
+        fid.write("Progress variable definition: " + "+".join(("%+.6e*%s" % (w, s)) for w, s in zip(self.__pv_weights, self.__pv_definition)))
+        fid.write("\n\n")
+        return 
     
     def SaveConfig(self):
         """

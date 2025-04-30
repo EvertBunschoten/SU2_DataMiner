@@ -16,7 +16,7 @@ from vtkmodules.vtkRenderingCore import (
 from vtkmodules.vtkRenderingAnnotation import vtkCubeAxesActor, vtkScalarBarActor
 from vtkmodules.vtkInteractionWidgets import vtkOrientationMarkerWidget, vtkScalarBarWidget
 from Common.Properties import DefaultSettings_FGM
-from Common.DataDrivenConfig import FlameletAIConfig 
+from Common.DataDrivenConfig import Config_FGM 
 
 #from .pipeline import PipelineManager
 from trame.assets.local import LocalFileManager

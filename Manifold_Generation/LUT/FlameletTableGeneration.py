@@ -18,7 +18,7 @@
 #                                                                                             |
 # Description:                                                                                |
 #   Table generator class for generating SU2-supported tables of flamelet data.               |
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -28,7 +28,7 @@ from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt 
 from tqdm import tqdm
 import sys,os
-from Common.DataDrivenConfig import FlameletAIConfig, Config
+from Common.DataDrivenConfig import Config_FGM, Config
 from Common.CommonMethods import GetReferenceData 
 from Common.Properties import DefaultSettings_FGM
 import cantera as ct
@@ -182,7 +182,7 @@ class SU2TableGenerator_Base:
     
 class SU2TableGenerator:
 
-    _Config:FlameletAIConfig = None # FlameletAIConfig class from which to read settings.
+    _Config:Config_FGM = None # Config_FGM class from which to read settings.
     _savedir:str
 
     _mixfrac_min:float = None     # Minimum mixture fraction value of the flamelet data.
@@ -227,12 +227,12 @@ class SU2TableGenerator:
 
     _preprocessed:bool = False 
 
-    def __init__(self, Config:FlameletAIConfig, load_file:str=None, n_near:int=None, p_fac:int=None):
+    def __init__(self, Config:Config_FGM, load_file:str=None, n_near:int=None, p_fac:int=None):
         """
         Initiate table generator class.
 
-        :param Config: FlameletAIConfig object.
-        :type Config: FlameletAIConfig
+        :param Config: Config_FGM object.
+        :type Config: Config_FGM
         """
 
         if n_near and p_fac:
@@ -553,7 +553,7 @@ class SU2TableGenerator:
     
     def WriteTableFile(self, output_filepath:str=None):
         """
-        Save the table data and connectivity as a Dragon library file. If no file name is provided, the table file will be named according to the FlameletAIConfig class name.
+        Save the table data and connectivity as a Dragon library file. If no file name is provided, the table file will be named according to the Config_FGM class name.
 
         :param output_filepath: optional output filepath for table file.
         :type output_filepath: str
@@ -886,7 +886,7 @@ class SU2TableGenerator:
 if __name__ == "__main__":
     config_input_file = sys.argv[-2]
     N_cores = int(sys.argv[-1])
-    Config = FlameletAIConfig(config_input_file)
+    Config = Config_FGM(config_input_file)
     T = SU2TableGenerator(Config)
     if N_cores > 1:
         T.SetNCores(N_cores)

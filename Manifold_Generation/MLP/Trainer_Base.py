@@ -19,7 +19,7 @@
 # Description:                                                                                |
 #   Base class for the various MLP trainer types and MLP evaluator class.                     |
 #                                                                                             |
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -44,27 +44,31 @@ from tensorflow import keras
 import matplotlib.pyplot as plt 
 from sklearn.metrics import r2_score
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
-from keras.initializers import HeUniform
+from keras.initializers import HeUniform,RandomUniform
 import csv 
 
 from Common.Config_base import Config
 from Common.Properties import DefaultProperties 
-from Common.CommonMethods import GetReferenceData
+from Common.CommonMethods import GetReferenceData, write_SU2_MLP
 
 # Activation function options
-activation_function_names_options:list[str] = ["linear","elu","relu","tanh","exponential","gelu"]
+activation_function_names_options:list[str] = ["linear","elu","relu","tanh","exponential","gelu","sigmoid", "swish"]
 activation_function_options = [tf.keras.activations.linear,
                             tf.keras.activations.elu,\
                             tf.keras.activations.relu,\
                             tf.keras.activations.tanh,\
                             tf.keras.activations.exponential,\
-                            tf.keras.activations.gelu]
+                            tf.keras.activations.gelu,\
+                            tf.keras.activations.sigmoid,\
+                            tf.keras.activations.swish]
 
 scaler_functions = {"robust":RobustScaler,\
                     "standard":StandardScaler,\
                     "minmax":MinMaxScaler}
 class MLPTrainer:
     # Base class for flamelet MLP trainer
+    _dt = tf.float32
+    _dt_np = np.float32 
 
     _n_epochs:int = DefaultProperties.N_epochs      # Number of epochs to train for.
     _alpha_expo:float = DefaultProperties.init_learning_rate_expo  # Alpha training exponent parameter.
@@ -131,10 +135,11 @@ class MLPTrainer:
     history_plot_axes = None
     history_epochs = []
     history_loss = []
-    history_val_loss = []
+    val_loss_history = []
+    history_learningrate = []
 
     _stagnation_tolerance:float = 1e-11 
-    _stagnation_patience:int = 100
+    _stagnation_patience:int = 200
     _verbose:int = 1
 
     callback_every:int = 20 
@@ -143,6 +148,12 @@ class MLPTrainer:
     scaler_function_x = scaler_functions[scaler_function_name]()
     scaler_function_y = scaler_functions[scaler_function_name]()
 
+    weights_initializer:str = "he_uniform"
+
+    _loaded_custom_weights:bool = False
+    _custom_weights:list[np.ndarray[float]] = None 
+    _custom_biases:list[np.ndarray[float]] = None 
+    
     def __init__(self):
         """Initiate MLP trainer object.
         """
@@ -188,13 +199,17 @@ class MLPTrainer:
         self._mlp_output_file_name = mlp_fileheader
         return 
     
-    def SetScaler(self, scaler_function:str="robust"):
+    def SetScaler(self, scaler_function:str="robust",scale_x:float=None,scale_y:float=None,offset_x:float=None,offset_y:float=None):
         if scaler_function not in scaler_functions.keys():
             raise Exception("Train data scaling function should be one of the following: "+",".join(f for f in scaler_functions.keys()))
         self.scaler_function_name = scaler_function
         self.scaler_function_x = scaler_functions[scaler_function]()
         self.scaler_function_y = scaler_functions[scaler_function]()
         return
+    
+    def SetInitializer(self, initializer_function:str="he_uniform"):
+        self.weights_initializer = initializer_function
+        return 
     
     def SetSaveDir(self, save_dir_in:str):
         """Define directory in which trained MLP information is saved.
@@ -347,21 +362,6 @@ class MLPTrainer:
                             does not equal the MLP input dimension ("+str(len(self._controlling_vars))+")")
         return np.zeros(1)
     
-    def LoadWeights(self, weights_in:list[np.ndarray], biases_in:list[np.ndarray]):
-        """Set custom weights and biases upon initializing the network.
-
-        :param weights_in: list with hidden layer weight matrices.
-        :type weights_in: list[np.ndarray]
-        :param biases_in: list with hidden layer bias arrays.
-        :type biases_in: list[np.ndarray]
-        """
-        self._weights = []
-        self._biases = []
-        for w, b in zip(weights_in, biases_in):
-            self._weights.append(tf.Variable(w, dtype=tf.float32))
-            self._biases.append(tf.Variable(b,dtype=tf.float32))
-        return 
-    
     def SaveWeights(self):
         """Save the weights of the current network as numpy arrays.
         """
@@ -371,7 +371,10 @@ class MLPTrainer:
         return
     
     def SetDecaySteps(self):
-        self._decay_steps = int(0.01*self._n_epochs * float(self._Np_train) / (2**self._batch_expo))
+        """Set the number of steps in the exponential decay algorithm. The number of steps scale are proportioned based on the number of epochs, 
+        and training data size and mini batch size.
+        """
+        self._decay_steps = int(1e-3 * self._n_epochs * self._Np_train / (2**self._batch_expo))
         return 
     
     def RestartTraining(self):
@@ -405,7 +408,7 @@ class MLPTrainer:
         :return: list of weight arrays.
         :rtype: list[np.ndarray]
         """
-        return self._weights
+        return [w.numpy() for w in self._weights]
     
     def GetBiases(self):
         """Get the trainable biases from the network.
@@ -413,7 +416,7 @@ class MLPTrainer:
         :return: list of bias arrays.
         :rtype: list[np.ndarray]
         """
-        return self._biases 
+        return [b.numpy() for b in self._biases] 
     
     def PlotR2Data(self):
         """Plot the MLP prediction in the form of R2-plots w.r.t. the reference data, and along each of the 
@@ -421,9 +424,12 @@ class MLPTrainer:
         """
 
         # Evaluate the MLP on the input test set data.
-        pred_data_norm = self.EvaluateMLP(self._X_test_norm)
+        X_test = self.scaler_function_x.inverse_transform(self._X_test_norm)
+        pred_data_dim = self.EvaluateMLP(X_test)
+        pred_data_norm = self.scaler_function_y.transform(self.TransformData(pred_data_dim))
         ref_data_norm = self._Y_test_norm 
 
+        pred_data_norm[np.isnan(pred_data_norm)] = 10.0
         # Generate and save R2-plots for each of the output parameters.
         fig, axs = plt.subplots(nrows=len(self._train_vars), ncols=1,figsize=[5,5*len(self._train_vars)])
         for iVar in range(len(self._train_vars)):
@@ -458,6 +464,12 @@ class MLPTrainer:
         fig.savefig(self._save_dir + "/Model_"+str(self._model_index) + "/Predict_along_CVs."+self._figformat, format=self._figformat, bbox_inches='tight')
         plt.close(fig)
         return 
+    
+    def TransformData(self, Y_untransformed):
+        return Y_untransformed
+    
+    def TransformData_Inv(self, Y_transformed):
+        return Y_transformed 
     
     def GetTrainData(self):
         """
@@ -510,14 +522,15 @@ class MLPTrainer:
             print("Reading train, test, and validation data...")
         
         if is_nullMLP:
-            X_full, _ = GetReferenceData(MLPData_filepath + "_full.csv", x_vars, [])
+            X_full, _ = GetReferenceData(MLPData_filepath + "_full.csv", x_vars, [],dtype=self._dt_np)
             Y_full = np.zeros(np.shape(X_full)[0])
         else:
-            X_full, Y_full = GetReferenceData(MLPData_filepath + "_full.csv", x_vars, y_vars)
-        
+            X_full, Y_full = GetReferenceData(MLPData_filepath + "_full.csv", x_vars, y_vars,dtype=self._dt_np)
+        Y_full = self.TransformData(Y_full)
+
         scaler_x.fit(X_full)
         scaler_y.fit(Y_full)
-        
+
         # Free up memory
         del X_full
         del Y_full
@@ -525,12 +538,15 @@ class MLPTrainer:
         if is_nullMLP:
             return 
         else:
-            X_train, Y_train = GetReferenceData(MLPData_filepath + "_train.csv", x_vars, y_vars)
-            X_test, Y_test = GetReferenceData(MLPData_filepath + "_test.csv", x_vars, y_vars)
-            X_val, Y_val = GetReferenceData(MLPData_filepath + "_val.csv",x_vars, y_vars)
+            X_train, Y_train = GetReferenceData(MLPData_filepath + "_train.csv", x_vars, y_vars,dtype=self._dt_np)
+            X_test, Y_test = GetReferenceData(MLPData_filepath + "_test.csv", x_vars, y_vars,dtype=self._dt_np)
+            X_val, Y_val = GetReferenceData(MLPData_filepath + "_val.csv",x_vars, y_vars,dtype=self._dt_np)
             if self._verbose > 0:
                 print("Done!")
 
+            Y_train = self.TransformData(Y_train)
+            Y_test = self.TransformData(Y_test)
+            Y_val = self.TransformData(Y_val)
 
             # Normalize train, test, and validation controlling variables
             X_train_norm = scaler_x.transform(X_train)
@@ -543,97 +559,39 @@ class MLPTrainer:
             Y_val_norm = scaler_y.transform(Y_val)
 
             return X_train_norm, X_test_norm, X_val_norm, Y_train_norm, Y_test_norm, Y_val_norm
-        
+    
+    def GetScalerFunctionParams(self):
+        if self.scaler_function_name == "minmax":
+            scaler_function_vals_in = [[mi,ma] for mi, ma in zip(self.scaler_function_x.data_min_, self.scaler_function_x.data_max_)]
+            scaler_function_vals_out = [[mi,ma] for mi, ma in zip(self.scaler_function_y.data_min_, self.scaler_function_y.data_max_)]
+        else:
+            scaler_function_vals_in = [[mi,ma] for mi, ma in zip(self._X_offset, self._X_scale)]
+            scaler_function_vals_out = [[mi,ma] for mi, ma in zip(self._Y_offset, self._Y_scale)]
+        return self.scaler_function_name, scaler_function_vals_in, scaler_function_vals_out
+    
     def write_SU2_MLP(self, file_out:str):
         """Write the network to ASCII format readable by the MLPCpp module in SU2.
 
         :param file_out: MLP output path and file name.
         :type file_out: str
         """
-
-        n_layers = len(self._weights)+1
-
-        # Select trimmed weight matrices for output.
-        weights_for_output = self._weights
-        biases_for_output = self._biases
-
-        # Opening output file
-        fid = open(file_out+'.mlp', 'w+')
-        fid.write("<header>\n\n")
-        
-        self.add_additional_header_info(fid)
-        # Writing number of neurons per layer
-        fid.write('[number of layers]\n%i\n\n' % n_layers)
-        fid.write('[neurons per layer]\n')
-        activation_functions = []
-
-        for iLayer in range(n_layers-1):
-            if iLayer == 0:
-                activation_functions.append('linear')
-            else:
-                activation_functions.append(self._activation_function_name)
-            n_neurons = np.shape(weights_for_output[iLayer])[0]
-            fid.write('%i\n' % n_neurons)
-        fid.write('%i\n' % len(self._train_vars))
-
-        activation_functions.append('linear')
-
-        # Writing the activation function for each layer
-        fid.write('\n[activation function]\n')
-        for iLayer in range(n_layers):
-            fid.write(activation_functions[iLayer] + '\n')
-
-        # Writing the input and output names
-        fid.write('\n[input names]\n')
-        for input in self._controlling_vars:
-                fid.write(input + '\n')
-        
-        fid.write('\n[input regularization method]\n%s\n' % self.scaler_function_name)
-
-        fid.write('\n[input normalization]\n')
-        for i in range(len(self._controlling_vars)):
-            if self.scaler_function_name == "minmax":
-                fid.write('%+.16e\t%+.16e\n' % (self.scaler_function_x.data_min_[i], self.scaler_function_x.data_max_[i]))
-            else:
-                fid.write('%+.16e\t%+.16e\n' % (self._X_offset[i], self._X_scale[i]))
-
-        fid.write('\n[output names]\n')
-        for output in self._train_vars:
-            fid.write(output+'\n')
-        
-        fid.write('\n[output regularization method]\n%s\n' % self.scaler_function_name)
-
-        fid.write('\n[output normalization]\n')
-        for i in range(len(self._train_vars)):
-            if self.scaler_function_name == "minmax":
-                fid.write('%+.16e\t%+.16e\n' % (self.scaler_function_y.data_min_[i], self.scaler_function_y.data_max_[i]))
-            else:
-                fid.write('%+.16e\t%+.16e\n' % (self._Y_offset[i], self._Y_scale[i]))
-
-        fid.write("\n</header>\n")
-        # Writing the weights of each layer
-        fid.write('\n[weights per layer]\n')
-        for W in weights_for_output:
-            fid.write("<layer>\n")
-            for i in range(np.shape(W)[0]):
-                fid.write("\t".join("%+.16e" % float(w) for w in W[i, :]) + "\n")
-            fid.write("</layer>\n")
-        
-        # Writing the biases of each layer
-        fid.write('\n[biases per layer]\n')
-        
-        # Input layer biases are set to zero
-        fid.write("\t".join("%+.16e" % 0 for _ in self._controlling_vars) + "\n")
-
-        #for B in self.biases:
-        for B in biases_for_output:
-            try:
-                fid.write("\t".join("%+.16e" % float(b) for b in B.numpy()) + "\n")
-            except:
-                fid.write("\t".join("%+.16e" % float(B.numpy())) + "\n")
-
-        fid.close()
-        return 
+        weights = [w.numpy() for w in self._weights]
+        biases = [b.numpy() for b in self._biases]
+        if self.scaler_function_name == "minmax":
+            scaler_function_vals_in = [[mi,ma] for mi, ma in zip(self.scaler_function_x.data_min_, self.scaler_function_x.data_max_)]
+            scaler_function_vals_out = [[mi,ma] for mi, ma in zip(self.scaler_function_y.data_min_, self.scaler_function_y.data_max_)]
+        else:
+            scaler_function_vals_in = [[mi,ma] for mi, ma in zip(self._X_offset, self._X_scale)]
+            scaler_function_vals_out = [[mi,ma] for mi, ma in zip(self._Y_offset, self._Y_scale)]
+        return write_SU2_MLP(file_out, weights=weights,\
+                                       biases=biases, \
+                                       activation_function_name=self._activation_function_name,\
+                                       train_vars=self._train_vars,\
+                                       controlling_vars=self._controlling_vars,\
+                                       scaler_function=self.scaler_function_name,\
+                                       scaler_function_vals_in=scaler_function_vals_in,\
+                                       scaler_function_vals_out=scaler_function_vals_out,\
+                                       additional_header_info_function=self.add_additional_header_info)
     
     def add_additional_header_info(self, fid):
         return 
@@ -676,14 +634,34 @@ class MLPTrainer:
         return 
     
     def Plot_and_Save_History(self):
+        self.PlotLearningRate()
         return
+    
+    def PlotLearningRate(self):
+        fig = plt.figure(figsize=[10,10])
+        ax = plt.axes()
+        ax.plot(self.history_learningrate,'k')
+        ax.grid()
+        ax.set_yscale('log')
+        ax.set_xlabel("Epoch",fontsize=20)
+        ax.set_ylabel("Learning rate [-]",fontsize=20)
+        ax.tick_params(which='both',labelsize=18)
+        fig.savefig(self._save_dir +"/Model_"+str(self._model_index) + "/LearningRate."+self._figformat,format=self._figformat, bbox_inches='tight')
+        plt.close(fig)
+        return 
+    
+    def SetWeightsBiases(self, custom_weights:list[np.ndarray[float]], custom_biases:list[np.ndarray[float]]):
+        self._custom_weights = custom_weights.copy()
+        self._custom_biases = custom_biases.copy()
+        self._loaded_custom_weights = True
+        return 
     
 class TensorFlowFit(MLPTrainer):
     _model:keras.models.Sequential
     history_epochs = []
     history_loss = []
-    history_val_loss = []
-
+    val_loss_history = []
+    history_learningrate = []
     def __init__(self):
         MLPTrainer.__init__(self)
         return 
@@ -704,11 +682,18 @@ class TensorFlowFit(MLPTrainer):
             # Add hidden layersSetTrainFileHeader
             iLayer = 0
             while iLayer < len(self._hidden_layers):
-                self._model.add(keras.layers.Dense(self._hidden_layers[iLayer], activation=self._activation_function_name, kernel_initializer="he_uniform"))
+                self._model.add(keras.layers.Dense(self._hidden_layers[iLayer], activation=self._activation_function_name, kernel_initializer=self.weights_initializer))
                 iLayer += 1
             
             # Add output layer
             self._model.add(keras.layers.Dense(len(self._train_vars), activation='linear'))
+
+            if self._loaded_custom_weights:
+                weights_and_biases = []
+                for w,b in zip(self._custom_weights,self._custom_biases):
+                    weights_and_biases.append(w)
+                    weights_and_biases.append(b)
+                self._model.set_weights(weights_and_biases)
 
             # Define learning rate schedule and optimizer
             self.SetDecaySteps()
@@ -721,9 +706,12 @@ class TensorFlowFit(MLPTrainer):
             self._model.compile(optimizer=opt, loss="mean_squared_error", metrics=["mape"])
         return 
     
-    def EvaluateMLP(self,input_data_norm):
+    def EvaluateMLP(self,input_data_dim):
+        input_data_norm = self.scaler_function_x.transform(input_data_dim)
         pred_data_norm = self._model.predict(input_data_norm, verbose=0)
-        return pred_data_norm
+        pred_data_dim = self.scaler_function_y.inverse_transform(pred_data_norm)
+        pred_data_dim_out = self.TransformData_Inv(pred_data_dim)
+        return pred_data_dim_out
     
     # Initialize MLP training 
     def Train_MLP(self):
@@ -732,7 +720,7 @@ class TensorFlowFit(MLPTrainer):
 
         self.history_epochs = []
         self.history_loss=[]
-        self.history_val_loss=[]
+        self.val_loss_history=[]
         
         # Read train,test, and validation data.
         self.GetTrainData()
@@ -794,12 +782,12 @@ class TensorFlowFit(MLPTrainer):
         with open(self._save_dir + "/Model_"+str(self._model_index)+"/TrainingHistory.csv", "w+") as fid:
             fid.write("epoch,loss,validation_loss\n")
             csvWriter = csv.writer(fid, delimiter=',')
-            csvWriter.writerows(np.array([self.history_epochs, self.history_loss, self.history_val_loss]).T)
+            csvWriter.writerows(np.array([self.history_epochs, self.history_loss, self.val_loss_history]).T)
 
         fig = plt.figure(figsize=[10,10])
         ax = plt.axes()
         ax.plot(self.history_loss, 'b', linewidth=2,label=r'Training score')
-        ax.plot(self.history_val_loss, 'r', linewidth=2,label=r"Validation score")
+        ax.plot(self.val_loss_history, 'r', linewidth=2,label=r"Validation score")
         ax.grid()
         ax.set_yscale('log')
         ax.legend(fontsize=20)
@@ -809,7 +797,8 @@ class TensorFlowFit(MLPTrainer):
         ax.tick_params(axis='both', which='major', labelsize=18)
         fig.savefig(self._save_dir + "/Model_"+str(self._model_index)+ "/History_Plot_Direct."+self._figformat, format=self._figformat, bbox_inches='tight')
         plt.close(fig)
-        return 
+        return super().Plot_and_Save_History()
+    
         
     class PlotCallback(tf.keras.callbacks.Callback):
             FitClass = None
@@ -819,7 +808,7 @@ class TensorFlowFit(MLPTrainer):
             def on_epoch_end(self, epoch, logs=None):
                 self.FitClass.history_epochs.append(epoch)
                 self.FitClass.history_loss.append(logs["loss"])
-                self.FitClass.history_val_loss.append(logs["val_loss"])
+                self.FitClass.val_loss_history.append(logs["val_loss"])
                 
                 if (epoch+1) % self.FitClass.callback_every == 0:
                     self.FitClass.CustomCallback()
@@ -841,7 +830,8 @@ class CustomTrainer(MLPTrainer):
     __keep_training:bool = True 
     __stagnation_iter:int = 0
 
-    _regularization_param:float = 1e-4
+    _include_regularization:bool = False
+    _regularization_param:float = 1e-5
 
     def __init__(self):
         MLPTrainer.__init__(self)
@@ -856,7 +846,7 @@ class CustomTrainer(MLPTrainer):
 
         self._weights = []
         for W in weights_input:
-            self._weights.append(tf.Variable(W, self._dt))
+            self._weights.append(tf.Variable(tf.cast(W, self._dt), self._dt))
         return 
     
     def SetBiases(self, biases_input:list[np.ndarray]):
@@ -868,7 +858,7 @@ class CustomTrainer(MLPTrainer):
 
         self._biases = []
         for b in biases_input:
-            self._biases.append(tf.Variable(b, self._dt))
+            self._biases.append(tf.Variable(tf.cast(b,self._dt), self._dt))
         return 
     
     def InitializeWeights_and_Biases(self):
@@ -883,24 +873,22 @@ class CustomTrainer(MLPTrainer):
             NN.append(N)
         NN.append(len(self._train_vars))
 
-        initializer = HeUniform()
-        for i in range(len(NN)-1):
-            self._weights.append(tf.Variable(initializer(shape=(NN[i],NN[i+1])),self._dt))
-            self._biases.append(tf.Variable(initializer(shape=(NN[i+1],)),self._dt))             
+        if self.weights_initializer == "he_uniform":
+            initializer = HeUniform()
+        elif self.weights_initializer == "random_uniform":
+            initializer = RandomUniform()
+        if self._loaded_custom_weights:
+            for i in range(len(self._custom_weights)):
+                if self._loaded_custom_weights:
+                    self._weights.append(tf.Variable(tf.cast(self._custom_weights[i], self._dt),self._dt))
+                    self._biases.append(tf.Variable(tf.cast(self._custom_biases[i], self._dt),self._dt))
+        else:     
+            for i in range(len(NN)-1):
+                self._weights.append(tf.Variable(tf.cast((initializer(shape=(NN[i],NN[i+1]))),self._dt),self._dt))
+                self._biases.append(tf.Variable(tf.cast((initializer(shape=(NN[i+1],))),self._dt),self._dt))             
             
         return 
     
-
-    def LoadWeights(self):
-        """Load weights from saved numpy arrays.
-        """
-
-        for i in range(len(self._weights)):
-            loaded_W = np.load(self._save_dir + "/Model_"+str(self._model_index) + "/W_"+self._train_name+"_"+str(i)+".npy", allow_pickle=True)
-            loaded_b = np.load(self._save_dir + "/Model_"+str(self._model_index) + "/b_"+self._train_name+"_"+str(i)+".npy", allow_pickle=True)
-            self._weights[i] = tf.Variable(loaded_W, self._dt)
-            self._biases[i]= tf.Variable(loaded_b, self._dt)
-        return 
     
     @tf.function
     def CollectVariables(self):
@@ -942,7 +930,7 @@ class CustomTrainer(MLPTrainer):
         Y = self.ComputeLayerInput(Y, w[-1], b[-1])
         return Y 
     
-    def EvaluateMLP(self, input_data_norm:np.ndarray):
+    def EvaluateMLP(self, input_data_dim:np.ndarray):
         """Evaluate MLP for a given set of normalized input data.
 
         :param input_data_norm: array of normalized controlling variable data.
@@ -951,11 +939,15 @@ class CustomTrainer(MLPTrainer):
         :return: MLP output data for the given inputs.
         :rtype: np.ndarray
         """
-        if np.shape(input_data_norm)[1] != len(self._controlling_vars):
-            raise Exception("Number of input variables ("+str(np.shape(input_data_norm)[1]) + ") \
+        if np.shape(input_data_dim)[1] != len(self._controlling_vars):
+            raise Exception("Number of input variables ("+str(np.shape(input_data_dim)[1]) + ") \
                             does not equal the MLP input dimension ("+str(len(self._controlling_vars))+")")
-        input_data_tf = tf.constant(input_data_norm, tf.float32)
-        return self._MLP_Evaluation(input_data_tf).numpy()
+        input_data_norm = self.scaler_function_x.transform(input_data_dim)
+        input_data_tf = tf.constant(input_data_norm, self._dt)
+        output_data_norm = self._MLP_Evaluation(input_data_tf).numpy()
+        output_data_dim = self.scaler_function_y.inverse_transform(output_data_norm)
+        output_data_dim_transformed = self.TransformData_Inv(output_data_dim)
+        return output_data_dim_transformed
     
     @tf.function
     def mean_square_error(self, y_true, y_pred):
@@ -964,12 +956,15 @@ class CustomTrainer(MLPTrainer):
     @tf.function
     def Compute_Direct_Error(self, x_norm:tf.constant, y_label_norm:tf.constant):
         y_pred_norm = self._MLP_Evaluation(x_norm)
-        return self.mean_square_error(y_label_norm, y_pred_norm)
+        return tf.reduce_mean(tf.pow(y_pred_norm - y_label_norm, 2),axis=0)
     
     @tf.function 
     def TrainingLoss_error(self, x_norm:tf.constant, y_label_norm:tf.constant):
         pred_error_outputs = self.Compute_Direct_Error(x_norm, y_label_norm)
         mean_pred_error = tf.reduce_mean(pred_error_outputs)
+        if self._include_regularization:
+            reg_error = self.RegularizationLoss()
+            mean_pred_error += reg_error
         return mean_pred_error 
     
     @tf.function
@@ -1029,6 +1024,7 @@ class CustomTrainer(MLPTrainer):
         return 
     
     def PrepareValidationHistory(self):
+        self.history_learningrate = []
         self.val_loss_history=[]
         for _ in self._train_vars:
             self.val_loss_history.append([])
@@ -1038,12 +1034,14 @@ class CustomTrainer(MLPTrainer):
         train_batches = tf.data.Dataset.from_tensor_slices((self._X_train_norm, self._Y_train_norm)).batch(2**self._batch_expo)
         return train_batches
     
+
     def LoopEpochs(self):
         t_start = time.time()
         worst_error = 1e32
         self._i_epoch = 0
         train_batches = self.SetTrainBatches()
         while (self._i_epoch < self._n_epochs) and self.__keep_training:
+            self.history_learningrate.append(self._optimizer.learning_rate.numpy())
             self.LoopBatches(train_batches=train_batches)
 
             val_loss = self.ValidationLoss()
@@ -1062,7 +1060,7 @@ class CustomTrainer(MLPTrainer):
     
     def PrintEpochInfo(self, i_epoch, val_loss):
         if self._verbose > 0:
-                print("Epoch: ", str(i_epoch), " Validation loss: ", ", ".join("%s : %.8e" % (s, v.numpy()) for s, v in zip(self._train_vars, val_loss)))
+            print("Epoch: ", str(i_epoch), " Validation loss: ", ", ".join("%s : %.8e" % (s, v) for s, v in zip(self._train_vars, val_loss)))
         return 
     
     def LoopBatches(self, train_batches):
@@ -1076,14 +1074,16 @@ class CustomTrainer(MLPTrainer):
             self.val_loss_history[iVar].append(val_loss[iVar])
         return val_loss
     
+    @tf.function
     def RegularizationLoss(self):
         reg_loss = 0.0
-        for w in self._weights:
+        for w in self._trainable_hyperparams:
             reg_loss += self._regularization_param*tf.reduce_sum(tf.pow(w, 2))
         
         return reg_loss 
     
     def TestLoss(self):
+
         t_start = time.time()
         self._test_score = tf.reduce_mean(self.Compute_Direct_Error(tf.constant(self._X_test_norm, self._dt), tf.constant(self._Y_test_norm, self._dt))).numpy()
         t_end = time.time()
@@ -1115,16 +1115,20 @@ class CustomTrainer(MLPTrainer):
         plt.close(fig)
 
         with open(self._save_dir + "/Model_"+str(self._model_index)+"/TrainingHistory.csv", "w+") as fid:
-            fid.write("epoch,"+ ",".join(("validation_loss_"+var for var in vars_to_plot))+"\n")
+            fid.write("epoch,learning_rate,"+ ",".join(("validation_loss_"+var for var in vars_to_plot))+"\n")
             epochs = np.arange(np.shape(H)[1])
-            H_concat = np.vstack((epochs, H)).T 
+            lr = np.array(self.history_learningrate)
+            H_concat = np.vstack((epochs, lr, H)).T 
             csvWriter = csv.writer(fid, delimiter=',')
             csvWriter.writerows(H_concat)
 
-        return 
+        return super().Plot_and_Save_History()
     
     def __CheckEarlyStopping(self, val_loss, worst_error):
         current_error = tf.reduce_max(val_loss)
+        if np.isnan(current_error.numpy()):
+            self.__keep_training = False 
+
         if current_error < worst_error - self._stagnation_tolerance:
             self.__keep_training = True 
             self.__stagnation_iter = 0
@@ -1155,14 +1159,35 @@ class PhysicsInformedTrainer(CustomTrainer):
     _Y_state_scale:np.ndarray = None 
     _Y_state_offset:np.ndarray = None 
 
+    _X_boundary_norm:np.ndarray[float] = None 
+    _Y_boundary_norm:np.ndarray[float] = None 
+    
     _state_vars:list[str]
 
     vals_lambda:list[float] = None
     projection_vals:list[tf.constant] = None 
 
-    lambda_min:float = 0.0
-    lambda_max:float = 300.0
+    projection_arrays:list[np.ndarray] = None 
+    target_arrays:list[np.ndarray] = None 
+    idx_PIvar:list[int] = None 
+    lamba_labels:list[str] = None 
+
+    _boundary_data_file:str = None 
+
+
+    _enable_boundary_loss:bool=True
+    _include_boundary_loss:bool=True
+    _boundary_loss_patience:int = 10
+    _N_bc:int=None 
+
+    _train_step_type:str="Jacobi"
+    __train_step_type_options:list[str] = ["Gauss-Seidel","Jacobi"]
+    j_gradient_update:int = 0
+    lambda_history:list = []
+    update_lambda_every_iter:int = 10
     def __init__(self):
+        """MLP trainer base class for physics-informed machine learning.
+        """
         CustomTrainer.__init__(self)
         return 
     
@@ -1190,8 +1215,38 @@ class PhysicsInformedTrainer(CustomTrainer):
 
         return 
     
-    def PreprocessPINNVars(self):
+    def SetBoundaryDataFile(self, boundary_file_name:str):
+        self._boundary_data_file = boundary_file_name
+        return 
+    
+    def GetBoundaryData(self, y_vars=None):
+        """Load flamelet data equilibrium boundary data.
+        """
+        if y_vars == None:
+            y_vars = self._train_vars
+        # Load controlling and train variables from boundary data.
+        X_boundary, Y_boundary = GetReferenceData(self._boundary_data_file, x_vars=self._controlling_vars, train_variables=y_vars,dtype=self._dt_np)
         
+        
+        # Normalize controlling and labeled data with respect to domain data.
+        self._X_boundary_norm = self.scaler_function_x.transform(X_boundary)
+        self._Y_boundary_norm = self.scaler_function_y.transform(Y_boundary)
+
+        return 
+    
+    def SetTrainStepType(self, train_step_type:str="Jacobi"):
+        if train_step_type not in self.__train_step_type_options:
+            raise Exception("Weights update step type should be one of the following : "+ ",".join(s for s in self.__train_step_type_options))
+        self._train_step_type = train_step_type
+        return 
+    
+    def SetDecaySteps(self):
+        super().SetDecaySteps()
+        if self._train_step_type=="Gauss-Seidel":
+            self._decay_steps *= len(self._state_vars)
+        return 
+    
+    def PreprocessPINNVars(self):
         return 
     
     def SetScaler(self, scaler_function: str = "robust"):
@@ -1201,7 +1256,11 @@ class PhysicsInformedTrainer(CustomTrainer):
     
     def GetTrainData(self):
         super().GetTrainData()
+        self.GetBoundaryData()
+        self.CollectPIVars()
         self.GetStateTrainData()
+        self._Y_state_scale_tf = tf.cast(self._Y_state_scale, self._dt)
+        self._Y_state_offset_tf = tf.cast(self._Y_state_offset, self._dt)
         return 
     
     def Plot_and_Save_History(self, vars=None):
@@ -1209,14 +1268,38 @@ class PhysicsInformedTrainer(CustomTrainer):
         return 
     
     def PrepareValidationHistory(self):
+        self.history_learningrate=[]
         self.val_loss_history=[]
         for _ in self._state_vars:
             self.val_loss_history.append([])
         return 
     
     def SetTrainBatches(self):
-        train_batches = tf.data.Dataset.from_tensor_slices((self._X_train_norm, self._Y_state_train_norm)).batch(2**self._batch_expo)
-        return train_batches
+        train_batches_domain = tf.data.Dataset.from_tensor_slices((self._X_train_norm, self._Y_state_train_norm)).batch(2**self._batch_expo)
+        domain_batches_list = [b for b in train_batches_domain]
+        
+        batch_size_train = 2**self._batch_expo
+
+        if self._enable_boundary_loss:
+            # Collect projection array data.
+            p_concatenated = tf.stack([tf.constant(p,dtype=self._dt) for p in self.projection_arrays],axis=2)
+            
+            # Collect target projection gradient data.
+            Y_target_concatenated = tf.stack([tf.constant(t,dtype=self._dt) for t in self.target_arrays], axis=1)
+
+            # Collect boundary controlling variable data.
+            X_boundary_tf = tf.constant(self._X_boundary_norm, dtype=self._dt)
+        
+            # Forumulate batches.
+            batches_concat = tf.data.Dataset.from_tensor_slices((X_boundary_tf, p_concatenated, Y_target_concatenated)).batch(batch_size_train)
+            batches_concat_list = [b for b in batches_concat]
+
+            # Re-size boundary data batches to that of the domain batches such that both data can be evaluated simultaneously during training.
+            Nb_boundary = len(batches_concat_list)
+            batches_concat_list_resized = [batches_concat_list[i % Nb_boundary] for i in range(len(domain_batches_list))]
+        else:
+            batches_concat_list_resized = [[None]*len(domain_batches_list),[None]*len(domain_batches_list),[None]*len(domain_batches_list)]
+        return (domain_batches_list, batches_concat_list_resized)
     
     @tf.function
     def ComputeFirstOrderDerivatives(self, x_norm_input:tf.constant,idx_out:int=0):
@@ -1246,15 +1329,273 @@ class PhysicsInformedTrainer(CustomTrainer):
             mean_grad_ub += val_lambda_old * tf.reduce_mean(tf.abs(g_ub))
         mean_grad_ub /= len(self._weights)
 
-        lambda_prime = max_grad_direct / (mean_grad_ub + 1e-32)
-        lambda_prime_scaled = tf.maximum(tf.minimum(lambda_prime, self.lambda_max), self.lambda_min)
-        val_lambda_new = 0.9 * val_lambda_old + 0.1 * lambda_prime_scaled
+        lambda_prime = max_grad_direct / (mean_grad_ub + 1e-7)
+        val_lambda_new = 0.9 * val_lambda_old + 0.1 * lambda_prime
         if tf.math.is_nan(val_lambda_new):
             val_lambda_new = 1.0
         return val_lambda_new
 
+    def CollectPIVars(self):
+        self.projection_arrays = []
+        self.target_arrays = []
+        self.vals_lambda = []
+        self.idx_PIvar = []
+        self.lamba_labels = []
+        val_lambda_default = tf.constant(1.0,dtype=self._dt)
+        return val_lambda_default
     
-class EvaluateArchitecture:
+    def LoopEpochs(self):
+        self.j_gradient_update = 0
+        self.lambda_history.clear()
+        return super().LoopEpochs()
+    
+    def LoopBatches(self, train_batches):
+        """Loop over domain and boundary batches for each epoch.
+
+        :param train_batches: tuple of domain and boundary data batches.
+        :type train_batches: tuple
+        """
+        domain_batches = train_batches[0]
+        boundary_batches = train_batches[1]
+        vals_lambda = self.vals_lambda.copy()
+        for iBatch, batch_domain in enumerate(domain_batches):
+            # Extract domain batch data.
+            X_domain_batch = batch_domain[0]
+            Y_domain_batch = batch_domain[1]
+            if self._enable_boundary_loss:
+                batch_boundary = boundary_batches[iBatch]
+                # Extract boundary batch data.
+                X_boundary_batch = batch_boundary[0]
+                P_boundary_batch = batch_boundary[1]
+                Yt_boundary_batch = batch_boundary[2]
+            else:
+                X_boundary_batch = None 
+                P_boundary_batch = None 
+                Yt_boundary_batch = None 
+                
+            if self._i_epoch > self._boundary_loss_patience and self._enable_boundary_loss:
+                self._include_boundary_loss = True
+            else:
+                self._include_boundary_loss = False
+            # Run train step and adjust weights.
+            if self._train_step_type == "Gauss-Seidel":
+                self.Train_Step_Gauss_Seidel(X_domain_batch, Y_domain_batch, X_boundary_batch,P_boundary_batch, Yt_boundary_batch, vals_lambda, self._include_boundary_loss)
+            else:
+                self.Train_Step(X_domain_batch, Y_domain_batch, X_boundary_batch,P_boundary_batch, Yt_boundary_batch, vals_lambda, self._include_boundary_loss)
+
+            # Update boundary condition penalty values.
+            if ((self.j_gradient_update + 1)%self.update_lambda_every_iter ==0) and self._include_boundary_loss:
+                vals_lambda_updated = self.UpdateLambdas(X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda)
+                self.vals_lambda = [v for v in vals_lambda_updated]
+
+            self.j_gradient_update += 1
+        if self._enable_boundary_loss:  
+            self.lambda_history.append([lamb.numpy() for lamb in self.vals_lambda])
+
+        return 
+    
+    @tf.function
+    def Train_Step(self, X_domain_batch:tf.constant, Y_domain_batch:tf.constant, \
+                   X_boundary_batch:tf.constant, P_boundary_batch:tf.constant, Yt_boundary_batch:tf.constant, vals_lambda:list[tf.constant], include_boundary:bool):
+
+        # Compute training loss for the current batch and extract HP sensitivities.
+        batch_loss, sens_batch = self.Train_sensitivity_function(X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda,include_boundary)
+        
+        # Update network weigths and biases.
+        self.UpdateWeights(sens_batch)
+
+        return batch_loss
+    
+    @tf.function
+    def Train_Step_Gauss_Seidel(self, X_domain_batch:tf.constant, Y_domain_batch:tf.constant, \
+                   X_boundary_batch:tf.constant, P_boundary_batch:tf.constant, Yt_boundary_batch:tf.constant, vals_lambda:list[tf.constant], include_boundary:bool):
+        for iVar in range(len(self._state_vars)):
+            with tf.GradientTape() as tape:
+                tape.watch(self._trainable_hyperparams)
+                Y_state_pred = self.EvaluateState(X_domain_batch)[:, iVar]
+                Y_state_pred_norm = (Y_state_pred - self._Y_state_offset[iVar]) / self._Y_state_scale[iVar]
+                Y_state_ref= Y_domain_batch[:, iVar]
+                state_error_norm = tf.reduce_mean(tf.pow((Y_state_pred_norm - Y_state_ref), 2))
+                grads_state_error = tape.gradient(state_error_norm, self._trainable_hyperparams)
+            self.UpdateWeights(grads_state_error)
+            if include_boundary:
+                with tf.GradientTape() as tape:
+                    boundary_loss = 0.0
+                    for iBc in range(self._N_bc):
+                        bc_loss = self.ComputeNeumannPenalty(X_boundary_batch, Yt_boundary_batch, P_boundary_batch,iBc)
+                        boundary_loss += vals_lambda[iBc] * bc_loss
+                    grads_boundary_error = tape.gradient(boundary_loss, self._trainable_hyperparams)
+                    self.UpdateWeights(grads_boundary_error)
+        return 
+    
+    @tf.function
+    def UpdateWeights(self, grads):
+        self._optimizer.apply_gradients(zip(grads, self._trainable_hyperparams))
+        return
+    
+    @tf.function 
+    def UpdateLambdas(self, X_domain_batch:tf.constant, Y_domain_batch:tf.constant,\
+                            X_boundary_batch:tf.constant,  \
+                            P_boundary_batch:tf.constant, Yt_boundary_batch:tf.constant, vals_lambda_old:list[tf.constant]):
+        """Update boundary condition penalty values.
+
+        :return: list of updated penalty values.
+        :rtype: list[tf.constant]
+        """
+
+        _, grads_domain, _, grads_bc_list = self.ComputeGradients(X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch)
+        
+        vals_lambda_new = []
+        for iBc, lambda_old in enumerate(vals_lambda_old):
+            lambda_new = self.update_lambda(grads_domain, grads_bc_list[iBc], lambda_old)
+            vals_lambda_new.append(lambda_new)
+        return vals_lambda_new
+    
+    @tf.function 
+    def EvaluateState(self, X_norm:tf.constant):
+        return 
+    
+    @tf.function 
+    def ComputeStateError(self, X_label_norm:tf.constant,Y_state_label_norm:tf.constant):
+        Y_state_pred = self.EvaluateState(X_label_norm)
+        Y_state_pred_norm = (Y_state_pred - self._Y_state_offset_tf)/self._Y_state_scale_tf
+        pred_error = tf.reduce_mean(tf.pow(Y_state_pred_norm - Y_state_label_norm, 2), axis=0)
+        return pred_error
+    
+    @tf.function 
+    def ComputeGradients_State_error(self, Y_state_label_norm:tf.constant, X_label_norm:tf.constant):
+        with tf.GradientTape() as tape:
+            tape.watch(self._trainable_hyperparams)
+            state_loss = self.ComputeStateError(X_label_norm, Y_state_label_norm)
+
+            grads_state = tape.gradient(tf.reduce_mean(state_loss), self._trainable_hyperparams)
+
+        return state_loss, grads_state 
+    
+    @tf.function
+    def ComputeGradients(self, X_domain_batch, Y_domain_batch, X_boundary_batch,  P_boundary_batch, Yt_boundary_batch):
+        y_domain_loss, grads_domain = self.ComputeGradients_State_error(X_label_norm=X_domain_batch, Y_state_label_norm=Y_domain_batch)
+
+        grads_bc_list = []
+        loss_bc_list = []
+        for iBC in range(self._N_bc):
+            boundary_loss, grads_boundary_loss = self.ComputeGradients_Boundary_Error(X_boundary_batch, Yt_boundary_batch,P_boundary_batch,iBC)
+            
+            grads_bc_list.append(grads_boundary_loss)
+            loss_bc_list.append(boundary_loss)
+        return y_domain_loss, grads_domain, loss_bc_list, grads_bc_list
+    
+    @tf.function
+    def ComputeGradients_Boundary_Error(self, X_boundary_batch, Yt_boundary_batch,P_boundary_batch,iVar):
+        with tf.GradientTape() as tape:
+            tape.watch(self._trainable_hyperparams)
+            neumann_penalty_var = self.ComputeNeumannPenalty(X_boundary_batch, Yt_boundary_batch, P_boundary_batch,iVar)
+            grads_neumann = tape.gradient(neumann_penalty_var, self._trainable_hyperparams)
+        return neumann_penalty_var, grads_neumann
+    
+    @tf.function
+    def ComputeNeumannPenalty(self, x_norm_boundary:tf.constant, dy_norm_boundary_target:tf.constant,precon_gradient:tf.constant, iVar:int=0): 
+        """Neumann penalty function for projected MLP Jacobians along boundary data.
+
+        :param x_norm_boundary: boundary data controlling variable values.
+        :type x_norm_boundary: tf.constant
+        :param y_norm_boundary_target: labeled boundary data.
+        :type y_norm_boundary_target: tf.constant
+        :param dy_norm_boundary_target: target projected gradient.
+        :type dy_norm_boundary_target: tf.constant
+        :param precon_gradient: MLP Jacobian pre-conditioner.
+        :type precon_gradient: tf.constant
+        :param iVar: boundary condition index, defaults to 0
+        :type iVar: int, optional
+        :return: direct evaluation and Neumann penalty values.
+        :rtype: tf.constant
+        """
+
+        # Evaluate MLP Jacobian on boundary data.
+        _, dy_pred_norm = self.ComputeFirstOrderDerivatives(x_norm_boundary, self.idx_PIvar[iVar])
+
+        # Project Jacobian along boundary data according to penalty function.
+        project_dy_pred_norm = tf.reduce_sum(tf.multiply(precon_gradient[:,:,iVar], dy_pred_norm), axis=1)
+
+        # Compute direct and Neumann penalty values.
+        penalty = tf.reduce_mean(tf.pow(project_dy_pred_norm - dy_norm_boundary_target[:, iVar], 2))
+        return penalty
+    
+    @tf.function 
+    def Train_loss_function(self, X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda, include_boundary):
+        
+        domain_loss = self.TrainingLoss_error(X_domain_batch, Y_domain_batch)
+        total_loss = domain_loss
+        bc_loss = 0.0
+        if include_boundary:
+            bc_loss = self.ComputeBCLoss(X_boundary_batch, Yt_boundary_batch, P_boundary_batch, vals_lambda)
+
+        total_loss += bc_loss
+        return [total_loss, domain_loss, bc_loss]
+    
+    
+    @tf.function 
+    def ComputeBCLoss(self, X_boundary_batch, Yt_boundary_batch, P_boundary_batch, vals_lambda):
+        boundary_loss = 0.0
+        for iBc in range(self._N_bc):
+            boundary_loss += vals_lambda[iBc] * self.ComputeNeumannPenalty(X_boundary_batch, Yt_boundary_batch, P_boundary_batch,iBc)
+        return boundary_loss 
+    
+    @tf.function 
+    def Train_sensitivity_function(self, X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda, include_boundary):
+        with tf.GradientTape() as tape:
+            tape.watch(self._trainable_hyperparams)
+            train_losses = self.Train_loss_function(X_domain_batch, Y_domain_batch, X_boundary_batch, P_boundary_batch, Yt_boundary_batch, vals_lambda,include_boundary)
+            total_loss = train_losses[0]
+            domain_loss = train_losses[1]
+            boundary_loss = train_losses[2]
+            grads_loss = tape.gradient(total_loss, self._trainable_hyperparams)
+        return [total_loss, domain_loss, boundary_loss], grads_loss 
+    
+    @tf.function 
+    def TrainingLoss_error(self, x_norm:tf.constant, y_state_label_norm:tf.constant):
+        pred_error_outputs = self.ComputeStateError(x_norm, y_state_label_norm)
+        mean_pred_error = tf.reduce_mean(pred_error_outputs)
+        return mean_pred_error
+    
+    def ValidationLoss(self):
+        val_error_state = self.ComputeStateError(tf.cast(self._X_val_norm, dtype=self._dt), tf.cast(self._Y_state_val_norm,dtype=self._dt))
+        val_error_state = val_error_state.numpy()
+        for iVar in range(len(self._state_vars)):
+            self.val_loss_history[iVar].append(val_error_state[iVar])
+        return val_error_state
+    
+    def TestLoss(self):
+        test_error_state = self.ComputeStateError(tf.cast(self._X_test_norm, dtype=self._dt), tf.cast(self._Y_state_test_norm,dtype=self._dt))
+        self.state_test_loss = test_error_state.numpy()
+        self._test_score = np.average(self.state_test_loss)
+        return test_error_state
+    
+    def PlotLambdaHistory(self):
+        fig = plt.figure(figsize=[10,10])
+        ax = plt.axes()
+        for iBc in range(self._N_bc):
+            ax.plot([self.lambda_history[i][iBc] for i in range(len(self.lambda_history))], label=self.lamba_labels[iBc])
+        ax.grid()
+        ax.set_xlabel(r"Epoch [-]",fontsize=20)
+        ax.set_ylabel(r"Lambda value[-]",fontsize=20)
+        ax.tick_params(which='both',labelsize=18)
+        ax.legend(fontsize=20)
+        ax.set_title(r"Neumann penalty modifier history", fontsize=20)
+        fig.savefig(self._save_dir+"/Model_"+str(self._model_index)+"/Lambda_history."+self._figformat,format=self._figformat,bbox_inches='tight')
+        plt.close(fig)
+        return 
+    
+    def CustomCallback(self):
+        if self._enable_boundary_loss:
+            self.PlotLambdaHistory()
+        return 
+    
+    def EnableBCLoss(self, enable_bc_loss:bool=True):
+        self._enable_boundary_loss = enable_bc_loss
+        return 
+    
+class TrainMLP:
     """Class for training MLP architectures
     """
 
@@ -1283,13 +1624,16 @@ class EvaluateArchitecture:
 
     _fig_format:str = "png"
     _scaler:str = "robust"
-
+    __set_custom_weights:bool = False
+    __weights_custom:list[np.ndarray[float]] = None 
+    __biases_custom:list[np.ndarray[float]] = None 
+    
     def __init__(self, Config_in:Config):
-        """Define EvaluateArchitecture instance and prepare MLP trainer with
+        """Define TrainMLP instance and prepare MLP trainer with
         default settings.
 
-        :param Config: FlameletAIConfig object describing the flamelet data manifold.
-        :type Config: FlameletAIConfig
+        :param Config: Config_FGM object describing the flamelet data manifold.
+        :type Config: Config_FGM
         :param group_idx: MLP output group index, defaults to 0
         :type group_idx: int, optional
         :raises Exception: if MLP output group index is undefined by flameletAI configuration.
@@ -1308,7 +1652,6 @@ class EvaluateArchitecture:
         
         # Define MLPTrainer object with default settings (currently only supports TensorFlowFit)
         self._train_file_header = self._Config.GetOutputDir()+"/"+self._Config.GetConcatenationFileHeader()
-
         self.SynchronizeTrainer()
         pass
 
@@ -1328,6 +1671,8 @@ class EvaluateArchitecture:
         self._trainer_direct.SetLRDecay(self.lr_decay)
         self._trainer_direct.SetBatchExpo(self.batch_expo)
         self._trainer_direct.SetHiddenLayers(self.architecture)
+        if self.__set_custom_weights:
+            self._trainer_direct.SetWeightsBiases(self.__weights_custom,self.__biases_custom)
         self._trainer_direct.SetTrainFileHeader(self._train_file_header)
         self._trainer_direct.SetVerbose(self.verbose)
         self._trainer_direct.SetFigFormat(self._fig_format)
@@ -1371,6 +1716,7 @@ class EvaluateArchitecture:
             if NN <= 0:
                 raise Exception("Number of neurons in hidden layers should be higher than zero.")
             self.architecture.append(NN)
+        self.__set_custom_weights = False
         self.SynchronizeTrainer()
         return 
     
@@ -1446,7 +1792,18 @@ class EvaluateArchitecture:
         self.process_index = process
         self.SynchronizeTrainer()
         return
-     
+    
+    def SetWeightsBiases(self, weights_input_custom:list[np.ndarray[float]],biases_input_custom:list[np.ndarray[float]]):
+        if len(weights_input_custom) != len(biases_input_custom):
+            raise Exception("Weights and biases should be same size.")
+        if len(weights_input_custom) != (len(self.architecture)+1):
+            raise Exception("Weights should be compatible with hidden layer architecture.")
+        self.__weights_custom = weights_input_custom.copy()
+        self.__biases_custom = biases_input_custom.copy()
+        self.__set_custom_weights = True 
+        self.SynchronizeTrainer()
+        return 
+    
     def PrepareOutputDir(self):
         """Prepare output directory in which to save trained MLP data.
         """
@@ -1479,7 +1836,9 @@ class EvaluateArchitecture:
         fid.close()
 
         self._test_score = self._trainer_direct.GetTestScore()
-        self.__cost_parameter = self._trainer_direct.GetCostParameter()
+        if np.isnan(self._test_score):
+            self._test_score = 1e2
+        self._cost_parameter = self._trainer_direct.GetCostParameter()
         return 
     
     def TrainPostprocessing(self):
@@ -1495,7 +1854,7 @@ class EvaluateArchitecture:
         :return: MLP cost parameter
         :rtype: float
         """
-        return self.__cost_parameter
+        return self._cost_parameter
     
     def GetTestScore(self):
         """Get MLP evaluation test score upon completion of training.
@@ -1504,6 +1863,18 @@ class EvaluateArchitecture:
         :rtype: float
         """
         return self._test_score
+    
+    def GetWeights(self):
+        return self._trainer_direct.GetWeights()
+    def GetBiases(self):
+        return self._trainer_direct.GetBiases()
+    
+    def GetScalerFunctionParams(self):
+        return self._trainer_direct.GetScalerFunctionParams()
+    def GetControlVars(self):
+        return self._trainer_direct._controlling_vars
+    def GetTrainVars(self):
+        return self._trainer_direct._train_vars
     
     def SetTrainFileHeader(self, fileheader:str):
         """Set a custom training data file header.

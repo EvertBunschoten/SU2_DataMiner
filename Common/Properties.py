@@ -19,7 +19,7 @@
 # Description:                                                                                |
 #  Default settings/names/properties for the various steps within the DataMiner workflow.     |                                                                          
 #                                                                                             |  
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -52,7 +52,7 @@ class EntropicVars(Enum):
     dsdrho_e=auto()
     dsde_rho=auto()
     d2sdrho2=auto()
-    d2sdrhode=auto()
+    d2sdedrho=auto()
     d2sde2=auto()
     dTdrho_e=auto()
     dTde_rho=auto()
@@ -64,7 +64,47 @@ class EntropicVars(Enum):
     dhdrho_p=auto()
     dsdp_rho=auto()
     dsdrho_p=auto()
+    cp=auto()
     N_STATE_VARS=auto()
+
+class FGMVars(Enum):
+    ProgressVariable=0
+    EnthalpyTot=auto()
+    MixtureFraction=auto()
+    Distance=auto()
+    Velocity=auto()
+    Temperature=auto()
+    Density=auto()
+    MolarWeightMix=auto()
+    Cp=auto()
+    Conductivity=auto()
+    ViscosityDyn=auto()
+    Heat_Release=auto()
+    DiffusionCoefficient=auto()
+    ProdRateTot_PV=auto()
+    Beta_ProgVar=auto()
+    Beta_Enth_Thermal=auto()
+    Beta_Enth=auto()
+    Beta_MixFrac=auto() 
+
+FGMSymbols:dict = {FGMVars.ProgressVariable.name : r"Progress variable $(\mathcal{Y})[-]$",\
+                   FGMVars.EnthalpyTot.name : r"Total enthalpy $(h)[J \mathrm{kg}^{-1}]$",\
+                   FGMVars.MixtureFraction.name : r"Mixture fraction $(Z)[-]$",\
+                   FGMVars.Distance.name : r"Flamelet solution grid $(x)[m]$",\
+                   FGMVars.Velocity.name : r"Flamelet velocity $(u)[m s^{-1}]$",\
+                   FGMVars.Temperature.name : r"Temperature $(T)[K]$",\
+                   FGMVars.Density.name : r"Density $(\rho)[\mathrm{kg} m^{-3}]$",\
+                   FGMVars.MolarWeightMix.name : r"Mean, molar weight $(W_M)[\mathrm{kg} \mathrm{mol}^{-1}]$",\
+                   FGMVars.Cp.name : r"Specific heat $(c_p)[J \mathrm{kg}^{-1}K^{-1}]$",\
+                   FGMVars.Conductivity.name : r"Thermal conductivity $(k)[W m^{-1} K^{-1}]$",\
+                   FGMVars.ViscosityDyn.name : r"Dynamic viscosity $(\mu)[m^2 s^{-2}]$",\
+                   FGMVars.Heat_Release.name : r"Heat release rate $\left(\dot{Q}\right)[W \mathrm{kg}^{-1} m^3]$",\
+                   FGMVars.DiffusionCoefficient.name : r"Diffusion coefficient $\left(D\right)[\mathrm{kg} m]$",\
+                   FGMVars.ProdRateTot_PV.name : r"PV source term $\left(\rho\dot{\omega}_\mathcal{Y}\right)[\mathrm{kg} m^{-3} s^{-1}]$",\
+                   FGMVars.Beta_ProgVar.name : r"PV pref. diffusion scalar $\left(\beta_\mathcal{Y}\right)[-]$",\
+                   FGMVars.Beta_Enth_Thermal.name : r"Cp pref. diffusion scalar $\left(\beta_{h,1}\right)[J \mathrm{kg}^{-1} K^{-1}]$",\
+                   FGMVars.Beta_Enth.name : r"Specific enthalpy pref. diffusion scalar $\left(\beta_{h,2}\right)[J \mathrm{kg}^{-1}]$",\
+                   FGMVars.Beta_MixFrac.name : r"Mixture fraction pref. diffusion scalar $\left(\beta_Z\right)[-]$"}
 
 class DefaultSettings_NICFD(DefaultProperties):
     T_min:float = 300
@@ -90,13 +130,13 @@ class DefaultSettings_NICFD(DefaultProperties):
     name_density:str = EntropicVars.Density.name
     name_energy:str = EntropicVars.Energy.name
 
-    hidden_layer_architecture:list[int] = [95]
+    hidden_layer_architecture:list[int] = [12,12]
 
-    init_learning_rate_expo:float = -1.64126
-    learning_rate_decay:float = 9.87211e-01
+    init_learning_rate_expo:float = -3.0
+    learning_rate_decay:float = 0.98985
     activation_function:str = "exponential"
     config_type:str = "EntropicAI"
-    supported_state_vars:list[str] = ["T","p","c2","dTdrho_e","dTde_rho","dpdrho_e","dpde_rho"]
+    supported_state_vars:list[str] = ["s","T","p","c2","dTdrho_e","dTde_rho","dpdrho_e","dpde_rho"]
 
 class DefaultSettings_FGM(DefaultProperties):
     config_name:str = "config_FGM"
@@ -157,4 +197,5 @@ ActivationFunctionOptions = {"linear" : tf.keras.activations.linear,\
                              "tanh" : tf.keras.activations.tanh,\
                              "exponential" : tf.keras.activations.exponential,\
                              "gelu" : tf.keras.activations.gelu,\
-                             "sigmoid" : tf.keras.activations.sigmoid}
+                             "sigmoid" : tf.keras.activations.sigmoid,\
+                             "swish" : tf.keras.activations.swish}

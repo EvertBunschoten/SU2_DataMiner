@@ -24,13 +24,13 @@
 #  , and z_i and z_c are the mixture fraction coefficients and constant respectively.         |
 #  This regression test compares the mixture fraction according to Cantera and to FlameletAI  |
 #                                                                                             |  
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
 import cantera as ct 
 import numpy as np
-from Common.DataDrivenConfig import FlameletAIConfig 
+from Common.DataDrivenConfig import Config_FGM 
 np.random.seed(0)
 
 # Reaction mechanism, temperature, pressure, and equivalence ratio.
@@ -40,7 +40,7 @@ p = ct.one_atm
 phi = 0.5 
 
 # Initiate empty FlameletAI.
-Config = FlameletAIConfig()
+Config = Config_FGM()
 Config.SetFuelDefinition(["H2"], [1.0])
 Config.SetReactionMechanism(reaction_mechanism)
 

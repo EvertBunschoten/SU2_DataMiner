@@ -8,7 +8,7 @@
 #       #                                                                            #        #
 ###############################################################################################
 
-######################### FILE NAME: 4:collect_flamelet_data.py ###############################
+############################# FILE NAME: GenerateFluidData.py #################################
 #=============================================================================================#
 # author: Evert Bunschoten                                                                    |
 #    :PhD Candidate ,                                                                         |
@@ -18,39 +18,32 @@
 #                                                                                             |
 #                                                                                             |
 # Description:                                                                                |
-#  Concatenate flamelet data and group outputs for training physics-informed neural networks. |
+#  Generate flamelet data as per settings in the SU2 DataMiner configuration.                 |
 #                                                                                             |  
 # Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
-from su2dataminer.config import Config_FGM 
-from su2dataminer.process_data import FlameletConcatenator, GroupOutputs
+import argparse 
+import sys 
 
-# Load FlameletAI configuration
-Config = Config_FGM("Hydrogen_PINNs.cfg")
+#---------------------------------------------------------------------------------------------#
+# Importing DataMiner classes and functions
+#---------------------------------------------------------------------------------------------#
+from Common.Properties import *
+from Common.DataDrivenConfig import *
+#---------------------------------------------------------------------------------------------#
+# Parse arguments
+#---------------------------------------------------------------------------------------------#
+parser = argparse.ArgumentParser()
+parser.add_argument('--c', dest='config_name', type=str, help='Configuration file name.', default=DefaultProperties.config_name+".cfg")
+parser.add_argument('--t', dest='type', type=int, help='Data type to generate: (1:FGM, 2:NICFD)', default=1)
+args = parser.parse_args(args=None if sys.argv[1:] else ['--help']) 
 
-# Initiate flamelet data concatenator
-Concat = FlameletConcatenator(Config)
-
-# Reduce number of points per flamelet to speed up training
-Concat.SetNFlameletNodes(2**Config.GetBatchExpo())
-
-# Include H2O reaction rates and heat release in flamelet data set 
-Concat.SetAuxilarySpecies(["H2O"])
-Concat.SetLookUpVars(["Heat_Release"])
-
-# Read and concatenate flamelet data
-Concat.ConcatenateFlameletData()
-
-# Read and concatenate equilibrium boundary data
-Concat.CollectBoundaryData()
-
-# Compute affinity between flamelet data trends and group into MLP outputs.
-Grouper = GroupOutputs(Config)
-
-# Only consider net reaction rate for H2O
-Grouper.ExcludeVariables(["Y_dot_neg-H2O","Y_dot_pos-H2O"])
-Grouper.EvaluateGroups()
-Grouper.UpdateConfig()
-
+if args.type == 1:
+    config = Config_FGM(args.config_name)
+elif args.type == 2:
+    config = Config_NICFD(args.config_name)
+else:
+    raise Exception("Config type should be 1 or 2")
+config.PrintBanner()

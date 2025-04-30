@@ -19,7 +19,7 @@
 # Description:                                                                                |
 #  Interactive menus for configuration set-up.                                                |
 #                                                                                             |  
-# Version: 1.0.0                                                                              |
+# Version: 2.0.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -121,7 +121,7 @@ def ManualFlameletConfiguration():
     """
 
     # Initiate empty configuration.
-    Config_in:FlameletAIConfig = FlameletAIConfig()
+    Config_in:Config_FGM = Config_FGM()
     statisfied = False 
     
     while not statisfied:
@@ -300,7 +300,7 @@ def ManualNICFDConfiguration():
     """
 
     # Initiate empty configuration.
-    Config_in:EntropicAIConfig = EntropicAIConfig()
+    Config_in:Config_NICFD = Config_NICFD()
     statisfied = False 
     
     while not statisfied:
