@@ -47,7 +47,7 @@ jobs:
   #     - name: Build and push the image
   #       run : |
   #         docker login --username EvertBunschoten --password ${{ secrets.GHCR_TOKEN }} ghcr.io
-  #         docker build . --file ./docker/build/Dockerfile_test --tag ghcr.io/evertbunschoten/su2dataminer_test:latest
+  #         docker build . --file ./docker/build/Dockerfile --tag ghcr.io/evertbunschoten/su2dataminer_test:latest
   #         docker push ghcr.io/evertbunschoten/su2dataminer_test:latest
   #     # -
   #     #   name: Build and push
@@ -74,13 +74,13 @@ jobs:
   #     #     entrypoint: /bin/rm
   #     #     args: -rf install install_bin.tgz src ccache
   run_regression:
-    name: Push Docker image to Docker Hub
+    name: Pull Docker image and run regression
     runs-on: ubuntu-latest
     steps:
       - name: Authenticate to GHCR registry
         run: docker login --username EvertBunschoten --password ${{ secrets.GHCR_TOKEN }} ghcr.io
       - name: Run regression tests
-        uses: docker://ghcr.io/evertbunschoten/su2_dataminer/test_su2_dataminer:3005202
+        uses: docker://ghcr.io/evertbunschoten/su2dataminer_test:latest
         with:
           args: -b ${{ github.ref }} -s run_regression.py
       
