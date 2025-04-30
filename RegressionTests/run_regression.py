@@ -13,13 +13,13 @@ def main():
     fluid_air.test_files = ["fluid_data_test.csv"]
     test_list.append(fluid_air)
 
-    # fluid_MM = TestCase("Fluid_MM")
-    # fluid_MM.config_dir = "FluidGeneration/MM/"
-    # fluid_MM.config_file = "config_MM.cfg"
-    # fluid_MM.exec_command = "./generate_fluid_data.py"
-    # fluid_MM.reference_files = ["MLP_data_test_ref.csv"]
-    # fluid_MM.test_files = ["fluid_data_test.csv"]
-    # test_list.append(fluid_MM)
+    fluid_MM = TestCase("Fluid_MM")
+    fluid_MM.config_dir = "FluidGeneration/MM/"
+    fluid_MM.config_file = "config_MM.cfg"
+    fluid_MM.exec_command = "./generate_fluid_data.py"
+    fluid_MM.reference_files = ["MLP_data_test_ref.csv"]
+    fluid_MM.test_files = ["fluid_data_test.csv"]
+    test_list.append(fluid_MM)
 
     # training_MM_direct = TestCase("Training_MM_Direct")
     # training_MM_direct.config_dir = "FluidTraining/MM/"
