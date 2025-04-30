@@ -38,18 +38,14 @@ jobs:
   #         tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
   #         labels: latest
 
-  # regression:
-  #   runs-on: ubuntu-latest 
-  #   permissions:
-  #     packages: write
-  #   steps:
-  #     - name: Authenticate to GHCR registry
-  #       run: docker login --username EvertBunschoten --password ${{ secrets.GHCR_TOKEN }} ghcr.io
+  authenticate:
+    runs-on: ubuntu-latest 
+    permissions:
+      packages: write
+    steps:
+      - name: Authenticate to GHCR registry
+        run: docker login --username EvertBunschoten --password ${{ secrets.GHCR_TOKEN }} ghcr.io
       
-  #     - name: Run regression tests
-  #       uses: docker://ghcr.io/evertbunschoten/su2dataminer_test:latest
-  #       with:
-  #         args: -b ${{ github.ref }} -s run_regression.py
   # build:
   #   runs-on: 'ubuntu-latest'
   #   steps:
