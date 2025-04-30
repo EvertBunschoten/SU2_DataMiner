@@ -77,8 +77,6 @@ jobs:
     name: Pull Docker image and run regression
     runs-on: ubuntu-latest
     steps:
-      - name: Authenticate to GHCR registry
-        run: docker login --username EvertBunschoten --password ${{ secrets.GHCR_TOKEN }} ghcr.io
       - name: Run regression tests
         uses: docker://ghcr.io/evertbunschoten/su2dataminer_test:latest
         with:
