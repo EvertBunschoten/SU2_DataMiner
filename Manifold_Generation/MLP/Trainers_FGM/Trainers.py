@@ -75,7 +75,7 @@ class Train_Flamelet_Direct(TensorFlowFit):
         fid.write("Progress variable definition: " + "+".join(("%+.6e*%s" % (w, s)) for w, s in zip(self.__Config.GetProgressVariableWeights(), self.__Config.GetProgressVariableSpecies())))
         fid.write("\n\n")
         return super().add_additional_header_info(fid)
-
+    
     def GetTrainData(self):
         super().GetTrainData()
         self._X_scale = self.scaler_function_x.scale_
@@ -1102,7 +1102,9 @@ class TrainMLP_FGM(TrainMLP):
         initiate trainer object accordingly.
         """
         output_vars = self.__Config.GetMLPOutputGroup(self.__output_group)
-
+        self.__trainer_PINN = Train_FGM_PINN(Config_in=self.__Config,group_idx=self.__output_group)
+        self.__kind_trainer = "physicsinformed"
+        self._trainer_direct = self.__trainer_PINN
         # Check for physics-informed variables in the MLP output group.
         if any([((v in self.__PINN_variables) or ("Y_dot" in v)) for v in output_vars]):
             self.__kind_trainer = "physicsinformed"

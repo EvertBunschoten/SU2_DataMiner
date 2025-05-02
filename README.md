@@ -15,19 +15,27 @@ The SU2 DataMiner workflow allows the user to generate fluid data and convert th
 ## Requirements and Set-Up
 The SU2 DataMiner tool is python-based and was generated with python 3.11. Currently only Linux distributions are supported.
 You require the following modules for this workflow to run:
+- argparse
+- cantera
+- CoolProp
+- gmsh
+- joblib
+- keras
+- matplotlib
 - numpy
 - pickle
-- os
-- CoolProp
-- cantera
-- tqdm
-- csv
-- matplotlib
-- random 
-- tensorflow
-- time 
-- sklearn
 - pyfiglet
+- random
+- scipy
+- scikit-learn
+- tensorflow
+- time
+- tkinter
+- tqdm
+Alternatively, a suitable conda environment can be created using the [environment recipe](environment.yml) through the following command:
+```
+conda env create -f environment.yml
+```
 
 After cloning this repository, add the following lines to your ```~/.bashrc``` in order to update your pythonpath accordingly:
 

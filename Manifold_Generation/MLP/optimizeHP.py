@@ -62,7 +62,7 @@ class MLPOptimizer:
     # Mini-batch exponent (base 2) for training.
     _optimizebatch:bool = True 
     _batch_expo:int = DefaultProperties.batch_size_exponent
-    __batch_expo_min:int=4
+    __batch_expo_min:int=3
     __batch_expo_max:int=7
     
     # Optimize learning rate decay parameters.
@@ -75,12 +75,12 @@ class MLPOptimizer:
 
     # Learning rate decay parameter for exponential learning rate decay schedule.
     _lr_decay:float=DefaultProperties.learning_rate_decay
-    __lr_decay_min:float = 0.8
+    __lr_decay_min:float = 0.95
     __lr_decay_max:float = 1.0 
 
     # Optimize hidden layer architecture.
     _optimizeNN:bool = True
-    __NN_min:int = 6
+    __NN_min:int = 3
     __NN_max:int = 40 
     NLayers_min:int = 2
     NLayers_max:int = 10
@@ -1072,6 +1072,9 @@ class PlotHPOResults:
 
         population_indices = os.listdir(optim_directory)
         self._completed_models = []
+        self._completed_workers = []
+        self._hidden_layer_neurons = []
+        self._val_score = []
         for p in population_indices:
             if "Worker" in p:
                 models = os.listdir(optim_directory + "/" + p)
@@ -1273,12 +1276,55 @@ class PlotHPOResults:
 
         optim_directory = self._Config.GetOutputDir()+"/"+optim_header
 
+        pareto_scores = np.array(self._hidden_layer_neurons)[mask]
+        sorted_indices = np.argsort(pareto_scores)
+
         pareto_indices = []
-        for w, m in zip(np.array(self._completed_workers)[mask], np.array(self._completed_models)[mask]):
+        for w, m in zip(np.array(self._completed_workers)[mask][sorted_indices], np.array(self._completed_models)[mask][sorted_indices]):
             pareto_indices.append(optim_directory + ("/Worker_%i/Model_%i/" % (w, m)))
         
         
         return pareto_indices
+    
+    def GetParetoHP(self):
+        plot_data = np.hstack((np.array(self._hidden_layer_neurons)[:,np.newaxis],np.array(self._val_score)[:,np.newaxis]))
+        mask = paretoset(plot_data, sense=["min","min"])
+        optim_header = self.SetFolderHeader()
+        optim_directory = self._Config.GetOutputDir()+"/"+optim_header
+
+        pareto_alpha_expo = []
+        pareto_lr_decay = []
+        pareto_batch_expo = []
+        pareto_phi = []
+        pareto_N_H = []
+        pareto_weights = []
+        pareto_biases = []
+        for w, m in zip(np.array(self._completed_workers)[mask], np.array(self._completed_models)[mask]):
+            filedir = optim_directory + ("/Worker_%i/Model_%i/" % (w, m))
+            filedirpath = filedir + "MLP_performance.txt"
+            if os.path.isfile(filedirpath):
+                with open(filedirpath, 'r') as fid:
+                    lines = fid.readlines()
+
+                # validation_loss = float(lines[1].strip().split(":")[-1])
+                # if np.isnan(validation_loss):
+                #     validation_loss = 1e1
+                alpha_expo = float(lines[5].strip().split(':')[-1])
+                lr_decay = float(lines[6].strip().split(':')[-1])
+                batch_expo = int(lines[7].strip().split(':')[-1])
+                phi = list(ActivationFunctionOptions.keys())[int(lines[9].strip().split(':')[-1])]
+                N_H = [int(s) for s in lines[9].strip().split(":")[-1].split()]
+                weights = [np.load(filedir + ("/W_%i.npy" % i)) for i in range(len(N_H)+1)]
+                biases = [np.load(filedir + ("/b_%i.npy" % i)) for i in range(len(N_H)+1)]
+                
+                pareto_alpha_expo.append(alpha_expo)
+                pareto_lr_decay.append(lr_decay)
+                pareto_batch_expo.append(batch_expo)
+                pareto_phi.append(phi)
+                pareto_N_H.append(N_H)
+                pareto_weights.append(weights)
+                pareto_biases.append(biases)
+        return pareto_alpha_expo, pareto_lr_decay, pareto_batch_expo, pareto_phi, pareto_N_H, pareto_weights, pareto_biases
     
     def PlotParetoArchitectures(self):
 

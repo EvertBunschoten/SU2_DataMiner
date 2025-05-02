@@ -27,7 +27,6 @@
 
 import numpy as np 
 from os import path, listdir
-import sys
 import csv 
 from tqdm import tqdm
 np.random.seed(0)

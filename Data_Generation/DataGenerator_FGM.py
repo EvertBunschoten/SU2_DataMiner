@@ -53,11 +53,7 @@ class DataGenerator_Cantera(DataGenerator_Base):
     # Save directory for computed flamelet data
     __matlab__output_dir:str = "./"
 
-    __fuel_definition:list[str] = DefaultSettings_FGM.fuel_definition    # Fuel species
-    __fuel_weights:list[float] = DefaultSettings_FGM.fuel_weights        # Fuel molar weights
     __fuel_string:str = ''
-    __oxidizer_definition:list[str] = DefaultSettings_FGM.oxidizer_definition  # Oxidizer species
-    __oxidizer_weights:list[float] = DefaultSettings_FGM.oxidizer_weights      # Oxidizer molar weights
     __oxidizer_string:str = ''
 
     __n_flamelets:int = DefaultSettings_FGM.Np_temp       # Number of adiabatic and burner flame computations per mixture fraction
@@ -79,7 +75,6 @@ class DataGenerator_Cantera(DataGenerator_Base):
     __run_burnerflames:bool = DefaultSettings_FGM.include_burnerflames    # Run burner stabilized flame computations
     __run_equilibrium:bool = DefaultSettings_FGM.include_equilibrium    # Run chemical equilibrium computations
     __run_counterflames:bool = DefaultSettings_FGM.include_counterflames   # Run counter-flow diffusion flamelet simulations.
-    __run_fuzzy:bool = False           # Add randomized data around flamelet solutions to manifold.
 
     __u_fuel:float = 1.0       # Fuel stream velocity in counter-flow diffusion flame.
     __u_oxidizer:float = None   # Oxidizer stream velocity in counter-flow diffusion flame.
@@ -224,16 +219,6 @@ class DataGenerator_Cantera(DataGenerator_Base):
         self.__run_freeflames = input
         return 
     
-    def AddFuzz(self, input:bool=False):
-        self.__run_fuzzy = input 
-        return 
-    
-    def SetFuzzyMargin(self, fuzz_margin:float=0.1):
-        if fuzz_margin < 0:
-            raise Exception("Fuzzy margin should be positive")
-        self.__fuzzy_delta = fuzz_margin
-        return 
-    
     def RunBurnerFlames(self, input:bool=True):
         """Include burner-stabilized flame data in the manifold.
 
@@ -339,71 +324,6 @@ class DataGenerator_Cantera(DataGenerator_Base):
             mkdir(self.__matlab__output_dir+'counterflame_data_MATLAB')
         return 
 
-    def AddRandomData(self, flame_solution, mix_status, T_ub, extra_header=""):
-
-        if self.__define_equivalence_ratio:
-            folder_header = "phi"
-        else:
-            folder_header = "mixfrac"
-
-        if not path.isdir(self.GetOutputDir()+'/fuzzy_data/'):
-            mkdir(self.GetOutputDir()+'/fuzzy_data/')
-        if not path.isdir(self.GetOutputDir()+'/fuzzy_data/'+folder_header+'_'+str(round(mix_status, 6))):
-            mkdir(self.GetOutputDir()+'/fuzzy_data/'+folder_header+'_'+str(round(mix_status, 6)))
-
-        fileHeader = "fuzzy_data_"+folder_header+str(round(mix_status,6))+"_"+extra_header+"_Tu"+str(round(T_ub, 4))+".csv"
-
-        Y_flamelet = flame_solution.Y 
-        T_flamelet = flame_solution.T 
-        h_flamelet = flame_solution.enthalpy_mass
-        h_max, h_min = max(h_flamelet), min(h_flamelet)
-        gas_eq = ct.Solution(self.__reaction_mechanism)
-        gas_eq.Y = flame_solution.Y[:,0]
-        gas_eq.TP = T_flamelet[0], ct.one_atm
-
-        OH_ratio_base = gas_eq.elemental_mass_fraction("O")/gas_eq.elemental_mass_fraction("H")
-        ON_ratio_base = gas_eq.elemental_mass_fraction("O")/gas_eq.elemental_mass_fraction("N")
-
-        filepathname = self.GetOutputDir()+'/fuzzy_data/'+folder_header+'_'+str(round(mix_status, 6)) + "/" + fileHeader
-        a = 8
-        b = 5
-
-        for iX in range(len(flame_solution.grid)):   
-
-            y_local = Y_flamelet[:, iX]
-            gas_eq.Y = y_local
-            valid_mixture = False 
-            while not valid_mixture:
-                c = np.random.uniform(low=-1, high=1)
-                
-                h_perturbed = flame_solution.enthalpy_mass[iX] + (c/a) * (h_max - h_min)
-                y_perturbed = np.power(np.abs(y_local), 1 + (c / b))
-                y_perturbed = y_perturbed / np.sum(y_perturbed)
-                gas_eq.HP = h_perturbed, ct.one_atm
-                gas_eq.Y = y_perturbed
-
-                OH_ratio = gas_eq.elemental_mass_fraction("O")/gas_eq.elemental_mass_fraction("H")
-                ON_ratio = gas_eq.elemental_mass_fraction("O")/gas_eq.elemental_mass_fraction("N")
-                valid_OH_ratio = (OH_ratio >= 0.98*OH_ratio_base and OH_ratio <= 1.02*OH_ratio_base)
-                valid_ON_ratio = (ON_ratio >= 0.98*ON_ratio_base and ON_ratio <= 1.02*ON_ratio_base)
-
-                if valid_OH_ratio and valid_ON_ratio:
-                    valid_mixture = True
-            
-            gas_eq.Y = y_perturbed
-            gas_eq.HP = h_perturbed, ct.one_atm
-            if iX == 0:
-                variables, data_calc = self.__SaveFlameletData(gas_eq, self.gas)
-                fid = open(filepathname, 'w+')
-                fid.write(variables + "\n")
-                fid.close()
-            else:
-                variables, data_calc_2 = self.__SaveFlameletData(gas_eq, self.gas)
-                data_calc = np.append(data_calc, data_calc_2, axis=0)
-        fid = open(filepathname, 'a+')
-        csvWriter = csv.writer(fid)
-        csvWriter.writerows(data_calc)
-        fid.close()
 
     def ComputeFreeFlames(self, mix_status:float, T_ub:float, i_freeflame:int=0):
         """Generate adiabatic free-flamelet data for a specific mixture fraction or equivalence ratio and reactant temperature.
@@ -449,9 +369,6 @@ class DataGenerator_Cantera(DataGenerator_Base):
                 return 
             
             variables, data_calc = self.__SaveFlameletData(flame, self.gas)
-
-            if self.__run_fuzzy:
-                self.AddRandomData(flame, mix_status, T_ub)
 
             # Generate sub-directory if it's not there.
             if not path.isdir(self.GetOutputDir()+'/freeflame_data/'):
@@ -550,9 +467,6 @@ class DataGenerator_Cantera(DataGenerator_Base):
                 # Extracting flamelet data
                 variables, data_calc = self.__SaveFlameletData(burner_flame, self.gas)
 
-                if self.__run_fuzzy:
-                    self.AddRandomData(burner_flame, mix_status, T_burner, "mdot_"+str(round(m_dot_next,4)))
-                    
                 # Generate sub-directory if it's not there.
                 if not path.isdir(self.GetOutputDir()+'/burnerflame_data/'):
                     mkdir(self.GetOutputDir()+'/burnerflame_data/')
@@ -585,8 +499,6 @@ class DataGenerator_Cantera(DataGenerator_Base):
 
                 print("Successfull burnerflame simulation at "+folder_header+": "+ str(mix_status)+" mdot: " + str(m_dot_next)+ " ("+str(i_burnerflame+1)+"/"+str(self.__n_flamelets)+")")
                     
-            # else:
-            #     print("delta pv too small at "+folder_header+": "+str(mix_status)+" (" + str(i_burnerflame+1) + "/"+str(self.__n_flamelets)+")")    
             except:
                 print("Unsuccessfull burnerflame simulation at "+folder_header+": "+ str(mix_status)+" mdot: " + str(m_dot_next)+ " ("+str(i_burnerflame+1)+"/"+str(self.__n_flamelets)+")")
                 pass
@@ -763,66 +675,6 @@ class DataGenerator_Cantera(DataGenerator_Base):
                     mkdir(self.__matlab__output_dir+'/equilibrium_data_MATLAB/'+folder_header+'_'+str(round(mix_status, 6)))
             self.__TranslateToMatlabFile(filename_plus_folder, eq_filename, self.__matlab__output_dir + "/equilibrium_data_MATLAB/"+folder_header+'_'+str(round(mix_status, 6)) + "/")
 
-    def ComputeHardCorner(self, mix_status:float, T_u:float):
-        print("Starting interpolation process...")
-        gas_eq = ct.Solution(self.__reaction_mechanism)
-        
-
-        if self.__define_equivalence_ratio:
-            folder_header = "phi"
-        else:
-            folder_header = "mixfrac"
-
-        fileHeader = "corner_data_"
-        if not path.isdir(self.GetOutputDir()+'/equilibrium_data/'):
-                        mkdir(self.GetOutputDir()+'/equilibrium_data/')
-        if not path.isdir(self.GetOutputDir() + "/equilibrium_data/" + folder_header+"_"+str(round(mix_status,6))):
-            mkdir(self.GetOutputDir() + "/equilibrium_data/" + folder_header+"_"+str(round(mix_status,6)))
-        
-        if self.__define_equivalence_ratio:
-            gas_eq.set_equivalence_ratio(mix_status, self.__fuel_string, self.__oxidizer_string)
-        else:
-            gas_eq.set_mixture_fraction(mix_status, self.__fuel_string, self.__oxidizer_string)
-        gas_eq.TP = T_u, ct.one_atm 
-        gas_eq.equilibrate("HP")
-        gas_eq.TP = T_u, ct.one_atm 
-        Y_target = gas_eq.Y 
-        N_enth_grid = self.__n_flamelets+1
-        Np_last_flamelet = len(self.last_h_flamelet)
-
-        for i in range(Np_last_flamelet):
-            enth_range = np.linspace(0, 1, N_enth_grid)
-            Y_interpolated = np.zeros([gas_eq.n_species, N_enth_grid])
-            T_interpolated = np.interp(enth_range, xp=np.array([0,1]),fp=np.array([self.last_T_flamelet[i], T_u]))
-            for iSp in range(gas_eq.n_species):
-                Y_interpolated[iSp, :] = np.interp(enth_range, xp=np.array([0, 1]),\
-                                                fp=np.array([self.last_Y_flamelet[iSp, i], Y_target[iSp]]))
-            
-            max_Y, min_Y = np.max(Y_interpolated, axis=1), np.min(Y_interpolated, axis=1)
-            min_T, max_T = max(T_interpolated), min(T_interpolated)
-            for j in range(N_enth_grid):
-                # T_fuzzy = T_interpolated[j] + (max_T - min_T)*self.__fuzzy_delta*(np.random.rand()-0.5)
-                # Y_fuzzy = Y_interpolated[:, j] + (max_Y - min_Y)*self.__fuzzy_delta*(np.random.rand()-0.5)
-                # Y_fuzzy = Y_fuzzy / np.sum(Y_fuzzy)
-                gas_eq.TP = T_interpolated[j], ct.one_atm 
-                gas_eq.Y = Y_interpolated[:, j]   
-                if j == 0:
-                    if not path.isdir(self.GetOutputDir()+'/equilibrium_data/'+folder_header+'_'+str(round(mix_status, 6))):
-                        mkdir(self.GetOutputDir()+'/equilibrium_data/'+folder_header+'_'+str(round(mix_status, 6)))
-                    variables, data_calc = self.__SaveFlameletData(gas_eq, self.gas)
-                    fid = open(self.GetOutputDir()+"/equilibrium_data/"+folder_header+"_"+str(round(mix_status,6))+"/"+ fileHeader +folder_header+"_"+str(round(mix_status,6))+"_"+str(i)+".csv", 'w+')
-                    fid.write(variables + "\n")
-                    fid.close()
-                else:
-                    _, data_calc_2 = self.__SaveFlameletData(gas_eq, self.gas)
-                    data_calc = np.append(data_calc, data_calc_2, axis=0)
-
-            eq_filename = fileHeader +folder_header+"_"+str(round(mix_status,6))+"_"+str(i)+".csv"
-            filename_plus_folder = self.GetOutputDir()+"/equilibrium_data/"+folder_header+"_"+str(round(mix_status,6))+"/"+ eq_filename
-            fid = open(filename_plus_folder, 'a+')
-            csvWriter = csv.writer(fid)
-            csvWriter.writerows(data_calc)
-            fid.close()
 
     def ComputeFlameletsOnMixStatus(self, mix_status:float):
         self._ComputeFlameletsOnMixStatus(mix_status)
@@ -876,10 +728,8 @@ class DataGenerator_Cantera(DataGenerator_Base):
             self.ComputeEquilibrium(mix_status=mix_status,\
                                     T_range=np.linspace(self.__T_unburnt_lower, self.__T_unburnt_upper, 2*self.__n_flamelets),\
                                     burnt=True)
-
-            # if self.__run_freeflames or self.__run_burnerflames:
-            #     self.ComputeHardCorner(mix_status=mix_status, T_u=self.__T_unburnt_lower)
-
+        return 
+    
     def ComputeFlamelets(self):
         """Generate and store all flamelet data for the current settings.
         """
@@ -1005,38 +855,38 @@ class DataGenerator_Cantera(DataGenerator_Base):
             data_matrix = np.append(data_matrix, np.array([[enthalpy]]), axis=1)
             variables += DefaultSettings_FGM.name_mixfrac+','
             data_matrix = np.append(data_matrix, np.array([mixture_fraction]), axis=1)
-            variables += 'Temperature,'
+            variables += '%s,' % FGMVars.Temperature.name
             data_matrix = np.append(data_matrix, np.array([[T]]), axis=1)
-            variables += 'Density,'
+            variables += '%s,' % FGMVars.Density.name
             data_matrix = np.append(data_matrix, np.array([[density]]), axis=1)
-            variables += 'MolarWeightMix,'
+            variables += '%s,' % FGMVars.MolarWeightMix.name
             data_matrix = np.append(data_matrix, mean_molar_weights.T, axis=1)
-            variables += 'Cp,'
+            variables += '%s,' % FGMVars.Cp.name
             data_matrix = np.append(data_matrix, np.array([[cp]]), axis=1)
-            variables += 'Conductivity,'
+            variables += '%s,' % FGMVars.Conductivity.name
             data_matrix = np.append(data_matrix, np.array([[k]]), axis=1)
-            variables += 'ViscosityDyn,'
+            variables += '%s,' % FGMVars.ViscosityDyn.name
             data_matrix = np.append(data_matrix, np.array([[viscosity]]), axis=1)
-            variables += 'Heat_Release'
+            variables += '%s' % FGMVars.Heat_Release.name
             data_matrix = np.append(data_matrix, np.array([[heat_rel]]), axis=1)
         else:
             variables += ','+DefaultSettings_FGM.name_enth+','
             data_matrix = np.append(data_matrix, np.reshape(enthalpy, [len(enthalpy),1]), axis=1)
             variables += DefaultSettings_FGM.name_mixfrac+','
             data_matrix = np.append(data_matrix, np.reshape(mixture_fraction, [len(mixture_fraction),1]), axis=1)
-            variables += 'Temperature,'
+            variables += '%s,' % FGMVars.Temperature.name
             data_matrix = np.append(data_matrix, np.reshape(T, [len(T), 1]), axis=1)
-            variables += 'Density,'
+            variables += '%s,' % FGMVars.Density.name
             data_matrix = np.append(data_matrix, np.reshape(density, [len(density), 1]), axis=1)
-            variables += 'MolarWeightMix,'
+            variables += '%s,' % FGMVars.MolarWeightMix.name
             data_matrix = np.append(data_matrix, mean_molar_weights.T, axis=1)
-            variables += 'Cp,'
+            variables += '%s,' % FGMVars.Cp.name
             data_matrix = np.append(data_matrix, np.reshape(cp, [len(cp), 1]), axis=1)
-            variables += 'Conductivity,'
+            variables += '%s,' % FGMVars.Conductivity.name
             data_matrix = np.append(data_matrix, np.reshape(k, [len(k), 1]), axis=1)
-            variables += 'ViscosityDyn,'
+            variables += '%s,' % FGMVars.ViscosityDyn.name
             data_matrix = np.append(data_matrix, np.reshape(viscosity, [len(viscosity), 1]), axis=1)
-            variables += 'Heat_Release'
+            variables += '%s' % FGMVars.Heat_Release.name
             data_matrix = np.append(data_matrix, np.reshape(heat_rel, [len(heat_rel), 1]), axis=1)
 
         return variables, data_matrix
@@ -1194,21 +1044,13 @@ def ComputeBoundaryData(Config:Config_FGM, run_parallel:bool=False, N_processors
         F.ComputeFlameletsOnMixStatus(mix_input)
 
 
-    mix_bounds = Config.GetMixtureBounds()
     Np_unb_mix = Config.GetNpMix()
     Config.gas.TP=300,101325
     Config.gas.set_equivalence_ratio(1.0, Config.GetFuelString(), Config.GetOxidizerString())
-    #if Config.GetMixtureStatus():
     mix_status_stoch = Config.gas.mixture_fraction(Config.GetFuelString(), Config.GetOxidizerString())
-    # else:
-    #     mix_status_stoch = Config.gas.equivalence_ratio(Config.GetFuelString(), Config.GetOxidizerString())
-    #if mix_bounds[0] < mix_status_stoch and mix_bounds[1] > mix_status_stoch:
     mixture_range_lean = np.linspace(0, mix_status_stoch, int(Np_unb_mix/2))
     mixture_range_rich = np.linspace(mix_status_stoch, 1, int(Np_unb_mix/2)+1)
     mixture_range = np.append(mixture_range_lean, mixture_range_rich[1:])
-    # else:
-    #     # Equivalence ratios to calculate flamelets for are system inputs
-    #     mixture_range = np.linspace(mix_bounds[0], mix_bounds[1], Np_unb_mix)
     
     if run_parallel:
         Parallel(n_jobs=N_processors)(delayed(ComputeEquilibriumData)(mix_status) for mix_status in mixture_range)
