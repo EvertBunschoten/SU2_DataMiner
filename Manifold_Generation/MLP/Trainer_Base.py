@@ -370,7 +370,7 @@ class MLPTrainer:
         return
     
     def SetDecaySteps(self):
-        self._decay_steps = int(float(self._Np_train) / (2**self._batch_expo))
+        self._decay_steps = int(1e-3 * self._n_epochs * float(self._Np_train) / (2**self._batch_expo))
         return 
     
     def RestartTraining(self):
@@ -1224,6 +1224,7 @@ class PhysicsInformedTrainer(CustomTrainer):
     vals_lambda:list[float] = None
     projection_vals:list[tf.constant] = None 
 
+    cv_boundary_arrays:list[np.ndarray] = None 
     projection_arrays:list[np.ndarray] = None 
     target_arrays:list[np.ndarray] = None 
     idx_PIvar:list[int] = None 
@@ -1330,29 +1331,42 @@ class PhysicsInformedTrainer(CustomTrainer):
         return 
     
     def SetTrainBatches(self):
+        """Define training data and consistency penalty batches for training.
+
+        :return: training data batches, consistency penalty batches
+        :rtype: list[tf.constant]
+        """
         train_batches_domain = tf.data.Dataset.from_tensor_slices((self._X_train_norm, self._Y_state_train_norm)).batch(2**self._batch_expo)
         domain_batches_list = [b for b in train_batches_domain]
 
         batch_size_train = 2**self._batch_expo
 
-        # Collect projection array data.
-        p_concatenated = tf.stack([tf.constant(p, dtype=self._dt) for p in self.projection_arrays],axis=2)
+        # For each physics-informed penalty function, collect the controlling variables, Jacobian projection array, and target projected gradient.
+        # Each array is batched and resized to the training data set.
+        cv_PI = []
+        p_PI = []
+        t_PI = []
+        for cv, p, t in zip(self.cv_boundary_arrays, self.projection_arrays, self.target_arrays):
+            p_tf = tf.constant(p, dtype=self._dt)
+            cv_tf = tf.constant(cv, dtype=self._dt)
+            t_tf = tf.constant(t, dtype=self._dt)
+            batches_bc = tf.data.Dataset.from_tensor_slices((cv_tf, p_tf, t_tf)).batch(batch_size_train)
+            batches_bc_list = [b for b in batches_bc]
+            Nb_bc = len(batches_bc_list)
+            cv_tf_resized = tf.concat([batches_bc_list[i % Nb_bc][0] for i in range(len(domain_batches_list))], axis=0)
+            p_tf_resized  = tf.concat([batches_bc_list[i % Nb_bc][1] for i in range(len(domain_batches_list))], axis=0)
+            t_tf_resized  = tf.concat([batches_bc_list[i % Nb_bc][2] for i in range(len(domain_batches_list))], axis=0)
+            cv_PI.append(cv_tf_resized)
+            p_PI.append(p_tf_resized)
+            t_PI.append(t_tf_resized)
+            
+        cv_concatenated = tf.stack([cv for cv in cv_PI],axis=2)
+        p_concatenated = tf.stack([p for p in p_PI],axis=2)
+        t_concatenated = tf.stack([t for t in t_PI],axis=1)
         
-        # Collect target projection gradient data.
-        Y_target_concatenated = tf.stack([tf.constant(t, dtype=self._dt) for t in self.target_arrays], axis=1)
-
-        # Collect boundary controlling variable data.
-        X_boundary_tf = tf.constant(self._X_boundary_norm, dtype=self._dt)
-
-        # Forumulate batches.
-        batches_concat = tf.data.Dataset.from_tensor_slices((X_boundary_tf, p_concatenated, Y_target_concatenated)).batch(batch_size_train)
+        batches_concat = tf.data.Dataset.from_tensor_slices((cv_concatenated, p_concatenated, t_concatenated)).batch(batch_size_train)
         batches_concat_list = [b for b in batches_concat]
-
-        # Re-size boundary data batches to that of the domain batches such that both data can be evaluated simultaneously during training.
-        Nb_boundary = len(batches_concat_list)
-        batches_concat_list_resized = [batches_concat_list[i % Nb_boundary] for i in range(len(domain_batches_list))]
-
-        return (domain_batches_list, batches_concat_list_resized)
+        return (domain_batches_list, batches_concat_list)
     
     @tf.function
     def ComputeFirstOrderDerivatives(self, x_norm_input:tf.constant,idx_out:int=0):
@@ -1389,6 +1403,7 @@ class PhysicsInformedTrainer(CustomTrainer):
         return val_lambda_new
 
     def CollectPIVars(self):
+        self.cv_boundary_arrays = []
         self.projection_arrays = []
         self.target_arrays = []
         self.vals_lambda = []
@@ -1560,7 +1575,7 @@ class PhysicsInformedTrainer(CustomTrainer):
         """
 
         # Evaluate MLP Jacobian on boundary data.
-        _, dy_pred_norm = self.ComputeFirstOrderDerivatives(x_norm_boundary, self.idx_PIvar[iVar])
+        _, dy_pred_norm = self.ComputeFirstOrderDerivatives(x_norm_boundary[:,:,iVar], self.idx_PIvar[iVar])
 
         # Project Jacobian along boundary data according to penalty function.
         project_dy_pred_norm = tf.reduce_sum(tf.multiply(precon_gradient[:,:,iVar], dy_pred_norm), axis=1)
