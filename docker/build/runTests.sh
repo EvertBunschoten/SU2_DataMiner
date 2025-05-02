@@ -12,6 +12,7 @@ Note: If you specify a working directory using the --workdir option for docker,
 
 flags=""
 branch=""
+testscript=""
 workdir=$PWD
 
 export CCACHE_DIR=$workdir/ccache
@@ -24,6 +25,10 @@ if [ "$#" -ne 0 ]; then
                     branch=$2
                     shift 2
                 ;;
+            -s)
+                    testscript=$2
+                    shift 2
+                ;;
             *)
                     echo "$usage" >&2
                     exit 1
@@ -34,23 +39,36 @@ fi
 
 
 if [ ! -z "$branch" ]; then
-  name="PINNTraining_$(echo $branch | sed 's/\//_/g')"
+  name="SU2_DataMiner_$(echo $branch | sed 's/\//_/g')"
   echo "Branch provided. Cloning to $PWD/src/$name"
   if [ ! -d "src" ]; then
     mkdir "src"
   fi
   cd "src"
-  git clone --recursive https://github.com/EvertBunschoten/PINNTraining $name
+  git clone --recursive https://github.com/EvertBunschoten/SU2_DataMiner $name
   cd $name
   git config --add remote.origin.fetch '+refs/pull/*/merge:refs/remotes/origin/refs/pull/*/merge'
   git config --add remote.origin.fetch '+refs/heads/*:refs/remotes/origin/refs/heads/*'
   git fetch origin
   git checkout $branch
   git submodule update
+  export SU2DATAMINER_HOME=$PWD
 else
-  if [ ! -d "src/PINNTraining" ]; then
-    echo "PINNTraining source directory not found. Make sure to mount existing PINNTraining at directory at /src/PINNTraining. Otherwise use -b to provide a branch."
+  if [ ! -d "src/SU2_DataMiner" ]; then
+    echo "SU2_DataMiner source directory not found. Make sure to mount existing SU2_DataMiner at directory at /src/SU2_DataMiner. Otherwise use -b to provide a branch."
     exit 1
   fi
-  cd src/PINNTraining
+  cd src/SU2_DataMiner
+  export SU2DATAMINER_HOME=$PWD
 fi
+
+name="SU2_DataMiner_$(echo $branch | sed 's/\//_/g')"
+echo "Running regression tests for $name"
+cd "RegressionTests"
+
+export PYTHONPATH=$PYTHONPATH:$SU2DATAMINER_HOME
+export PATH=$PATH:$SU2DATAMINER_HOME/bin/
+
+. /home/ubuntu/pyenv/bin/activate
+
+python3 $testscript

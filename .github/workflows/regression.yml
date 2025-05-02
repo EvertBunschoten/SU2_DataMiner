@@ -3,25 +3,28 @@ name: Regression and Unit Testing
 on:
   push:
     branches:
+      - 'develop'
       - 'main'
-  workflow_call:
-    inputs:
-      runner:
-        description: 'The github runner to use'
-        default: 'ubuntu-latest'
-        required: false 
-        type: string
-jobs:
-  build:
-    name: build package
-    strategy: 
-      fail-fast: false
-    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
-    steps:
-      - name: Say hi
-        run: echo "hi there"
+      - 'feature_regressiontests'
+  pull_request:
+    branches:
+      - 'develop'
+      - 'main'
 
-      - name: Docker Login
-        run: |
-          export CR_PAT=${{ secrets.DOCKER_TOKEN }}
-          echo $CR_PAT | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+jobs:
+
+  run_regression:
+    name: Run tests in container
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pre Cleanup
+        uses: docker://ghcr.io/evertbunschoten/su2dataminer_test:latest
+        with:
+          entrypoint: /bin/rm 
+          args: -rf src/
+
+      - name: Run regression tests
+        uses: docker://ghcr.io/evertbunschoten/su2dataminer_test:latest
+        with:
+          args: -b ${{ github.ref }} -s run_regression.py
+      

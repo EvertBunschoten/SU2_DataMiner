@@ -1,0 +1,31 @@
+FROM ubuntu:latest
+ENV LANG=C.UTF-8
+RUN apt-get update && apt-get install -y \
+    python3 \
+    git \
+    build-essential \
+    ccache && \ 
+    apt-get update && \
+    apt-get install -y python3-virtualenv && \
+    apt-get install -y python3.12-venv && \
+    python3 -m venv /home/ubuntu/pyenv && \
+    virtualenv -p /usr/bin/python3 /home/ubuntu/pyenv && \
+    . /home/ubuntu/pyenv/bin/activate && \
+    python3 -m pip install \
+    numpy \
+    pickled \
+    CoolProp \
+    cantera \
+    tqdm \
+    matplotlib \
+    tensorflow \
+    scikit-learn \
+    pyfiglet
+    # && virtualenv -p /usr/bin/python3 /home/ubuntu/pyenv \
+    # && python -m ensurepip --upgrade \
+    # && python -m pip install CoolProp tensorflow 
+
+# Copies your code file from your action repository to the filesystem path `/` of the container
+COPY docker/build/runTests.sh /runTests.sh
+
+ENTRYPOINT ["/runTests.sh"]
