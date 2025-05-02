@@ -71,6 +71,7 @@ class FGMVars(Enum):
     ProgressVariable=0
     EnthalpyTot=auto()
     MixtureFraction=auto()
+    Y_H=auto()
     Distance=auto()
     Velocity=auto()
     Temperature=auto()
@@ -90,6 +91,7 @@ class FGMVars(Enum):
 FGMSymbols:dict = {FGMVars.ProgressVariable.name : r"Progress variable $(\mathcal{Y})[-]$",\
                    FGMVars.EnthalpyTot.name : r"Total enthalpy $(h)[J \mathrm{kg}^{-1}]$",\
                    FGMVars.MixtureFraction.name : r"Mixture fraction $(Z)[-]$",\
+                   FGMVars.Y_H.name : r"Hydrogen radical mass fraction $(Y_H)[-]$",\
                    FGMVars.Distance.name : r"Flamelet solution grid $(x)[m]$",\
                    FGMVars.Velocity.name : r"Flamelet velocity $(u)[m s^{-1}]$",\
                    FGMVars.Temperature.name : r"Temperature $(T)[K]$",\
