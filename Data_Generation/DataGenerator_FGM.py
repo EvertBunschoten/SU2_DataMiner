@@ -39,7 +39,7 @@ np.random.seed(2)
 from Common.DataDrivenConfig import Config_FGM
 from Data_Generation.DataGenerator_Base import DataGenerator_Base
 from Common.CommonMethods import ComputeLewisNumber
-from Common.Properties import DefaultSettings_FGM
+from Common.Properties import DefaultSettings_FGM,FGMVars
 
 class DataGenerator_Cantera(DataGenerator_Base):
     """Generate flamelet data using Cantera.
@@ -86,6 +86,8 @@ class DataGenerator_Cantera(DataGenerator_Base):
 
     __fuzzy_delta:float = 0.1
 
+    __include_unityLewis:bool = False 
+
     def __init__(self, Config:Config_FGM=None):
         DataGenerator_Base.__init__(self, Config_in=Config)
 
@@ -114,6 +116,12 @@ class DataGenerator_Cantera(DataGenerator_Base):
         self.__transport_model = self._Config.GetTransportModel()
 
         self.gas = ct.Solution(self._Config.GetReactionMechanism())
+
+        FGM_control_vars = self._Config.GetControllingVariables()
+        if FGMVars.Y_H.name in FGM_control_vars:
+            self.__include_unityLewis = True 
+        else:
+            self.__include_unityLewis = False 
 
         self.__n_flamelets = self._Config.GetNpTemp()
         [self.__T_unburnt_lower, self.__T_unburnt_upper] = self._Config.GetUnbTempBounds()
@@ -428,6 +436,7 @@ class DataGenerator_Cantera(DataGenerator_Base):
         flame.transport_model = self.__transport_model
 
         # Try to solve the flamelet solution. If solution diverges, move on to next flamelet.
+        simulation_success = True
         try:
             flame.solve(loglevel=0, refine_grid=True, auto=True)
             
@@ -451,7 +460,10 @@ class DataGenerator_Cantera(DataGenerator_Base):
                 mkdir(self.GetOutputDir()+'/freeflame_data/'+folder_header+'_'+str(round(mix_status, 6)))
 
             if max(flame.grid) < 1.0:
-                freeflame_filename = "freeflamelet_"+folder_header+str(round(mix_status,6))+"_Tu"+str(round(T_ub, 4))+".csv"
+                flamelet_file_header = ""
+                if self.__include_unityLewis and self.__transport_model=="unity-Lewis-number":
+                    flamelet_file_header = "unityLewis"
+                freeflame_filename = "freeflamelet_"+folder_header+str(round(mix_status,6))+"_Tu"+str(round(T_ub, 4))+"_"+flamelet_file_header+".csv"
                 filename_plus_folder = self.GetOutputDir()+"/freeflame_data/"+folder_header+'_'+str(round(mix_status, 6)) + "/"+freeflame_filename
                 fid = open(filename_plus_folder, 'w+')
                 fid.write(variables + "\n")
@@ -470,10 +482,12 @@ class DataGenerator_Cantera(DataGenerator_Base):
                 print("Successfull Freeflame simulation at "+folder_header+": "+str(mix_status)+ " T_u: " +str(T_ub) + " ("+str(i_freeflame+1)+"/"+str(self.__n_flamelets)+")")
             else:
                 print("Unsuccessfull Freeflame simulation at "+folder_header+": "+str(mix_status)+ " T_u: " +str(T_ub) + " ("+str(i_freeflame+1)+"/"+str(self.__n_flamelets)+")")
-            
+                simulation_success = False
         except:
+            simulation_success = False 
             print("Unsuccessfull Freeflame simulation at "+folder_header+": "+str(mix_status)+ " T_u: " +str(T_ub) + " ("+str(i_freeflame+1)+"/"+str(self.__n_flamelets)+")")
-
+        return simulation_success
+    
     def compute_SingleBurnerFlame(self, mix_status:float, T_burner:float, m_dot:float):
         """Compute the solution of a single burner-stabilized flamelet.
 
@@ -528,7 +542,7 @@ class DataGenerator_Cantera(DataGenerator_Base):
 
         for i_burnerflame, m_dot_next in enumerate(m_dot):
             try:
-                burner_flame = self.compute_SingleBurnerFlame(mix_status, self.__T_unburnt_lower, m_dot_next)
+                burner_flame = self.compute_SingleBurnerFlame(mix_status, T_burner, m_dot_next)
                 if np.max(burner_flame.T) <= DefaultSettings_FGM.T_threshold:
                     print("Burnerflame at %s %.3e, mdot %.2e is not burning" % (folder_header, mix_status, m_dot_next))
                     return 
@@ -545,7 +559,11 @@ class DataGenerator_Cantera(DataGenerator_Base):
                 if not path.isdir(self.GetOutputDir()+'/burnerflame_data/'+folder_header+'_'+str(round(mix_status, 6))):
                     mkdir(self.GetOutputDir()+'/burnerflame_data/'+folder_header+'_'+str(round(mix_status, 6)))
                 # burnerflame_filename = "burnerflamelet_"+folder_header+str(round(mix_status,6))+"_mdot"+str(round(m_dot_next, 4))+".csv"
-                burnerflame_filename = "burnerflamelet_%s%.6f_mdot%.4f.csv" % (folder_header, mix_status, m_dot_next)
+                
+                flamelet_file_header = ""
+                if self.__include_unityLewis and self.__transport_model=="unity-Lewis-number":
+                    flamelet_file_header = "unityLewis"
+                burnerflame_filename = "burnerflamelet_%s%.6f_Tu%.4f_mdot%.4f_%s.csv" % (folder_header, mix_status, T_burner, m_dot_next, flamelet_file_header)
                 filename_plus_folder = self.GetOutputDir()+"/burnerflame_data/"+folder_header+'_'+str(round(mix_status, 6)) + "/"+burnerflame_filename
                 fid = open(filename_plus_folder, 'w+')
                 fid.write(variables + "\n")
@@ -807,6 +825,15 @@ class DataGenerator_Cantera(DataGenerator_Base):
             fid.close()
 
     def ComputeFlameletsOnMixStatus(self, mix_status:float):
+        self._ComputeFlameletsOnMixStatus(mix_status)
+        if self.__include_unityLewis:
+            transport_model_orig = self.__transport_model
+            self.__transport_model = "unity-Lewis-number"
+            self._ComputeFlameletsOnMixStatus(mix_status)
+            self.__transport_model = transport_model_orig
+        return 
+    
+    def _ComputeFlameletsOnMixStatus(self, mix_status:float):
         """Generate flamelet data for a given mixture fraction or equivalence ratio.
 
         :param mix_status: Mixture fraction or equivalence ratio value.
