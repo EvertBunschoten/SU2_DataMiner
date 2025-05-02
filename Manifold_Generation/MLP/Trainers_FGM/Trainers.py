@@ -56,7 +56,7 @@ class Train_Flamelet_Direct(TensorFlowFit):
         # Set train variables based on what kind of network is trained
         self.__Config = Config_in
         self._filedata_train = self.__Config.GetOutputDir()+"/"+self.__Config.GetConcatenationFileHeader()
-        self._controlling_vars = DefaultProperties.controlling_variables
+        self._controlling_vars = Config_in.GetControllingVariables().copy()
         self._train_vars = self.__Config.GetMLPOutputGroup(group_idx)
         self._train_name = "Group"+str(group_idx+1)
         self.SetInitializer("he_uniform")
@@ -75,11 +75,6 @@ class Train_Flamelet_Direct(TensorFlowFit):
         fid.write("Progress variable definition: " + "+".join(("%+.6e*%s" % (w, s)) for w, s in zip(self.__Config.GetProgressVariableWeights(), self.__Config.GetProgressVariableSpecies())))
         fid.write("\n\n")
         return super().add_additional_header_info(fid)
-    
-
-    def SetDecaySteps(self):
-        self._decay_steps=0.01157 * self._Np_train
-        return 
 
     def GetTrainData(self):
         super().GetTrainData()
@@ -100,6 +95,7 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
 
     __Config:Config_FGM = None    # FlameletAI configuration class to read output variables and hyper-parameters from.
 
+    __include_Hradical:bool = False 
     def __init__(self, Config_in:Config_FGM, group_idx:int=0):
         """Class constructor. Initialize a physics-informed trainer object for a given output group.
 
@@ -112,7 +108,8 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         # Initiate parent class.
         PhysicsInformedTrainer.__init__(self)
         self.__Config = Config_in 
-        self._controlling_vars = DefaultProperties.controlling_variables
+        self.__include_Hradical = (FGMVars.Y_H.name in self.__Config.GetControllingVariables())
+        self._controlling_vars = self.__Config.GetControllingVariables().copy()
         self._train_vars = self.__Config.GetMLPOutputGroup(group_idx)
         self.callback_every = 10
         self._boundary_data_file = self.__Config.GetOutputDir()+"/"+DefaultProperties.boundary_file_header+"_full.csv"
@@ -130,10 +127,6 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
 
         self.SetInitializer("he_uniform")
 
-        return 
-    
-    def SetDecaySteps(self):
-        self._decay_steps=0.01157 * self._Np_train
         return 
     
     def GetTrainData(self):
@@ -164,6 +157,13 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         projection_array_train[:, self._controlling_vars.index(DefaultProperties.name_enth)] = 1.0 
         
         target_grad_array = np.zeros([len(projection_array_train)])
+        return projection_array_train, target_grad_array
+    
+    def __SetYH_projection(self):
+        projection_array_train = np.zeros(np.shape(self._X_boundary_norm))
+        projection_array_train[:, self._controlling_vars.index(FGMVars.Y_H.name)] = 1.0 
+        
+        target_grad_array = np.ones([len(projection_array_train)])
         return projection_array_train, target_grad_array
     
     def __SetPVZ_projection(self):
@@ -198,7 +198,15 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         Y_b_st = self.__Config.gas.Y 
         pv_st = self.__Config.ComputeProgressVariable(variables=None, flamelet_data=None, Y_flamelet=Y_b_st[:,np.newaxis])[0]
         h_st = self.__Config.gas.enthalpy_mass
-        X_st_norm = self.scaler_function_x.transform(np.array([[pv_st, h_st, Z_st]]))[0,:]
+        cvs_st = np.zeros([1, len(self._controlling_vars)])
+        cvs_st[0, self._controlling_vars.index(FGMVars.ProgressVariable.name)] = pv_st 
+        cvs_st[0, self._controlling_vars.index(FGMVars.EnthalpyTot.name)] = h_st 
+        cvs_st[0, self._controlling_vars.index(FGMVars.MixtureFraction.name)] = Z_st
+        if self.__include_Hradical:
+            H_st = self.__Config.gas.Y[self.__Config.gas.species_index("H")]
+            cvs_st[0, self._controlling_vars.index(FGMVars.Y_H.name)] = H_st
+        
+        X_st_norm = self.scaler_function_x.transform(cvs_st)[0,:]
         Z_st_norm = X_st_norm[2]
 
         # Identify rich and lean boundary nodes.
@@ -256,22 +264,96 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
                 is_unb[iz] = False 
 
         return is_unb
-    
     def __SetBeta_pv_projection(self):
         """Get boundary penalty gradient projection array and target projected gradient for the progress variable preferential diffusion scalar.
 
         :return: boundary projection array, target projected gradient, and penalty labels.
         :rtype: list[np.ndarray], list[np.ndarray], list[str]
         """
-        projection_array_h, target_grad_h = self.__SetEnth_projection()
-        is_unb = self.__LocateUnbBoundaryNodes()
 
-        projection_array_h[np.invert(is_unb), :] = 0.0
-        target_grad_h[np.invert(is_unb)] = 0.0
+        # Enthalpy projection: dbeta_pv / dh = 0
+        cv_PI = self._X_train_norm 
+        projection_array_h = np.zeros(np.shape(cv_PI))
+        projection_array_h[:, self._controlling_vars.index(FGMVars.EnthalpyTot.name)] = 1.0
+        target_grad_h = np.zeros(len(cv_PI))
+
         bc_labels = ["Beta_pv : h"]
         projection_arrays = [projection_array_h]
         target_grad_arrays = [target_grad_h]
-        return projection_arrays, target_grad_arrays, bc_labels 
+        cv_boundary_arrays = [cv_PI]
+
+        # pv-Z projection: dpv / dZ * dbeta_pv / dpv + dbeta_pv / dZ = c
+        projection_array_pvz, is_unb, is_lean, is_stoch = self.__SetPVZ_projection()
+        beta_pv_scale = self._Y_scale[self._train_vars.index(FGMVars.Beta_ProgVar.name)]
+        Z_scale = self._X_scale[self._controlling_vars.index(FGMVars.MixtureFraction.name)]
+        target_grad_pvz = np.zeros(len(projection_array_pvz))
+        
+        Le_i = self.__Config.GetConstSpecieLewisNumbers()
+
+        pv_species = self.__Config.GetProgressVariableSpecies()
+        pv_weights = self.__Config.GetProgressVariableWeights()
+
+        z_fuel = 1.0
+        self.__Config.gas.set_mixture_fraction(z_fuel, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        Y_fuel = self.__Config.gas.Y 
+        
+        z_ox = 0.0
+        self.__Config.gas.set_mixture_fraction(z_ox, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        Y_ox = self.__Config.gas.Y 
+        
+        self.__Config.gas.set_equivalence_ratio(1.0, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        z_stoch = self.__Config.gas.mixture_fraction(self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        self.__Config.gas.TP = self.__Config.GetUnbTempBounds()[1], ct.one_atm 
+        self.__Config.gas.equilibrate("TP")
+        Y_stoch = self.__Config.gas.Y 
+        
+        beta_pv_fuel = beta_pv_ox = beta_pv_stoch = 0.0
+        for sp, w in zip(pv_species, pv_weights):
+            i_sp = self.__Config.gas.species_index(sp)
+            beta_pv_fuel += (w / Le_i[i_sp]) * Y_fuel[i_sp]
+            beta_pv_ox += (w / Le_i[i_sp]) * Y_ox[i_sp]
+            beta_pv_stoch += (w / Le_i[i_sp]) * Y_stoch[i_sp]
+
+        target_grad_pvz[is_unb] = (beta_pv_fuel - beta_pv_ox) / (z_fuel - z_ox)
+        target_grad_pvz[np.logical_and(np.invert(is_unb), is_lean)] = (beta_pv_stoch - beta_pv_ox) / (z_stoch - z_ox)
+        target_grad_pvz[np.logical_and(np.invert(is_unb), np.invert(is_lean))] = (beta_pv_fuel - beta_pv_stoch) / (z_fuel - z_stoch)
+        target_grad_pvz[np.logical_and(np.invert(is_unb), is_stoch)] = 0.0
+
+        target_grad_pvz *= (Z_scale / beta_pv_scale)
+
+        projection_arrays.append(projection_array_pvz)
+        target_grad_arrays.append(target_grad_pvz)
+        bc_labels.append("Beta_pv : pv-Z")
+        cv_boundary_arrays.append(self._X_boundary_norm)
+
+        if self.__include_Hradical:
+
+            # Y_H projection: dbeta_pv / dY_H = (alpha_H - alpha_N2) / Le_H
+            beta_pv_scale = self._Y_scale[self._train_vars.index(FGMVars.Beta_ProgVar.name)]
+            Y_H_scale = self._X_scale[self._controlling_vars.index(FGMVars.Y_H.name)]
+            pv_species = self.__Config.GetProgressVariableSpecies()
+            pv_weights = self.__Config.GetProgressVariableWeights()
+            Le_H = self.__Config.GetConstSpecieLewisNumbers()[self.__Config.gas.species_index("H")]
+            alpha_H = 0.0
+            alpha_N2 = 0.0
+            if "H" in pv_species:
+                alpha_H = pv_weights[pv_species.index("H")]
+            if ("N2") in pv_species:
+                alpha_N2 = 0.0
+
+            cv_PI = self._X_train_norm 
+            target_grad_YH = np.ones(len(cv_PI))
+            projection_array_YH = np.zeros(np.shape(cv_PI))
+            projection_array_YH[:, self._controlling_vars.index(FGMVars.Y_H.name)] = 1.0
+            target_grad_YH *= ((alpha_H - alpha_N2) / Le_H) * Y_H_scale / beta_pv_scale
+        
+            projection_arrays.append(projection_array_YH)
+            target_grad_arrays.append(target_grad_YH)
+            bc_labels.append("Beta_pv : (a_H - a_N2)/Le_H")
+            cv_boundary_arrays.append(cv_PI)
+
+
+        return cv_boundary_arrays, projection_arrays, target_grad_arrays, bc_labels 
     
     def __SetBeta_Z_projection(self):
         """Get boundary penalty gradient projection array and target projected gradient for the mixture fraction preferential diffusion scalar.
@@ -279,16 +361,79 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         :return: boundary projection array, target projected gradient, and penalty labels.
         :rtype: list[np.ndarray], list[np.ndarray], list[str]
         """
-        projection_array_h, target_grad_h = self.__SetEnth_projection()
-        is_unb = self.__LocateUnbBoundaryNodes()
-        projection_array_h[np.invert(is_unb), :] = 0.0
-        target_grad_h[np.invert(is_unb)] = 0.0
-        
 
+        # Enthalpy projection: dbeta_z / dh = 0
+        cv_PI = self._X_train_norm
+        projection_array_h = np.zeros(np.shape(cv_PI))
+        projection_array_h[:,self._controlling_vars.index(FGMVars.EnthalpyTot.name)] = 1.0
+        target_grad_h = np.zeros(len(cv_PI))
+        
         bc_labels = ["Beta_Z : h"]
         projection_arrays = [projection_array_h]
         target_grad_arrays = [target_grad_h]
-        return projection_arrays, target_grad_arrays, bc_labels 
+        cv_boundary_arrays = [cv_PI]
+
+        # pv-Z projection: dpv / dZ * dbeta_z / dpv + dbeta_z / dZ = c
+        projection_array_pvz, is_unb, is_lean, is_stoch = self.__SetPVZ_projection()
+        beta_Z_scale = self._Y_scale[self._train_vars.index(FGMVars.Beta_MixFrac.name)]
+        Z_scale = self._X_scale[self._controlling_vars.index(FGMVars.MixtureFraction.name)]
+        target_grad_pvz = np.zeros(len(projection_array_pvz))
+        
+        Le_i = self.__Config.GetConstSpecieLewisNumbers()
+        z_i = self.__Config.GetMixtureFractionCoefficients()
+        z_Ns = self.__Config.GetMixtureFractionCoeff_Carrier()
+
+        z_fuel = 1.0
+        self.__Config.gas.set_mixture_fraction(z_fuel, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        Y_fuel = self.__Config.gas.Y 
+        beta_Z_fuel = np.sum((z_i - z_Ns) * Y_fuel / Le_i)
+
+        z_ox = 0.0
+        self.__Config.gas.set_mixture_fraction(z_ox, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        Y_ox = self.__Config.gas.Y 
+        beta_Z_ox = np.sum((z_i - z_Ns) * Y_ox / Le_i)
+        
+        self.__Config.gas.set_equivalence_ratio(1.0, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        z_stoch = self.__Config.gas.mixture_fraction(self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        self.__Config.gas.TP = self.__Config.GetUnbTempBounds()[1], ct.one_atm 
+        self.__Config.gas.equilibrate("TP")
+        Y_stoch = self.__Config.gas.Y 
+        beta_Z_stoch = np.sum((z_i - z_Ns) * Y_stoch / Le_i)
+
+        target_grad_pvz[is_unb] = (beta_Z_fuel - beta_Z_ox) / (z_fuel - z_ox)
+        target_grad_pvz[np.logical_and(np.invert(is_unb), is_lean)] = (beta_Z_stoch - beta_Z_ox) / (z_stoch - z_ox)
+        target_grad_pvz[np.logical_and(np.invert(is_unb), np.invert(is_lean))] = (beta_Z_fuel - beta_Z_stoch) / (z_fuel - z_stoch)
+        target_grad_pvz[np.logical_and(np.invert(is_unb), is_stoch)] = 0.0
+
+        target_grad_pvz *= (Z_scale / beta_Z_scale)
+
+        projection_arrays.append(projection_array_pvz)
+        target_grad_arrays.append(target_grad_pvz)
+        bc_labels.append("Beta_Z : pv-Z")
+        cv_boundary_arrays.append(self._X_boundary_norm)
+
+        if self.__include_Hradical:
+
+            # Y_H projection: dbeta_z / dY_H = (z_H - z_N2) / Le_H
+            beta_Z_scale = self._Y_scale[self._train_vars.index(FGMVars.Beta_MixFrac.name)]
+            Y_H_scale = self._X_scale[self._controlling_vars.index(FGMVars.Y_H.name)]
+            z_i = self.__Config.GetMixtureFractionCoefficients()
+            z_H = z_i[self.__Config.gas.species_index("H")]
+            z_Ns = self.__Config.GetMixtureFractionCoeff_Carrier()
+            Le_H = self.__Config.GetConstSpecieLewisNumbers()[self.__Config.gas.species_index("H")]
+            cv_H = self._X_train_norm
+            target_grad_YH = np.ones(len(cv_H))
+            projection_array_YH = np.zeros(np.shape(cv_H))
+            projection_array_YH[:, self._controlling_vars.index(FGMVars.Y_H.name)] = 1.0
+            target_grad_YH *= ((z_H - z_Ns) / Le_H) * Y_H_scale / beta_Z_scale
+            
+            projection_arrays.append(projection_array_YH)
+            target_grad_arrays.append(target_grad_YH)
+            bc_labels.append("Beta_Z : (z_H - z_N2)/Le_H")
+            cv_boundary_arrays.append(cv_H)
+        return cv_boundary_arrays, projection_arrays, target_grad_arrays, bc_labels 
+    
+
     
     def __SetMolarWeight_projection(self):
         """Get boundary penalty gradient projection array and target projected gradient for the mean molecular weight.
@@ -296,14 +441,20 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         :return: boundary projection array, target projected gradient, and penalty labels.
         :rtype: list[np.ndarray], list[np.ndarray], list[str]
         """
-        projection_array_h, target_grad_array = self.__SetEnth_projection()
-        is_unb = self.__LocateUnbBoundaryNodes()
-        projection_array_h[np.invert(is_unb), :] = 0.0
-        target_grad_array[np.invert(is_unb)] = 0.0
+
+        # Enthalpy projection: dWM / dh = 0
+
+        cv_PI = self._X_train_norm
+        projection_array_h = np.zeros(np.shape(cv_PI))
+        projection_array_h[:,self._controlling_vars.index(FGMVars.EnthalpyTot.name)] = 1.0
+        target_grad_array = np.zeros(len(cv_PI))
+        
         bc_name = "W_M : h"
+        cv_boundary_arrays = [cv_PI]
         projection_arrays = [projection_array_h]
         target_grad_arrays = [target_grad_array]
-        return projection_arrays, target_grad_arrays, [bc_name]
+
+        return cv_boundary_arrays, projection_arrays, target_grad_arrays, [bc_name]
     
     def __SetSource_projection(self):
         """Get boundary penalty gradient projection arrays and target projected gradients for source terms.
@@ -311,12 +462,34 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         :return: boundary projection arrays, target projected gradients, and penalty labels.
         :rtype: list[np.ndarray], list[np.ndarray], list[str]
         """
+        cv_boundary_arrays = []
+        projection_arrays = []
+        target_grad_arrays = []
+        bc_labels = []
+
+        # pv-Z projection: dpv/dZ * dsource/dpv + dsource/dZ = 0.0
+
+        cv_PI = self._X_boundary_norm
         projection_array_pvz, _, _, _ = self.__SetPVZ_projection()
         target_grad_array_pvz = np.zeros(len(projection_array_pvz))
+        label = "Source : pv-Z"
+        cv_boundary_arrays.append(cv_PI)
+        projection_arrays.append(projection_array_pvz)
+        target_grad_arrays.append(target_grad_array_pvz)
+        bc_labels.append(label)
 
-        projection_array_h, target_array_h = self.__SetEnth_projection()
+        # Enthalpy projection: dsource / dh = 0.0
+        cv_PI = self._X_boundary_norm
+        projection_array_h = np.zeros(np.shape(cv_PI))
+        projection_array_h[:, self._controlling_vars.index(FGMVars.EnthalpyTot.name)] = 1.0
+        target_array_h = np.zeros(len(cv_PI))
+        label = "Source : h"
+        cv_boundary_arrays.append(cv_PI)
+        projection_arrays.append(projection_array_h)
+        target_grad_arrays.append(target_array_h)
+        bc_labels.append(label)
 
-        return [projection_array_pvz, projection_array_h], [target_grad_array_pvz, target_array_h]
+        return cv_boundary_arrays, projection_arrays, target_grad_arrays, bc_labels
         
     def __SetT_projection(self):
         """Get boundary penalty gradient projection array and target projected gradient for temperature.
@@ -325,14 +498,154 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         :rtype: list[np.ndarray], list[np.ndarray], list[str]
         """
 
-        _, Cp_boundary = GetReferenceData(self._boundary_data_file, x_vars=self._controlling_vars, train_variables=[FGMVars.Cp.name])
+        # Enthalpy projection: dT / dh = 1/c_p 
+
+        cv_PI_unscaled, Cp_boundary = GetReferenceData(self._boundary_data_file, x_vars=self._controlling_vars, train_variables=[FGMVars.Cp.name])
+        cv_PI = self.scaler_function_x.transform(cv_PI_unscaled)
         projection_array_train, _ = self.__SetEnth_projection()
         T_scale = self._Y_scale[self._train_vars.index(FGMVars.Temperature.name)]
         h_scale = self._X_scale[self._controlling_vars.index(DefaultProperties.name_enth)]
         
         target_grad_array = (1.0 / Cp_boundary[:,0]) * h_scale / T_scale
         bc_name = "Temperature : 1/cp"
-        return [projection_array_train], [target_grad_array], [bc_name]
+
+        cv_boundary_arrays = [cv_PI]
+        projection_arrays = [projection_array_train]
+        target_grads = [target_grad_array]
+        bc_names = [bc_name]
+        if self.__include_Hradical:
+
+            # Y_H projection: dT / dY_H = 1 / c_p_H
+            cv_PI = self._X_boundary_norm
+            projection_array_train_YH = np.zeros(np.shape(cv_PI))
+            projection_array_train_YH[:, self._controlling_vars.index(FGMVars.Y_H.name)] = 1.0
+            target_grad_YH = np.ones(len(cv_PI))
+            x_unscaled = self.scaler_function_x.inverse_transform(cv_PI)
+            Y_H_scale = self._X_scale[self._controlling_vars.index(FGMVars.Y_H.name)]
+            self.__Config.gas.set_equivalence_ratio(1.0, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+            val_Z_stoch = self.__Config.gas.mixture_fraction(self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+
+            # Retrieve c_p_H from Cantera
+            for i_b in range(len(x_unscaled)):
+                x = x_unscaled[i_b, :]
+                val_pv = x[self._controlling_vars.index(FGMVars.ProgressVariable.name)]
+                val_h = x[self._controlling_vars.index(FGMVars.EnthalpyTot.name)]
+                val_Z = x[self._controlling_vars.index(FGMVars.MixtureFraction.name)]
+                
+                self.__Config.gas.set_mixture_fraction(val_Z, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+                self.__Config.gas.TP = self.__Config.GetUnbTempBounds()[1], ct.one_atm
+                val_pv_unb = self.__Config.ComputeProgressVariable(variables=None, flamelet_data=None, Y_flamelet=self.__Config.gas.Y[:,np.newaxis])[0]
+                if val_pv > val_pv_unb+1e-3:
+                    if val_Z > val_Z_stoch:
+                        self.__Config.gas.equilibrate("HP")
+                    else:
+                        self.__Config.gas.equilibrate("TP")
+                self.__Config.gas.HP = val_h, ct.one_atm
+
+                cp_i = self.__Config.gas.partial_molar_cp/self.__Config.gas.molecular_weights
+                cp_H = cp_i[self.__Config.gas.species_index("H")]
+                target_grad_YH[i_b] = (1.0/cp_H) * Y_H_scale / T_scale
+
+            cv_boundary_arrays.append(cv_PI)
+            projection_arrays.append(projection_array_train_YH)
+            target_grads.append(target_grad_YH)
+            bc_names.append("Temperature : 1/cp_H")
+        return cv_boundary_arrays, projection_arrays, target_grads, bc_names
+    
+    def __SetCp_projection(self):
+        """Get boundary penalty gradient projection array and target projected gradient for the specific heat at constant pressure.
+
+        :return: boundary projection array, target projected gradient, and penalty labels.
+        :rtype: list[np.ndarray], list[np.ndarray], list[str]
+        """
+        Cp_scale = self._Y_scale[self._train_vars.index(FGMVars.Cp.name)]
+
+        # c_p projection: dc_p / dY_H = c_p_H
+
+        cv_PI = self._X_boundary_norm
+        projection_array_train_YH = np.zeros(np.shape(cv_PI))
+        target_grad_YH = np.ones(len(cv_PI))
+        projection_array_train_YH[:, self._controlling_vars.index(FGMVars.Y_H.name)] = 1.0
+
+        x_unscaled = self.scaler_function_x.inverse_transform(cv_PI)
+        Y_H_scale = self._X_scale[self._controlling_vars.index(FGMVars.Y_H.name)]
+        self.__Config.gas.set_equivalence_ratio(1.0, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        val_Z_stoch = self.__Config.gas.mixture_fraction(self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+
+        for i_b in range(len(x_unscaled)):
+            x = x_unscaled[i_b, :]
+            val_pv = x[self._controlling_vars.index(FGMVars.ProgressVariable.name)]
+            val_h = x[self._controlling_vars.index(FGMVars.EnthalpyTot.name)]
+            val_Z = x[self._controlling_vars.index(FGMVars.MixtureFraction.name)]
+            
+            self.__Config.gas.set_mixture_fraction(val_Z, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+            self.__Config.gas.TP = self.__Config.GetUnbTempBounds()[1], ct.one_atm
+            val_pv_unb = self.__Config.ComputeProgressVariable(variables=None, flamelet_data=None, Y_flamelet=self.__Config.gas.Y[:,np.newaxis])[0]
+            if val_pv > val_pv_unb+1e-3:
+                if val_Z > val_Z_stoch:
+                    self.__Config.gas.equilibrate("HP")
+                else:
+                    self.__Config.gas.equilibrate("TP")
+            self.__Config.gas.HP = val_h, ct.one_atm
+
+            cp_i = self.__Config.gas.partial_molar_cp/self.__Config.gas.molecular_weights
+            cp_H = cp_i[self.__Config.gas.species_index("H")]
+            target_grad_YH[i_b] = (cp_H) * Y_H_scale / Cp_scale
+
+        projection_arrays = [projection_array_train_YH]
+        target_grads = [target_grad_YH]
+        bc_names = ["Cp : cp_H"]
+        cv_boundary_arrays = [cv_PI]
+        return cv_boundary_arrays, projection_arrays, target_grads, bc_names
+    
+    def __SetBeta_h1_projection(self):
+        """Get boundary penalty gradient projection array and target projected gradient for the specific heat preferential diffusion scalar.
+
+        :return: boundary projection array, target projected gradient, and penalty labels.
+        :rtype: list[np.ndarray], list[np.ndarray], list[str]
+        """
+        Beta_h1_scale = self._Y_scale[self._train_vars.index(FGMVars.Beta_Enth_Thermal.name)]
+
+        cv_boundary_arrays = []
+        projection_arrays = []
+        target_grads = []
+        bc_names = []
+
+        # Y_H projection: dbeta_h1/dY_H = (cp_H - cp_N2)/Le_H
+
+        cv_PI = self._X_boundary_norm
+        projection_array_train_YH = np.zeros(np.shape(cv_PI))
+        projection_array_train_YH[:, self._controlling_vars.index(FGMVars.Y_H.name)] = 1.0
+        target_grad_YH = np.ones(len(cv_PI))
+        Le_H = self.__Config.GetConstSpecieLewisNumbers()[self.__Config.gas.species_index("H")]
+        x_unscaled = self.scaler_function_x.inverse_transform(cv_PI)
+        Y_H_scale = self._X_scale[self._controlling_vars.index(FGMVars.Y_H.name)]
+
+        self.__Config.gas.set_equivalence_ratio(1.0, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+        val_Z_stoch = self.__Config.gas.mixture_fraction(self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+
+        for i_b in range(len(x_unscaled)):
+            x = x_unscaled[i_b, :]
+            val_pv = x[self._controlling_vars.index(FGMVars.ProgressVariable.name)]
+            val_h = x[self._controlling_vars.index(FGMVars.EnthalpyTot.name)]
+            val_Z = x[self._controlling_vars.index(FGMVars.MixtureFraction.name)]
+            self.__Config.gas.set_mixture_fraction(val_Z, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+            val_pv_unb = self.__Config.ComputeProgressVariable(variables=None, flamelet_data=None, Y_flamelet=self.__Config.gas.Y[:,np.newaxis])[0]
+            if val_pv > val_pv_unb+1e-3:
+                if val_Z > val_Z_stoch:
+                    self.__Config.gas.equilibrate("HP")
+                else:
+                    self.__Config.gas.equilibrate("TP")
+            self.__Config.gas.HP = val_h, 101325
+            cp_i = self.__Config.gas.partial_cp/self.__Config.gas.molecular_weights
+            cp_H = cp_i[self.__Config.gas.species_index("H")]
+            cp_carrier = cp_i[self.__Config.gas.species_index("N2")]
+            target_grad_YH[i_b] = ((cp_H - cp_carrier) / Le_H) * (Y_H_scale) / Beta_h1_scale
+        projection_arrays.append(projection_array_train_YH)
+        target_grads.append(target_grad_YH)
+        bc_names.append("Beta_h1 : (cp_H - cp_N2)/Le_H")
+        cv_boundary_arrays.append(cv_PI)
+        return cv_boundary_arrays, projection_arrays, target_grads, bc_names 
     
     def __SetBeta_h2_projection(self):
         """Get boundary penalty gradient projection array and target projected gradient for the formation enthalpy preferential diffusion scalar.
@@ -341,9 +654,11 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         :rtype: list[np.ndarray], list[np.ndarray], list[str]
         """
 
+        # Enthalpy projection: dbeta_h2 / dh = 1 - beta_h1/c_p
+
         # Extract specific heat and beta_h1 from flamelet data.
-        _, Y_boundary = GetReferenceData(self._boundary_data_file, x_vars=self._controlling_vars, train_variables=[FGMVars.Cp.name, FGMVars.Beta_Enth_Thermal.name])
-        is_unb = self.__LocateUnbBoundaryNodes()
+        cv_PI_unscaled, Y_boundary = GetReferenceData(self._boundary_data_file, x_vars=self._controlling_vars, train_variables=[FGMVars.Cp.name, FGMVars.Beta_Enth_Thermal.name])
+        cv_PI = self.scaler_function_x.transform(cv_PI_unscaled)
         Cp_boundary = Y_boundary[:,0]
         Beta_h1_boundary = Y_boundary[:,1]
 
@@ -352,15 +667,53 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         h_scale = self._X_scale[self._controlling_vars.index(DefaultProperties.name_enth)]
 
         # Set projection array along total enthalpy direction.
-        projection_array_train, _ = self.__SetEnth_projection()
+        projection_array_train_enth = np.zeros(np.shape(cv_PI))
+        projection_array_train_enth[:, self._controlling_vars.index(FGMVars.EnthalpyTot.name)] = 1.0
+
         # Normalized projected target gradient.
-        target_grad_array = (1 - (Beta_h1_boundary / Cp_boundary)) * h_scale / Beta_h2_scale
+        target_grad_array_enth = (1 - (Beta_h1_boundary / Cp_boundary)) * h_scale / Beta_h2_scale
 
-        projection_array_train[np.invert(is_unb),:] = 0.0
-        target_grad_array[np.invert(is_unb)] = 0.0
+        cv_boundary_arrays = [cv_PI]
+        projection_arrays = [projection_array_train_enth]
+        target_grads = [target_grad_array_enth]
+        bc_names = ["Beta_h2 : 1 - Beta_h1/cp"]
 
-        bc_name = "Beta_h2 : 1 - Beta_h1/cp"
-        return [projection_array_train], [target_grad_array], [bc_name]
+        if self.__include_Hradical:
+            # Y_H projection: dbeta_h2 / dY_H = (h_H - h_N2)/Le_H
+
+            cv_PI = self._X_train_norm
+            projection_array_train_YH = np.zeros(np.shape(cv_PI))
+            projection_array_train_YH[:, self._controlling_vars.index(FGMVars.Y_H.name)] = 1.0
+            target_grad_YH = np.ones(len(cv_PI))
+            
+            Le_H = self.__Config.GetConstSpecieLewisNumbers()[self.__Config.gas.species_index("H")]
+            x_unscaled = self.scaler_function_x.inverse_transform(cv_PI)
+            Y_H_scale = self._X_scale[self._controlling_vars.index(FGMVars.Y_H.name)]
+            self.__Config.gas.set_equivalence_ratio(1.0, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+            val_Z_stoch = self.__Config.gas.mixture_fraction(self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+
+            for i_b in range(len(x_unscaled)):
+                x = x_unscaled[i_b, :]
+                val_pv = x[self._controlling_vars.index(FGMVars.ProgressVariable.name)]
+                val_h = x[self._controlling_vars.index(FGMVars.EnthalpyTot.name)]
+                val_Z = x[self._controlling_vars.index(FGMVars.MixtureFraction.name)]
+                self.__Config.gas.set_mixture_fraction(val_Z, self.__Config.GetFuelString(), self.__Config.GetOxidizerString())
+                val_pv_unb = self.__Config.ComputeProgressVariable(variables=None, flamelet_data=None, Y_flamelet=self.__Config.gas.Y[:,np.newaxis])[0]
+                if val_pv > val_pv_unb+1e-3:
+                    if val_Z > val_Z_stoch:
+                        self.__Config.gas.equilibrate("HP")
+                    else:
+                        self.__Config.gas.equilibrate("TP")
+                self.__Config.gas.HP = val_h, DefaultProperties.pressure
+                h_i = self.__Config.gas.partial_molar_enthalpies/self.__Config.gas.molecular_weights
+                h_H = h_i[self.__Config.gas.species_index("H")]
+                h_carrier = h_i[self.__Config.gas.species_index("N2")]
+                target_grad_YH[i_b] = ((h_H - h_carrier) / Le_H) * (Y_H_scale) / Beta_h2_scale
+            cv_boundary_arrays.append(cv_PI)
+            projection_arrays.append(projection_array_train_YH)
+            target_grads.append(target_grad_YH)
+            bc_names.append("Beta_h2 : (h_H - h_N2)/Le_H")
+        return cv_boundary_arrays, projection_arrays, target_grads, bc_names 
     
     def CollectPIVars(self):
         """Collect the Jacobian projection arrays and projected target arrays for any physics-informed variables in the training data set.
@@ -368,65 +721,43 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
 
         val_lambda_default = super().CollectPIVars()
         for ivar, var in enumerate(self._train_vars):
+            proj_method = None 
 
-            # Apply general invariance for source terms.
+            # Check which projection method should be used.
             if (var == FGMVars.ProdRateTot_PV.name) or (var == FGMVars.Heat_Release.name) or ("Y_dot" in var):
-            
-                proj_arrays, target_grads = self.__SetSource_projection()
-                for i in range(len(proj_arrays)):
-                    self.idx_PIvar.append(ivar)
-                    self.projection_arrays.append(proj_arrays[i])
-                    self.target_arrays.append(target_grads[i])
-                    self.vals_lambda.append(val_lambda_default)
-                self.lamba_labels.append(var + " : pv-Z")
-                self.lamba_labels.append(var + " : h")
+                proj_method = self.__SetSource_projection
 
-            # Enforce total enthalpy invariance for pv and z preferential diffusion scalars.
             if (var == FGMVars.Beta_ProgVar.name):
-                proj_arrays, target_grads, bc_names = self.__SetBeta_pv_projection()
-                for p, t, b in zip(proj_arrays, target_grads, bc_names):
-                    self.idx_PIvar.append(ivar)
-                    self.projection_arrays.append(p)
-                    self.target_arrays.append(t)
-                    self.lamba_labels.append(b)
-                    self.vals_lambda.append(val_lambda_default)
+                proj_method = self.__SetBeta_pv_projection
 
             if (var == FGMVars.Beta_MixFrac.name):
-                proj_arrays, target_grads, bc_names = self.__SetBeta_Z_projection()
-                for p, t, b in zip(proj_arrays, target_grads, bc_names):
-                    self.idx_PIvar.append(ivar)
-                    self.projection_arrays.append(p)
-                    self.target_arrays.append(t)
-                    self.lamba_labels.append(b)
-                    self.vals_lambda.append(val_lambda_default)
+                proj_method = self.__SetBeta_Z_projection
 
             if (var == FGMVars.MolarWeightMix.name):
-                proj_arrays, target_grads, bc_names = self.__SetMolarWeight_projection()
-                for p, t, b in zip(proj_arrays, target_grads, bc_names):
-                    self.idx_PIvar.append(ivar)
-                    self.projection_arrays.append(p)
-                    self.target_arrays.append(t)
-                    self.lamba_labels.append(b)
-                    self.vals_lambda.append(val_lambda_default)
+                proj_method = self.__SetMolarWeight_projection
 
             if (var == FGMVars.Temperature.name):
-                proj_arrays, target_grads, bc_names = self.__SetT_projection()
-                for p, t, b in zip(proj_arrays, target_grads, bc_names):
-                    self.idx_PIvar.append(ivar)
-                    self.projection_arrays.append(p)
-                    self.target_arrays.append(t)
-                    self.lamba_labels.append(b)  
-                    self.vals_lambda.append(val_lambda_default)
+                proj_method = self.__SetT_projection
 
             if (var == FGMVars.Beta_Enth.name):
-                proj_arrays, target_grads, bc_names = self.__SetBeta_h2_projection()
-                for p, t, b in zip(proj_arrays, target_grads, bc_names):
+                proj_method = self.__SetBeta_h2_projection
+
+            if (self.__include_Hradical and (var == FGMVars.Beta_Enth_Thermal.name)):
+                proj_method = self.__SetBeta_h1_projection
+
+            if (self.__include_Hradical and (var == FGMVars.Cp.name)):
+                proj_method = self.__SetCp_projection
+            
+            # Collect consistency penalty controlling variable data, projection arrays, and target gradient arrays.
+            if proj_method:
+                cv_arrays, proj_arrays, target_grads, bc_names = proj_method()
+                for cv, p, t, b in zip(cv_arrays, proj_arrays, target_grads, bc_names):
                     self.idx_PIvar.append(ivar)
                     self.projection_arrays.append(p)
                     self.target_arrays.append(t)
                     self.lamba_labels.append(b)
+                    self.cv_boundary_arrays.append(cv)
                     self.vals_lambda.append(val_lambda_default)
-
         self._N_bc = len(self.vals_lambda) 
         return 
     
@@ -452,9 +783,11 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         self.pv_unb = np.zeros([len(mixfrac_range), len(T_range)])
         self.h_unb = np.zeros([len(mixfrac_range), len(T_range)])
         self.z_unb = np.zeros([len(mixfrac_range), len(T_range)])
+        self.y_h_unb = np.zeros([len(mixfrac_range), len(T_range)])
         self.pv_b = np.zeros([len(mixfrac_range), len(T_range)])
         self.h_b = np.zeros([len(mixfrac_range), len(T_range)])
         self.z_b = np.zeros([len(mixfrac_range), len(T_range)])
+        self.y_h_b = np.zeros([len(mixfrac_range), len(T_range)])
 
         gas_unb = ct.Solution(self.__Config.GetReactionMechanism())
         gas_b = ct.Solution(self.__Config.GetReactionMechanism())
@@ -481,11 +814,13 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
                 self.pv_unb[iZ, iT] = pv_unb
                 self.h_unb[iZ, iT] = gas_unb.enthalpy_mass
                 self.z_unb[iZ, iT] = Z 
+                self.y_h_unb[iZ, iT] = gas_unb.Y[gas_unb.species_index("H")]
 
                 gas_b.TP = T_range_b[iT], DefaultProperties.pressure
                 self.pv_b[iZ, iT] = pv_b
                 self.h_b[iZ, iT] = gas_b.enthalpy_mass
                 self.z_b[iZ, iT] = Z 
+                self.y_h_b[iZ, iT] = gas_b.Y[gas_unb.species_index("H")]
         if self._verbose > 0:
             print("Done!")
         
@@ -494,7 +829,6 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
     def __PlotUnbData(self):
         """Plot predicted quantities on chemical equilibrium data.
         """
-
         pv_unb = self.pv_unb.flatten()
         h_unb = self.h_unb.flatten()
         z_unb = self.z_unb.flatten()
@@ -503,9 +837,24 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         h_b = self.h_b.flatten()
         z_b = self.z_b.flatten()
         
-        X_unb = np.hstack((pv_unb[:, np.newaxis], h_unb[:,np.newaxis], z_unb[:,np.newaxis]))
+        X_unb = np.zeros([len(pv_unb), len(self._controlling_vars)])
+        X_b = np.zeros([len(pv_unb), len(self._controlling_vars)])
+
+        X_unb[:, self._controlling_vars.index(FGMVars.ProgressVariable.name)] = pv_unb
+        X_unb[:, self._controlling_vars.index(FGMVars.EnthalpyTot.name)] = h_unb
+        X_unb[:, self._controlling_vars.index(FGMVars.MixtureFraction.name)] = z_unb
+        
+        X_b[:, self._controlling_vars.index(FGMVars.ProgressVariable.name)] = pv_b
+        X_b[:, self._controlling_vars.index(FGMVars.EnthalpyTot.name)] = h_b
+        X_b[:, self._controlling_vars.index(FGMVars.MixtureFraction.name)] = z_b
+
+        if self.__include_Hradical:
+            y_h_unb = self.y_h_unb.flatten()
+            y_h_b = self.y_h_b.flatten()
+            X_unb[:, self._controlling_vars.index(FGMVars.Y_H.name)] = y_h_unb
+            X_b[:, self._controlling_vars.index(FGMVars.Y_H.name)] = y_h_b
+            
         X_unb_norm_np = self.scaler_function_x.transform(X_unb)
-        X_b = np.hstack((pv_b[:, np.newaxis], h_b[:,np.newaxis], z_b[:,np.newaxis]))
         X_b_norm_np = self.scaler_function_x.transform(X_b)
         
         X_unb_norm = tf.constant(X_unb_norm_np,dtype=self._dt)
@@ -830,10 +1179,10 @@ def PlotFlameletData(Trainer:MLPTrainer, Config:Config_FGM, train_name:str):
         for iCv, Cv in enumerate(Trainer._controlling_vars):
             if Cv == DefaultProperties.name_pv:
                 CV_flamelet[:, iCv] = Config.ComputeProgressVariable(variables_flamelet, flameletData)
+            elif Cv == FGMVars.Y_H.name:
+                CV_flamelet[:, iCv] = flameletData[:, variables_flamelet.index("Y-H")]
             else:
                 CV_flamelet[:, iCv] = flameletData[:, variables_flamelet.index(Cv)]
-        
-        CV_flamelet_norm = Trainer.scaler_function_x.transform(CV_flamelet)
         
         ref_data_flamelet = np.zeros([len(flameletData), len(Trainer._train_vars)])
 
