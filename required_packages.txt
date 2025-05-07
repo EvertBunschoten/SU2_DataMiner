@@ -1,4 +1,4 @@
-cantera
+cantera==3.0.1
 CoolProp
 csvkit
 gmsh
