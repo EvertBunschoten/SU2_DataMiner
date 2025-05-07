@@ -5,7 +5,7 @@ gmsh
 joblib
 keras
 matplotlib
-numpy=1.26.4
+numpy==1.26.4
 pypickle
 pyfiglet
 mkl_random
