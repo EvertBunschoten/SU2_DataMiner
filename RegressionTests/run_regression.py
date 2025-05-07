@@ -22,8 +22,16 @@ def main():
     fluid_MM.test_files = ["fluid_data_test.csv"]
     test_list_NICFD.append(fluid_MM)
 
+    hydrogen_flamelet = TestCase("H2_Flamelet")
+    hydrogen_flamelet.config_dir = "FlameletGeneration/Adiabatic_H2/"
+    hydrogen_flamelet.config_file = "adiabatic_flamelets.cfg"
+    hydrogen_flamelet.exec_command = "./generate_flamelet_data.py"
+    hydrogen_flamelet.reference_files = ["flamelet_data.ref"]
+    hydrogen_flamelet.test_files = ["freeflame_data/phi_1.0/freeflamelet_phi1.0_Tu300.0.csv"]
+    test_list_FGM.append(hydrogen_flamelet)
+    
     unittest_mixturefraction = TestCase("Mixture fraction")
-    unittest_mixturefraction.config_dir = "Physics/"
+    unittest_mixturefraction.config_dir = "Physics/MixtureFraction/"
     unittest_mixturefraction.config_file = ""
     unittest_mixturefraction.exec_command = "./mixturefraction_computation.py"
     unittest_mixturefraction.reference_files = ["mixture_fraction_verification.ref"]
