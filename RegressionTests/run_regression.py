@@ -22,6 +22,14 @@ def main():
     fluid_MM.test_files = ["fluid_data_test.csv"]
     test_list_NICFD.append(fluid_MM)
 
+    consistency_EEoS = TestCase("Consistency check EEoS")
+    consistency_EEoS.config_dir = "Physics/EntropicEoS/"
+    consistency_EEoS.config_file = ""
+    consistency_EEoS.exec_command = "./consistency_check.py"
+    consistency_EEoS.reference_files = ["consistency_check.ref"]
+    consistency_EEoS.test_files = ["consistency_check.txt"]
+    test_list_NICFD.append(consistency_EEoS)
+
     hydrogen_flamelet = TestCase("H2_Flamelet")
     hydrogen_flamelet.config_dir = "FlameletGeneration/Adiabatic_H2/"
     hydrogen_flamelet.config_file = "adiabatic_flamelets.cfg"
