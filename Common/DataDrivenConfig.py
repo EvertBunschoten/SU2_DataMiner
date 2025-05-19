@@ -631,7 +631,8 @@ class Config_FGM(Config):
 
     __Le_avg_method = avg_Le_const
     __Le_const_sp:np.ndarray[float] = None 
-    __custom_Le_av_set:bool = False 
+    __Le_avg_eq_ratio:float = 0.5
+    __Le_avg_T_unb:float = 300.0
 
     def __init__(self, load_file:str=None):
         """Class constructor
@@ -714,8 +715,7 @@ class Config_FGM(Config):
             self.SetProgressVariableDefinition(pv_sp_default, pv_w_default)
             self.__custom_pv_set = False
 
-        if not self.__custom_Le_av_set:
-            self.SetAverageLewisNumbers()
+        self.SetAverageLewisNumbers()
 
         return 
     
@@ -1045,8 +1045,7 @@ class Config_FGM(Config):
             self.__mix_status_lower = mix_lower
             self.__mix_status_upper = mix_upper
 
-        if not self.__custom_Le_av_set:
-            self.SetAverageLewisNumbers()
+        self.SetAverageLewisNumbers()
 
         return 
     
@@ -1102,8 +1101,7 @@ class Config_FGM(Config):
             self.__T_unb_upper = T_unb_upper
             self.__T_unb_lower = T_unb_lower
 
-        if not self.__custom_Le_av_set:
-            self.SetAverageLewisNumbers()
+        self.SetAverageLewisNumbers()
 
         return 
     
@@ -1150,8 +1148,7 @@ class Config_FGM(Config):
 
         """
         self.__run_mixture_fraction = run_as_mixture_fraction
-        if not self.__custom_Le_av_set:
-            self.SetAverageLewisNumbers()
+        self.SetAverageLewisNumbers()
 
         return
     
@@ -1349,6 +1346,8 @@ class Config_FGM(Config):
         pv_species.append(major_product)
         pv_weights.append(1.0 / self.gas.molecular_weights[self.gas.species_index(major_product)])
 
+        denominator = sum([abs(w) for w in pv_weights])
+        pv_weights = [w / denominator for w in pv_weights]
         return pv_species, pv_weights
     
     def SetPassiveSpecies(self, passive_species:list[str]=[]):
@@ -1477,6 +1476,32 @@ class Config_FGM(Config):
                 ppv += self.__pv_weights[iPv] * (prodrate_pos + prodrate_neg * mass_fraction)
             return ppv 
     
+    def GetSparkSources(self, val_phi:float, val_T:float, iGroup:int=0):
+        self.gas.set_equivalence_ratio(val_phi, self.__fuel_string, self.__oxidizer_string)
+        self.gas.TP=val_T,DefaultSettings_FGM.pressure 
+        
+        flame = ct.FreeFlame(self.gas)
+        flame.transport_model = self.__transport_model 
+        flame.solve(auto=True,refine_grid=True,loglevel=0)
+        dx = flame.grid[1:] - flame.grid[:-1]
+        t_res = np.sum(dx / flame.velocity[:-1])
+        qdot = flame.heat_release_rate
+        ix_max = np.argmax(qdot)
+        ydot = flame.net_production_rates
+        ppv = self.ComputeProgressVariable_Source(variables=None,flamelet_data=None,net_production_rate_flamelet=ydot)
+        ppv_spark = ppv[ix_max]
+        control_vars = self._control_vars[iGroup]
+        species_spark = []
+        for sp in self.__passive_species:
+            ix_sp = self.gas.species_index(sp)
+            pp_sp = ydot[ix_sp]*self.gas.molecular_weights[ix_sp]
+            species_spark.append(pp_sp[ix_max])
+        sources_spark = np.zeros(len(control_vars) + len(self.__passive_species))
+        sources_spark[control_vars.index("ProgressVariable")] = ppv_spark
+        for i_sp in range(len(self.__passive_species)):
+            sources_spark[len(control_vars) + i_sp] = species_spark[i_sp]
+        return sources_spark
+    
     def EnablePreferentialDiffusion(self, use_PD:bool=DefaultSettings_FGM.preferential_diffusion):
         """Include preferential diffusion scalars in flamelet data manifold.
 
@@ -1532,24 +1557,24 @@ class Config_FGM(Config):
             T_reactants = 0.5*(self.__T_unb_lower + self.__T_unb_upper)
         else:
             T_reactants = reactant_temperature 
-        
+        self.__Le_avg_T_unb = T_reactants 
+
         if mixture_status == None:
             mixture_status_gas = 0.5*(self.__mix_status_lower + self.__mix_status_upper)
         else:
             mixture_status_gas = mixture_status
-
+        self.__Le_avg_eq_ratio = mixture_status_gas
         self.gas.TP =T_reactants, DefaultSettings_FGM.pressure 
         if self.__run_mixture_fraction:
-            self.gas.set_mixture_fraction(mixture_status_gas, self.__fuel_string, self.__oxidizer_string)
+            self.gas.set_mixture_fraction(self.__Le_avg_eq_ratio, self.__fuel_string, self.__oxidizer_string)
         else:
-            self.gas.set_equivalence_ratio(mixture_status_gas, self.__fuel_string, self.__oxidizer_string)
+            self.gas.set_equivalence_ratio(self.__Le_avg_eq_ratio, self.__fuel_string, self.__oxidizer_string)
         
         Le_reactants = ComputeLewisNumber(self.gas)
         self.gas.equilibrate("HP")
         Le_products = ComputeLewisNumber(self.gas)
 
-        self.__Le_const_sp = 0.5*(Le_reactants + Le_products)
-        self.__custom_Le_av_set = True 
+        self.__Le_const_sp = 0.5*(Le_reactants + Le_products) 
 
         return 
     
