@@ -390,6 +390,7 @@ class DataGenerator_CoolProp(DataGenerator_Base):
         
         return 
     
+    
     def __GetStateVector(self):
         state_vector_vals = np.ones(EntropicVars.N_STATE_VARS.value)
         correct_phase = True 
