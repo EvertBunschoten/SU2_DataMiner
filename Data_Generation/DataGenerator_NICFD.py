@@ -47,6 +47,7 @@ class DataGenerator_CoolProp(DataGenerator_Base):
     """
     _Config:Config_NICFD
     fluid = None 
+    # TODO: change to 'excluded_phases'
     __accepted_phases:list[int] = [CoolP.iphase_gas, CoolP.iphase_supercritical_gas, CoolP.iphase_supercritical]
     # Pressure and temperature limits
     __use_PT:bool = DefaultSettings_NICFD.use_PT_grid
@@ -74,6 +75,11 @@ class DataGenerator_CoolProp(DataGenerator_Base):
     __success_locations:np.ndarray[bool] = None 
     __mixture:bool = False 
 
+    __two_phase:bool = False 
+    # TODO: include models for transport properties 
+
+    # TODO: include relative finite-difference step sizes 
+
     def __init__(self, Config_in:Config_NICFD=None):
         DataGenerator_Base.__init__(self, Config_in=Config_in)
 
@@ -85,6 +91,11 @@ class DataGenerator_CoolProp(DataGenerator_Base):
             self.__use_PT = self._Config.GetPTGrid()
             if len(self._Config.GetFluidNames()) > 1:
                 self.__mixture = True 
+
+            self.__two_phase = self._Config.TwoPhase()
+            # TODO: update excluded phases based on twophase setting 
+
+            # TODO: retrieve transport property settings
 
             self.fluid = CP.AbstractState(self._Config.GetEquationOfState(), self._Config.GetFluid())
             self.__auto_range = self._Config.GetAutoRange()
@@ -339,7 +350,7 @@ class DataGenerator_CoolProp(DataGenerator_Base):
                         T = self.fluid.T()
                         self.fluid.update(CP.PT_INPUTS, p, T)
                     # Check if fluid phase is not vapor or liquid
-                    self.__StateVars_fluid[i,j,:], self.__success_locations[i,j] = self.__GetStateVector()
+                    self.__StateVars_fluid[i,j,:], self.__success_locations[i,j] = self.GetStateVector()
                 except:
                     self.__success_locations[i,j] = False 
                     self.__StateVars_fluid[i, j, :] = None
@@ -390,11 +401,12 @@ class DataGenerator_CoolProp(DataGenerator_Base):
         
         return 
     
-    
-    def __GetStateVector(self):
+    def GetStateVector(self):
         state_vector_vals = np.ones(EntropicVars.N_STATE_VARS.value)
         correct_phase = True 
+        # TODO: change according to excluded phases
         if self.fluid.phase() in self.__accepted_phases:
+            # TODO: rewrite according to test script methods
             state_vector_vals[EntropicVars.s.value] = self.fluid.smass()
             if not self.__mixture:
                     state_vector_vals[EntropicVars.dsde_rho.value] = self.fluid.first_partial_deriv(CP.iSmass, CP.iUmass, CP.iDmass)
@@ -418,10 +430,17 @@ class DataGenerator_CoolProp(DataGenerator_Base):
             state_vector_vals[EntropicVars.dsdp_rho.value] = self.fluid.first_partial_deriv(CP.iSmass, CP.iP, CP.iDmass)
             state_vector_vals[EntropicVars.dsdrho_p.value] = self.fluid.first_partial_deriv(CP.iSmass, CP.iDmass, CP.iP)
             state_vector_vals[EntropicVars.cp.value] = self.fluid.cpmass()
+            
         else:
             correct_phase = False
             state_vector_vals[:] = None 
         return state_vector_vals, correct_phase
+    
+    # TODO: migrate methods for derivative calculation from test script 
+
+    def UpdateFluid(self, val_rho, val_e):
+        self.fluid.update(CP.DmassUmass_INPUTS, val_rho, val_e)
+        return 
     
     def VisualizeFluidData(self):
         """Visualize computed fluid data.

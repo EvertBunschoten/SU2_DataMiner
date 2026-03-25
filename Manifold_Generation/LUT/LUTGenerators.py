@@ -23,6 +23,9 @@
 #=============================================================================================#
 
 import numpy as np 
+import CoolProp.CoolProp as CP
+from Common.Properties import EntropicVars
+from su2dataminer.generate_data import DataGenerator_CoolProp
 from scipy.spatial import ConvexHull, Delaunay
 from sklearn.preprocessing import MinMaxScaler,RobustScaler,StandardScaler, QuantileTransformer
 import matplotlib.pyplot as plt 
@@ -36,49 +39,30 @@ from multiprocessing import Pool
 from sklearn.metrics import mean_squared_error
 from Common.Interpolators import Invdisttree 
 from random import sample 
+from concave_hull import concave_hull, concave_hull_indexes
 
-class SU2TableGenerator:
+class SU2TableGenerator_NICFD:
 
     _Config:Config_NICFD = None # Config_FGM class from which to read settings.
+    _DataGenerator:DataGenerator_CoolProp = None 
     _savedir:str
 
-    _mixfrac_min:float = None     # Minimum mixture fraction value of the flamelet data.
-    _mixfrac_max:float = None     # Maximum mixture fraction value of the flamelet data.
+    _base_cell_size:float = 2e-2      # Table level base cell size.
 
-    _pv_full_norm:np.ndarray[float] = None        # Normalized progress variable values of the flamelet data.
-    _enth_full_norm:np.ndarray[float] = None      # Normalized total enthalpy values of the flamelet data.
-    _mixfrac_full_norm:np.ndarray[float] = None   # Normalized mixture fraction values of the flamelet data.
+    _refined_cell_size:float = 5e-3#2.5e-3#1.5e-3   # Table level refined cell size.
+    _refinement_radius:float = 1e-2#5e-2     # Table level radius within which refinement is applied.
 
-    _Fluid_Variables:list[str] = None  # Variable names in the concatenated flamelet data file.
-    _Flamelet_Data:np.ndarray[float] = None     # Concatenated flamelet data.
-
-    _custom_table_limits_set:bool = False 
-    _mixfrac_min_table:float = None     # Lower mixture fraction limit of the table.
-    _mixfrac_max_table:float = None     # Upper mixture fraction limit of the table.
-
-    __run_parallel:bool = False 
-    __Np_cores:int = 1 
-
-    _N_table_levels:int = 100   # Number of table levels.
-    _mixfrac_range_table:np.ndarray[float] = None   # Mixture fraction values of the table levels.
-    _base_cell_size:float = 1e-2#3.7e-3      # Table level base cell size.
-
-    _refined_cell_size:float = 3e-4#2.5e-3#1.5e-3   # Table level refined cell size.
-    _refinement_radius:float = 5e-3#5e-2     # Table level radius within which refinement is applied.
-    _curvature_threshold:float = 0.15    # Curvature threshold above which refinement is applied.
-
+    _table_vars:list[str] = [s.name for s in EntropicVars][:-1]
     _table_nodes = []       # Progress variable, total enthalpy, and mixture fraction node values for each table level.
     _table_nodes_norm = []  # Normalized table nodes for each level.
     _table_connectivity = []    # Table node connectivity per table level.
     _table_hullnodes = []   # Hull node indices per table level.
-    __table_insert_levels:list[float] = []
 
     _controlling_variables:list[str]=["Density",\
                                       "Energy"]  # FGM controlling variables
-    _lookup_tree:Invdisttree = None     # KD tree with inverse distance weighted interpolation for flamelet data interpolation.
-    _flamelet_data_scaler:MinMaxScaler = None   # Scaler for flamelet data controlling variables.
-    _n_near:int = 9     # Number of nearest neighbors from which to evaluate flamelet data.
-    _p_fac:int = 3      # Power by which to weigh distances from query point.
+    _fluid_data_scaler:MinMaxScaler = None   # Scaler for flamelet data controlling variables.
+
+    # TODO: option for adaptive mesh/Cartesian mesh 
 
     def __init__(self, Config:Config_NICFD, load_file:str=None):
         """
@@ -87,238 +71,259 @@ class SU2TableGenerator:
         :param Config: Config_FGM object.
         :type Config: Config_FGM
         """
+        self._Config = Config 
+        self._controlling_variables= [c for c in self._Config.GetControllingVariables()]
 
-        if load_file:
-            # Load an existing TableGenerator object.
-            with open(load_file, "rb") as fid:
-                loaded_table_generator = pickle.load(fid)
-            self.__dict__ = loaded_table_generator.__dict__.copy()
-        else:
-            # Create new TableGenerator object.
-            self._Config = Config 
-
-            self.__DefineFluidDataInterpolator()
-
-        self._savedir = self._Config.GetOutputDir()
-
-        self._table_nodes, self.table_data, self._table_connectivity, self._table_hullnodes = self.__ComputeCurvature()
-
-        fig = plt.figure()
-        ax = plt.axes(projection='3d')
-        ax.plot3D(self._table_nodes[:,0],self._table_nodes[:,1], self.table_data[:, self._Fluid_Variables.index("d2sdrho2")],'k.')
-        plt.show()
-        self.table_vars = ['s','dsdrho_e','dsde_rho','d2sdrho2','d2sdedrho','d2sde2']
-
-        self.WriteTableFile(self._Config.GetOutputDir()+"/LUT_"+self._Config.GetConfigName()+".drg")
-
-    def __DefineFluidDataInterpolator(self):
-        print("Configuring KD-tree for most accurate lookups")
-
-        print("Loading fluid data...")
-        # Define scaler for FGM controlling variables.
-        full_data_file = self._Config.GetOutputDir()+"/"+self._Config.GetConcatenationFileHeader()+"_full.csv"
-        with open(full_data_file,'r') as fid:
-            self._Fluid_Variables = fid.readline().strip().split(',')
-        D_full = np.loadtxt(full_data_file,delimiter=',',skiprows=1)
-        self._scaler = MinMaxScaler()
-        self.CV_full = np.vstack(tuple(D_full[:, self._Fluid_Variables.index(c)] for c in self._controlling_variables)).T
-        self.__min_CV, self.__max_CV = np.min(self.CV_full,axis=0), np.max(self.CV_full,axis=0)
-
-        CV_full_scaled = self._scaler.fit_transform(self.CV_full)
-
-        # Exctract train and test data
-        train_data_file = self._Config.GetOutputDir()+"/"+self._Config.GetConcatenationFileHeader()+"_full.csv"
-        test_data_file = self._Config.GetOutputDir()+"/"+self._Config.GetConcatenationFileHeader()+"_test.csv"
-        
-        var_to_test_for = "d2sdrho2"
-        
-        D_train = np.loadtxt(train_data_file,delimiter=',',skiprows=1)
-        D_test = np.loadtxt(test_data_file,delimiter=',',skiprows=1)
-        
-        CV_train = np.vstack(tuple(D_train[:, self._Fluid_Variables.index(c)] for c in self._controlling_variables)).T 
-        CV_test = np.vstack(tuple(D_test[:, self._Fluid_Variables.index(c)] for c in self._controlling_variables)).T 
-
-        CV_train_scaled = self._scaler.transform(CV_train)
-        CV_test_scaled = self._scaler.transform(CV_test)
-
-        PPV_test = D_test[:, self._Fluid_Variables.index(var_to_test_for)]
-        print("Done!")
-
-        self._lookup_tree = Invdisttree(X=CV_train_scaled,z=D_train)
-        
-        print("Search for best tree parameters...")
-        # Do brute-force search to get the optimum number of nearest neighbors and distance power.
-        n_near_range = range(1, 20)
-        p_range = range(2, 6)
-        RMS_ppv = np.zeros([len(n_near_range), len(p_range)])
-        for i in tqdm(range(len(n_near_range))):
-            for j in range(len(p_range)):
-                PPV_predicted = self._lookup_tree(q=CV_test_scaled, nnear=n_near_range[i], p=p_range[j])[:, self._Fluid_Variables.index(var_to_test_for)]
-                rms_local = mean_squared_error(y_true=PPV_test, y_pred=PPV_predicted)
-                RMS_ppv[i,j] = rms_local 
-        [imin,jmin] = divmod(RMS_ppv.argmin(), RMS_ppv.shape[1])
-        self._n_near = n_near_range[imin]
-        self._p_fac = p_range[jmin]
-        print("Done!")
-        print("Best found number of nearest neighbors: "+str(self._n_near))
-        print("Best found distance power: "+str(self._p_fac))
-
-    def __EvaluateFluidInterpolator(self, CV_unscaled:np.ndarray):
-        CV_scaled = self._scaler.transform(CV_unscaled)
-        data_interp = self._lookup_tree(q=CV_scaled,nnear=self._n_near,p=self._p_fac)
-        return data_interp
+        self._DataGenerator = DataGenerator_CoolProp(self._Config)
+        self.__LoadFluidData()
+        return 
     
-    def ComputeTableMesh(self):
-        return
-    
-    def __ComputeCurvature(self):
-        rho_min = self.__min_CV[self._controlling_variables.index("Density")]
-        rho_max = self.__max_CV[self._controlling_variables.index("Density")]
-        e_min = self.__min_CV[self._controlling_variables.index("Energy")]
-        e_max = self.__max_CV[self._controlling_variables.index("Energy")]
+    # TODO: setters for Cartesian table options 
 
-        rho_range = (rho_min - rho_max)* (np.cos(np.linspace(0, 0.5*np.pi, 800))) + rho_max
-        e_range = np.linspace(e_min, e_max, 100)
-        xgrid, ygrid = np.meshgrid(rho_range, e_range)
+    def SetCellSize_Coarse(self, cell_size_coarse:float=1e-2):
+        """Specify the coarse level cell size of the table
 
-        CV_probe = self.CV_full
-        probe_data = self.__EvaluateFluidInterpolator(CV_probe)
-
-        DT = Delaunay(self.CV_full)
-        Tria = DT.simplices 
-        HullNodes = DT.convex_hull[:,0]
-        
-        return CV_probe, probe_data, Tria, HullNodes
-
-        # fig = plt.figure()
-        # ax = plt.axes(projection='3d')
-        # ax.plot3D(CV_probe[:,0],CV_probe[:,1],probe_data[:,self._Fluid_Variables.index("d2sdrho2")],'k.')
-        # ax.plot3D(CV_probe[HullNodes, 0], CV_probe[HullNodes, 1], probe_data[HullNodes,self._Fluid_Variables.index("d2sdrho2")],'r.')
-        # plt.show()
-        # plt.triplot(CV_probe[:,0],CV_probe[:,1],DT.simplices)
-        # plt.show()
-        
-
-        # rho_probe = probe_data[:, self._Fluid_Variables.index("Density")]
-        # e_probe = probe_data[:, self._Fluid_Variables.index("Energy")]
-
-        # test_points = np.hstack((rho_probe[:,np.newaxis], e_probe[:,np.newaxis]))
-        # CV_unique, idx_unique = np.unique(test_points,axis=0,return_index=True)
-
-        # CV_vals_norm = self._scaler.transform(CV_probe)
-
-        # hull = ConvexHull(CV_vals_norm)
-        # s_grid = probe_data[:, self._Fluid_Variables.index("s")]
-        # s_grid = np.reshape(s_grid, np.shape(xgrid))
-
-        # idx_ref = self.__ComputeEntropyCurvature(s_grid)
-        # x_refinement = CV_vals_norm[idx_ref, 0]
-        # y_refinement = CV_vals_norm[idx_ref, 1]
-        # x_hull = CV_vals_norm[hull.vertices, 0]
-        # y_hull = CV_vals_norm[hull.vertices, 1]
-        
-        # XY_refinement = np.vstack((x_refinement, y_refinement)).T
-        # XY_hull = np.vstack((x_hull, y_hull)).T
-
-        # return XY_refinement, XY_hull, hull.area
-    
-    def __ComputeEntropyCurvature(self, s_interp:np.ndarray[float]):
-        Q_norm = (s_interp - np.min(s_interp))/(np.max(s_interp) - np.min(s_interp))
-        dQdy, dQdx = np.gradient(Q_norm)
-        dQ_mag = np.sqrt(np.power(dQdy, 2) + np.power(dQdx, 2))
-        dQ_norm = dQ_mag / np.max(dQ_mag)
-        d2Qdy2, d2Qdx2 = np.gradient(dQ_norm)
-        d2Q_mag = np.sqrt(np.power(d2Qdy2, 2) + np.power(d2Qdx2, 2))
-        d2Q_norm = d2Q_mag / np.max(d2Q_mag)
-        d2Q_norm = d2Q_norm.flatten()
-        idx_ref = np.where(d2Q_norm > self._curvature_threshold/10)
-        return idx_ref 
-    
-    def __Compute2DMesh(self, XY_hull:np.ndarray, XY_refinement:np.ndarray, level_area:float):
+        :param cell_size_coarse: coarse cell size, defaults to 1e-2
+        :type cell_size_coarse: float, optional
+        :raises Exception: if specified cell size is negative or zero
         """
-        Generate a 2D mesh for the current table level.
+        if cell_size_coarse <= 0:
+            raise Exception("Cell size value should be positive")
+        self._base_cell_size = cell_size_coarse 
+        return 
+    
+    def SetCellSize_Refined(self, cell_size_ref:float=5e-3):
+        """Specify the refined level cell size of the table
 
-        :param XY_hull: Array containing normalized pv and enth coordinates of the outline of the table level.
-        :type XY_hull: NDArray
-        :param XY_refinement: Array containing normalized pv and enth coordinates where refinement should be applied.
-        :type XY_refinement: NDArray
-        :return: mesh nodes of the 2D table mesh.
-        :rtype: NDArray
+        :param cell_size_ref: refined cell size, defaults to 1e-2
+        :type cell_size_ref: float, optional
+        :raises Exception: if specified cell size is negative or zero
         """
+        if cell_size_ref <= 0:
+            raise Exception("Cell size value should be positive")
+        self._refined_cell_size = cell_size_ref 
+        return 
+    
+    def SetRefinement_Radius(self, refinement_radius:float=1e-2):
+        """Specify the radius around each refinement point within which the refined cell size is applied
+
+        :param refinement_radius: refinement radius, defaults to 1e-2
+        :type refinement_radius: float, optional
+        :raises Exception: if specified value is negative or zero
+        """
+        if refinement_radius <= 0:
+            raise Exception("Refinement radius should be positive")
+        self._refinement_radius = refinement_radius
+        return 
+    
+    def __LoadFluidData(self):
+        # TODO: generate coarse data grid from data generator
+        fluid_data_file = self._Config.GetOutputDir() + "/" + self._Config.GetConcatenationFileHeader() + "_full.csv"
+        with open(fluid_data_file, 'r') as fid:
+            vars = fid.readline().strip().split(',')
+        D = np.loadtxt(fluid_data_file,delimiter=',',skiprows=1)
+        entropic_vars = [a.name for a in EntropicVars][:-1]
+        self.table_vars = entropic_vars.copy()
+        fluid_data_out = np.zeros([len(D), EntropicVars.N_STATE_VARS.value])
+        for ivar, x in enumerate(vars):
+            fluid_data_out[:, entropic_vars.index(x)] = D[:, ivar]
+        self._fluid_data_scaler = MinMaxScaler()
+        fluid_data_norm = self._fluid_data_scaler.fit_transform(fluid_data_out)
+   
+        
+        return fluid_data_norm
+        
+    def __Compute2DMesh(self, points:np.ndarray[float], ref_pts:np.ndarray[float]=[],show:bool=False):
+        
+        
+        # Create concave hull of normalized table coordinates.
+        XY_hull = concave_hull(np.unique(points,axis=0), length_threshold=1e-1)
+        
+        # Filter concave hull to remove nodes that are too close together.
+        hull_pts = []
+        i = 0
+        hull_indices = [i]
+        while i < (len(XY_hull)-1):
+            i_next = i+1
+            found_next_pt = False 
+            while not found_next_pt:
+                dist = np.sqrt(np.sum(np.power(XY_hull[i_next, :] - XY_hull[i, :], 2)))
+                if (dist >= self._base_cell_size) or (i_next == len(XY_hull)-1):
+                    found_next_pt = True 
+                else:
+                    i_next += 1
+            i = i_next
+            hull_indices.append(i_next)
+        XY_hull = XY_hull[hull_indices, :]
+
+        # Initiate gmsh
         gmsh.initialize() 
-
-        gmsh.option.setNumber("General.Terminal", 0)
-        gmsh.option.setNumber("General.Verbosity", 1)
         gmsh.model.add("table_level")
         factory = gmsh.model.geo
 
-        base_cell_size = self._base_cell_size * level_area
-        refined_cell_size = self._refined_cell_size * level_area 
-        refinement_radius = self._refinement_radius * np.sqrt(level_area)
-
-        hull_pts = []
-        for i in range(int(len(XY_hull)/2)):
-            hull_pts.append(factory.addPoint(XY_hull[i, 0], XY_hull[i, 1], 0, base_cell_size))
-        hull_pts_2 = [hull_pts[-1]]
-        for i in range(int(len(XY_hull)/2), len(XY_hull)):
-            hull_pts_2.append(factory.addPoint(XY_hull[i, 0], XY_hull[i, 1], 0, base_cell_size))
-        hull_pts_2.append(hull_pts[0])
-        embed_pts = []
-        for i in range(len(XY_refinement)):
-            pt_idx = factory.addPoint(XY_refinement[i, 0], XY_refinement[i, 1], 0, refined_cell_size)
-            embed_pts.append(pt_idx)
-
-
-        hull_curve_1 = factory.addPolyline(hull_pts)
-        hull_curve_2 = factory.addPolyline(hull_pts_2)
+        # Create hull points
+        for i in range(int(len(XY_hull))):
+            hull_pts.append(factory.addPoint(XY_hull[i, 0], XY_hull[i, 1], 0, self._base_cell_size))
         
-        CL = factory.addCurveLoop([hull_curve_1, hull_curve_2])
-        
-        surf = factory.addPlaneSurface([CL])
-        gmsh.model.addPhysicalGroup(1, [hull_curve_1], name="hull_curve_1")
-        gmsh.model.addPhysicalGroup(1, [hull_curve_2], name="hull_curve_2")
-        gmsh.model.addPhysicalGroup(2, [surf], name="table_level")
-        gmsh.model.geo.synchronize()
+        # Connect hull points to a closed multi-component curve
+        hull_lines = []
+        for i in range(len(hull_pts)-1):
+            hull_lines.append(factory.addLine(hull_pts[i], hull_pts[i+1]))
+        hull_lines.append(factory.addLine(hull_pts[-1], hull_pts[0]))
 
+        # Create a 2D plane of the enclosed space
+        curvloop = factory.addCurveLoop(hull_lines)
+        factory.addPlaneSurface([curvloop])
+
+        # Apply refinement points
+        ref_pt_ids = []
+        if len(ref_pts)>0:
+            for i in range(len(ref_pts)):
+                ref_pt_ids.append(factory.addPoint(ref_pts[i,0], ref_pts[i, 1], 0.0))
+
+        # Apply conditional refinement, where the refined cell size is applied in proximity to the refinement points
         gmsh.model.mesh.field.add("Distance", 1)
-        gmsh.model.mesh.field.setNumbers(1, "PointsList", embed_pts)
+        gmsh.model.mesh.field.setNumbers(1, "PointsList", ref_pt_ids)
         gmsh.model.mesh.field.setNumber(1, "Sampling", 100)
         gmsh.model.mesh.field.add("Threshold", 2)
         gmsh.model.mesh.field.setNumber(2, "InField", 1)
-        gmsh.model.mesh.field.setNumber(2, "SizeMin", refined_cell_size)
-        gmsh.model.mesh.field.setNumber(2, "SizeMax", base_cell_size)
-        gmsh.model.mesh.field.setNumber(2, "DistMin", refinement_radius)
-        gmsh.model.mesh.field.setNumber(2, "DistMax", 1.5*refinement_radius)
+        gmsh.model.mesh.field.setNumber(2, "SizeMin", self._refined_cell_size)
+        gmsh.model.mesh.field.setNumber(2, "SizeMax", self._base_cell_size)
+        gmsh.model.mesh.field.setNumber(2, "DistMin", 0.5*self._refinement_radius)
+        gmsh.model.mesh.field.setNumber(2, "DistMax", 1.5*self._refinement_radius)
 
         gmsh.model.mesh.field.add("Min", 7)
         gmsh.model.mesh.field.setNumbers(7, "FieldsList", [2])
         gmsh.model.mesh.field.setAsBackgroundMesh(7)
-        
-        lc = base_cell_size
-        def meshSizeCallback(dim,tag,x,y,z,lc):
-            return lc
-        
-        gmsh.model.mesh.setSizeCallback(meshSizeCallback)
-        gmsh.option.setNumber("Mesh.Algorithm", 5)
+
+        factory.synchronize()
+
+        # Generate 2D mesh and extract table nodes
         gmsh.model.mesh.generate(2)
+        if show:
+            gmsh.fltk.run()
         nodes = gmsh.model.mesh.getNodes(dim=2, tag=-1, includeBoundary=True, returnParametricCoord=False)[1]
-        MeshPoints = np.array([nodes[::3], nodes[1::3]]).T
         gmsh.finalize()
-
-        # Remove mesh nodes that are out of bounds.
-        pv_norm, enth_norm = MeshPoints[:, 0], MeshPoints[:, 1]
-
-        CV_level_norm = np.vstack((pv_norm, enth_norm)).T 
-        CV_level_dim = self._scaler.inverse_transform(CV_level_norm)
-
-        MeshPoints = np.zeros([np.shape(MeshPoints)[0], 2])
-        MeshPoints[:, 0] = pv_norm 
-        MeshPoints[:, 1] = enth_norm 
-
-        table_level_data = self.__EvaluateFluidInterpolator(CV_level_dim)
-
-        return MeshPoints, table_level_data
+        MeshPoints = np.array([nodes[::3], nodes[1::3]]).T
+        return MeshPoints
     
+    
+    def __CalcMeshData(self, fluid_data_mesh:np.ndarray[float]):
+        """Calculate the fluid thermodynamic state variables for the table nodes
+
+        :param fluid_data_mesh: table mesh nodes of density and static energy
+        :type fluid_data_mesh: np.ndarray[float]
+        :return: filtered thermodynamic state data at the table nodes
+        :rtype: np.ndarray[float]
+        """
+        fluid_data_out = fluid_data_mesh.copy()
+        for i in range(len(fluid_data_mesh)):
+            try:
+                self._DataGenerator.UpdateFluid(fluid_data_mesh[i, EntropicVars.Density.value], fluid_data_mesh[i, EntropicVars.Energy.value])
+                state_vector, correct_phase = self._DataGenerator.GetStateVector()
+                if correct_phase:
+                    fluid_data_out[i, :] = state_vector
+                else:
+                    fluid_data_out[i, :] = None
+            except:
+                fluid_data_out[i, :] = None
+        fluid_data_out = fluid_data_out[~np.isnan(fluid_data_out[:,0]),:]
+        return fluid_data_out
+    
+    # TODO: include derivative and transport validation methods
+
+    def GenerateTable(self):
+        """Initiate table generation process
+        """
+
+        # Load initial fluid data and scale it
+        # TODO: use adaptive refinement or Cartesian refinement based on settings.
+
+        fluid_data_norm = self.__LoadFluidData()
+        rhoe_norm = fluid_data_norm[:, [EntropicVars.Density.value, EntropicVars.Energy.value]]
+
+        # Generate initial coarse table of fluid data
+        rhoe_mesh_norm_coarse = self.__Compute2DMesh(rhoe_norm)
+
+        # Calculate thermodynamic state variables of initial table nodes
+        fluid_data_norm_coarse = np.zeros([len(rhoe_mesh_norm_coarse), EntropicVars.N_STATE_VARS.value])
+        fluid_data_norm_coarse[:, EntropicVars.Density.value] = rhoe_mesh_norm_coarse[:,0]
+        fluid_data_norm_coarse[:, EntropicVars.Energy.value] = rhoe_mesh_norm_coarse[:,1]
+        fluid_data_coarse = self._fluid_data_scaler.inverse_transform(fluid_data_norm_coarse)
+        fluid_data_coarse = self.__CalcMeshData(fluid_data_coarse)
+
+        # Identify refinement locations
+        fluid_data_norm = self._fluid_data_scaler.transform(fluid_data_coarse)
+        ix_ref = self.__ApplyRefinement(fluid_data_norm)
+
+        # Regenerate table including refinement locations
+        rhoe_norm_mesh = fluid_data_norm[:, [EntropicVars.Density.value, EntropicVars.Energy.value]]
+        rhoe_norm_ref = rhoe_norm_mesh[ix_ref, :]
+        rhoe_mesh_norm = self.__Compute2DMesh(rhoe_norm, ref_pts=rhoe_norm_ref,show=True)
+
+        # Extract thermodynamic state variables of refined table
+        fluid_data_norm_ref = np.zeros([len(rhoe_mesh_norm), EntropicVars.N_STATE_VARS.value])
+        fluid_data_norm_ref[:, EntropicVars.Density.value] = rhoe_mesh_norm[:,0]
+        fluid_data_norm_ref[:, EntropicVars.Energy.value] = rhoe_mesh_norm[:,1]
+        fluid_data_ref = self._fluid_data_scaler.inverse_transform(fluid_data_norm_ref)
+        fluid_data_ref = self.__CalcMeshData(fluid_data_ref)
+
+        # Create triangulation of filtered thermodynamic state data
+        fluid_data_norm_ref = self._fluid_data_scaler.transform(fluid_data_ref)
+        DT = Delaunay(fluid_data_norm_ref[:, [EntropicVars.Density.value,EntropicVars.Energy.value]])
+
+        # Extract triangulation, hull nodes, and table data
+        Tria = DT.simplices 
+        HullNodes = concave_hull_indexes(fluid_data_norm_ref[:, [EntropicVars.Density.value,EntropicVars.Energy.value]])
+
+        self._table_nodes = fluid_data_ref 
+        self._table_connectivity = Tria 
+        self._table_hullnodes = HullNodes
+        
+        # Add static enthalpy and the specific heat at constant volume
+        self.table_vars.append("Enthalpy")
+        h = self._table_nodes[:, EntropicVars.Energy.value] + self._table_nodes[:, EntropicVars.p.value] / self._table_nodes[:, EntropicVars.Density.value]
+        self._table_nodes = np.hstack((self._table_nodes, h[:,np.newaxis]))
+
+        self.table_vars.append("cv")
+        cv = 1 /self._table_nodes[:, EntropicVars.dTde_rho.value]
+        self._table_nodes = np.hstack((self._table_nodes, cv[:,np.newaxis]))
+
+        return
+
+    def AddRefinementCriterion(self, TD_variable:str, norm_val_min:float=np.inf, norm_val_max:float=-np.inf):
+        """Apply refinement in the table where the normalized value of the thermodynamic variable lies between the specified bounds.
+
+        :param TD_variable: name of the thermodynamic variable for which to apply refinement
+        :type TD_variable: str
+        :param norm_val_min: lower bound of the normalized thermodynamic variable, defaults to np.inf
+        :type norm_val_min: float, optional
+        :param norm_val_max: upper bound of the normalized thermodynamic variable, defaults to -np.inf
+        :type norm_val_max: float, optional
+        :raises Exception: if thermodynamic state variable is unknown to SU2 DataMiner
+        """
+        if TD_variable not in self.table_vars:
+            raise Exception("%s is not present in fluid data" % TD_variable)
+        
+        self.refinement_vars.append(TD_variable)
+        self.refinement_norm_min.append(norm_val_min)
+        self.refinement_norm_max.append(norm_val_max)
+        return 
+    
+    def __ApplyRefinement(self, fluid_data_norm_ref:np.ndarray[float]):
+        ix_ref = np.array([],dtype=np.int64)
+        fluid_vars = [a.name for a in EntropicVars][:-1]
+        for TD_var, val_min, val_max in zip(self.refinement_vars, self.refinement_norm_min, self.refinement_norm_max):
+            norm_data_var = fluid_data_norm_ref[:, fluid_vars.index(TD_var)]
+
+            ix = np.argwhere(np.logical_and(norm_data_var>=val_min, norm_data_var<=val_max))[:,0]
+            ix_ref = np.append(ix_ref, ix)
+        if len(ix_ref) > 0:
+            return np.unique(ix_ref)
+        else:
+            return []
+
+            
     def WriteTableFile(self, output_filepath:str=None):
         """
         Save the table data and connectivity as a Dragon library file. If no file name is provided, the table file will be named according to the Config_FGM class name.
@@ -350,9 +355,9 @@ class SU2TableGenerator:
         fid.write("%i\n" % np.shape(self._table_hullnodes)[0])
         fid.write("\n")
 
-        fid.write("[Number of variables]\n%i\n\n" % (len(self.table_vars)+2))
+        fid.write("[Number of variables]\n%i\n\n" % (len(self.table_vars)))
         fid.write("[Variable names]\n")
-        for iVar, Var in enumerate(self._controlling_variables + self.table_vars):
+        for iVar, Var in enumerate(self.table_vars):
             fid.write(str(iVar + 1)+":"+Var+"\n")
         fid.write("\n")
 
@@ -360,10 +365,9 @@ class SU2TableGenerator:
 
         print("Writing table data...")
         fid.write("<Data>\n")
-        for iNode in range(np.shape(self._table_nodes)[0]):
-            fid.write("\t".join("%+.14e" % cv for cv in self._table_nodes[iNode, :]))
-            for var in self.table_vars:
-                fid.write("\t%+.14e" % self.table_data[:, self._Fluid_Variables.index(var)][iNode])
+        for iNode in range(len(self._table_nodes)):
+            for ivar in range(len(self.table_vars)):
+                fid.write("\t%+.14e" % self._table_nodes[iNode, ivar])
             fid.write("\n")
         fid.write("</Data>\n\n")
         print("Done!")
@@ -383,3 +387,7 @@ class SU2TableGenerator:
         print("Done!")
 
         fid.close()
+
+        return
+    
+    # TODO: update configuration function

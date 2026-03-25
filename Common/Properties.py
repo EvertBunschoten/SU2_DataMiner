@@ -67,6 +67,8 @@ class EntropicVars(Enum):
     cp=auto()
     N_STATE_VARS=auto()
 
+# TODO: include transport properties in entropic vars 
+
 class FGMVars(Enum):
     ProgressVariable=0
     EnthalpyTot=auto()
@@ -137,6 +139,11 @@ class DefaultSettings_NICFD(DefaultProperties):
     
     fluid_name:str = "Air"
     EOS_type:str = "HEOS"
+    conductivity_models:list[str] = ["volume", "mass"]
+    viscosity_models:list[str] = ["mcadams", "cicchitti", "dukler"]
+    conductivity_model:str = "volume"
+    viscosity_model:str = "mcadams"
+
     use_PT_grid:bool = False 
 
     controlling_variables:list[str] = [EntropicVars.Density.name, \
@@ -152,6 +159,9 @@ class DefaultSettings_NICFD(DefaultProperties):
     config_type:str = "EntropicAI"
     supported_state_vars:list[str] = ["s","T","p","c2","dTdrho_e","dTde_rho","dpdrho_e","dpde_rho"]
     supported_backends:list[str] = ["HEOS","PR", "SRK", "IF97","REFPROP"]
+
+    tabulation_options:list[str] = ["cartesian","adaptive"]
+    tabulation_method:str="cartesian"
     
 class DefaultSettings_FGM(DefaultProperties):
     config_name:str = "config_FGM"
@@ -214,3 +224,4 @@ ActivationFunctionOptions = {"linear" : tf.keras.activations.linear,\
                              "gelu" : tf.keras.activations.gelu,\
                              "sigmoid" : tf.keras.activations.sigmoid,\
                              "swish" : tf.keras.activations.swish}
+
