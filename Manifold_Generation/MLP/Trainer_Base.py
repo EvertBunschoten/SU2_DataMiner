@@ -86,6 +86,7 @@ class MLPTrainer:
     # Hardware info:
     _kind_device:str = "CPU" # Device type used to train (CPU or GPU)
     _device_index:int = 0    # Device index (core index or GPU card index)
+    _model_index:int = 0
     
     # MLP input (controlling) variables.
     _controlling_vars:list[str] = ["Density", 
@@ -422,6 +423,9 @@ class MLPTrainer:
         :rtype: list[np.ndarray]
         """
         return [b.numpy() for b in self._biases] 
+    
+    def GetActivationFunction(self):
+        return self._activation_function_name
     
     def PlotR2Data(self):
         """Plot the MLP prediction in the form of R2-plots w.r.t. the reference data, and along each of the 
@@ -1863,6 +1867,9 @@ class TrainMLP:
         self._trainer_direct.Plot_and_Save_History()
         return 
     
+    def GetActivationFunction(self):
+        return self.activation_function 
+    
     def GetCostParameter(self):
         """Get MLP evaluation cost parameter.
 
@@ -1890,6 +1897,11 @@ class TrainMLP:
         return self._trainer_direct._controlling_vars
     def GetTrainVars(self):
         return self._trainer_direct._train_vars
+    
+    def GetAlphaExpo(self):
+        return self.alpha_expo 
+    def GetLRDecay(self):
+        return self.lr_decay 
     
     def SetTrainFileHeader(self, fileheader:str):
         """Set a custom training data file header.

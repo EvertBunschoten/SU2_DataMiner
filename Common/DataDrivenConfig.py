@@ -1684,9 +1684,9 @@ class Config_FGM(Config):
         self.gas.set_equivalence_ratio(equivalence_ratio, self.__fuel_string, self.__oxidizer_string)
         self.gas.TP = temperature, DefaultSettings_FGM.pressure
 
-        pv_unb = 0
+        pv_unb = 0.0
         for iPV, pvSp in enumerate(self.__pv_definition):
-            pv_unb += self.__pv_weights[iPV] * self.gas.Y[self.gas.species_index(pvSp)]
+            pv_unb += float(self.__pv_weights[iPV] * self.gas.Y[self.gas.species_index(pvSp)])
         
         enth_unb = self.gas.enthalpy_mass
 
@@ -2006,7 +2006,12 @@ class Config_FGM(Config):
         scaler_function_name, scaler_function_vals_in,scaler_function_vals_out = trainer.GetScalerFunctionParams()
         MLP_weights = trainer.GetWeights().copy()
         MLP_biases = trainer.GetBiases().copy()
+        activation_function = trainer.activation_function
+        alpha_expo = trainer.GetAlphaExpo()
+        lr_decay = trainer.GetLRDecay()
+        batch_expo = trainer.batch_expo 
 
+        N_h = trainer.architecture
         if not self._MLP_weights:
             self._train_vars = []
             self._control_vars = []
@@ -2015,7 +2020,12 @@ class Config_FGM(Config):
             self._scaler_function_vals_out = []
             self._MLP_weights = []
             self._MLP_biases = []
+            self.__NN = []
+            self.__lr_decay = []
+            self.__alpha_expo = []
+            self.__batch_expo = []
         if (group_idx+1) > len(self._MLP_weights):
+            
             self._train_vars.append(train_vars)
             self._control_vars.append(control_vars)
             self._scaler_function_name.append(scaler_function_name)
@@ -2023,6 +2033,12 @@ class Config_FGM(Config):
             self._scaler_function_vals_out.append(scaler_function_vals_out)
             self._MLP_weights.append(MLP_weights)
             self._MLP_biases.append(MLP_biases)
+            self.__activation_function.append(activation_function)
+            self.__NN.append(N_h)
+            self.__lr_decay.append(lr_decay)
+            self.__alpha_expo.append(alpha_expo)
+            self.__batch_expo.append(batch_expo)
+
         else:
             self._train_vars[group_idx] = train_vars
             self._control_vars[group_idx] = control_vars 
@@ -2031,6 +2047,11 @@ class Config_FGM(Config):
             self._scaler_function_vals_out[group_idx] = scaler_function_vals_out
             self._MLP_weights[group_idx] = MLP_weights
             self._MLP_biases[group_idx] = MLP_biases 
+            self.__activation_function[group_idx] = activation_function
+            self.__NN[group_idx] = N_h
+            self.__lr_decay[group_idx] = lr_decay
+            self.__alpha_expo[group_idx] = alpha_expo
+            self.__batch_expo[group_idx] = batch_expo
         return 
     
     def WriteSU2MLP(self, file_name_out:str, group_idx:int=-1):

@@ -47,6 +47,16 @@ def main():
     hydrogen_flamelet.test_files = ["freeflame_data/phi_1.0/freeflamelet_phi1.0_Tu300.0.csv"]
     test_list_FGM.append(hydrogen_flamelet)
     
+    FGM_training = TestCase("ML FGM")
+    FGM_training.config_dir="FGM_MLP/"
+    FGM_training.config_file = ""
+    FGM_training.timeout=300
+    FGM_training.exec_command="./ML_FGM_manifold.py"
+    FGM_training.reference_files=["TrainingHistory_ref.csv"]
+    FGM_training.test_files=["architectures_Group1/Worker_0/Model_0/TrainingHistory.csv"]
+    test_list_FGM.append(FGM_training)
+
+    
     unittest_mixturefraction = TestCase("Mixture fraction")
     unittest_mixturefraction.config_dir = "Physics/MixtureFraction/"
     unittest_mixturefraction.config_file = ""

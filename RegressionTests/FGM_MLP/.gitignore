@@ -1,0 +1,7 @@
+fluid_data*
+boundary_data*
+*.cfg 
+*.log
+architectures_Group1*
+freeflame_data*
+equilibrium_data*

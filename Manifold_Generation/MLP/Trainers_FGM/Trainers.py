@@ -108,7 +108,7 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         # Initiate parent class.
         PhysicsInformedTrainer.__init__(self)
         self.__Config = Config_in 
-        self._controlling_vars = DefaultProperties.controlling_variables
+        self._controlling_vars = self.__Config.GetControllingVariables()
         self._train_vars = self.__Config.GetMLPOutputGroup(group_idx)
         self.callback_every = 10
         self._boundary_data_file = self.__Config.GetOutputDir()+"/"+DefaultProperties.boundary_file_header+"_full.csv"
@@ -116,14 +116,16 @@ class Train_FGM_PINN(PhysicsInformedTrainer):
         # Synchronize settings with loaded configuration
         self._alpha_expo = self.__Config.GetAlphaExpo(group_idx)
         self._lr_decay = self.__Config.GetLRDecay(group_idx)
-        self._batch_expo = self.__Config.GetBatchExpo(group_idx)
-        self._activation_function = self.__Config.GetActivationFunction(group_idx)
+        self.SetBatchExpo(self.__Config.GetBatchExpo(group_idx))
+        self.SetActivationFunction(self.__Config.GetActivationFunction(group_idx))
         self.SetHiddenLayers(self.__Config.GetHiddenLayerArchitecture(group_idx))
+        self.SetTrainVariables(self.__Config.GetMLPOutputGroup(group_idx))
+        self.SetTrainFileHeader(self.__Config.GetOutputDir()+"/"+self.__Config.GetConcatenationFileHeader())
         self._train_name = "Group"+str(group_idx+1)
         self.SetTrainStepType("Jacobi")
         self._enable_boundary_loss=True
         self._boundary_loss_patience=-1
-
+        self.SetSaveDir(os.getcwd())
         self.SetInitializer("he_uniform")
 
         return 

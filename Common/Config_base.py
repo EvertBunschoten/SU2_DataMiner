@@ -416,6 +416,8 @@ class Config:
         self._scaler_function_name, self._scaler_function_vals_in,self._scaler_function_vals_out = trainer.GetScalerFunctionParams()
         self._MLP_weights = trainer.GetWeights().copy()
         self._MLP_biases = trainer.GetBiases().copy()
+        self._hidden_layer_architecture =[h for h in trainer.architecture]
+        
         return 
     
     def GetWeightsBiases(self):
