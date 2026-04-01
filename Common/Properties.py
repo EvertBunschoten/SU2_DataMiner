@@ -65,6 +65,7 @@ class EntropicVars(Enum):
     dsdp_rho=auto()
     dsdrho_p=auto()
     cp=auto()
+    cv=auto()
     Enthalpy=auto()
     Conductivity=auto()
     ViscosityDyn=auto()
