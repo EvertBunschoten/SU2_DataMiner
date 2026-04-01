@@ -24,7 +24,7 @@
 
 import numpy as np 
 import CoolProp.CoolProp as CP
-from Common.Properties import EntropicVars
+from Common.Properties import EntropicVars,DefaultSettings_NICFD
 from su2dataminer.generate_data import DataGenerator_CoolProp
 from scipy.spatial import ConvexHull, Delaunay
 from sklearn.preprocessing import MinMaxScaler,RobustScaler,StandardScaler, QuantileTransformer
@@ -75,6 +75,15 @@ class SU2TableGenerator_NICFD:
         self._controlling_variables= [c for c in self._Config.GetControllingVariables()]
 
         self._DataGenerator = DataGenerator_CoolProp(self._Config)
+
+        entropic_vars = [a.name for a in EntropicVars][:-1]
+        self._table_vars = entropic_vars.copy()
+        if not self._Config.TwoPhase():
+            self._table_vars.remove(EntropicVars.VaporQuality.name)
+        if not self._Config.CalcTransportProperties():
+            self._table_vars.remove(EntropicVars.ViscosityDyn.name)
+            self._table_vars.remove(EntropicVars.Conductivity.name)
+            
         self.__LoadFluidData()
         return 
     
@@ -116,23 +125,56 @@ class SU2TableGenerator_NICFD:
         self._refinement_radius = refinement_radius
         return 
     
+    def SetTableDiscretization(self, method:str=DefaultSettings_NICFD.tabulation_method):
+        self._Config.SetTableDiscretization(method)
+        return 
+    
     def __LoadFluidData(self):
         # TODO: generate coarse data grid from data generator
         fluid_data_file = self._Config.GetOutputDir() + "/" + self._Config.GetConcatenationFileHeader() + "_full.csv"
         with open(fluid_data_file, 'r') as fid:
             vars = fid.readline().strip().split(',')
         D = np.loadtxt(fluid_data_file,delimiter=',',skiprows=1)
-        entropic_vars = [a.name for a in EntropicVars][:-1]
-        self.table_vars = entropic_vars.copy()
         fluid_data_out = np.zeros([len(D), EntropicVars.N_STATE_VARS.value])
         for ivar, x in enumerate(vars):
-            fluid_data_out[:, entropic_vars.index(x)] = D[:, ivar]
+            fluid_data_out[:, EntropicVars[x].value] = D[:, ivar]
         self._fluid_data_scaler = MinMaxScaler()
         fluid_data_norm = self._fluid_data_scaler.fit_transform(fluid_data_out)
    
         
         return fluid_data_norm
+    
+    def SetTableVars(self, table_vars_in:list[str]):
+        self._table_vars = []
+        if EntropicVars.Density.name not in table_vars_in:
+            print("Density should always be included in table variables")
+            self._table_vars.append(EntropicVars.Density.name)
+
+        if EntropicVars.Energy.name not in table_vars_in:
+            print("Energy should always be included in table variables")
+            self._table_vars.append(EntropicVars.Energy.name)
         
+        if self._Config.EnableTwophase() and EntropicVars.VaporQuality.name in table_vars_in:
+            print("Table generator not configured for two-phase, ignoring vapor quality from table data.")
+            table_vars_in.remove(EntropicVars.VaporQuality.name)
+        
+        if not self._Config.CalcTransportProperties():
+            if EntropicVars.Conductivity.name in table_vars_in:
+                print("Table generator not configured for transport properties, ignoring conductivity data")
+            if EntropicVars.ViscosityDyn.name in table_vars_in:
+                print("Table generator not configured for transport properties, ignoring viscosity data")
+            
+            
+        for v in table_vars_in:
+            found_var = False
+            for q in EntropicVars:
+                if v.lower() == q.name.lower():
+                    found_var = True
+                    self._table_vars.append(q.name)
+            if not found_var:
+                print("Error, \"%s\" is not supported by SU2 DataMiner" % v)
+        return 
+    
     def __Compute2DMesh(self, points:np.ndarray[float], ref_pts:np.ndarray[float]=[],show:bool=False):
         
         
@@ -231,6 +273,95 @@ class SU2TableGenerator_NICFD:
         return fluid_data_out
     
     # TODO: include derivative and transport validation methods
+    def __CartesianTableData(self):
+        print("Generating table on Cartesian grid")
+        Np_rho = self._Config.GetNpDensity()
+        Np_e = self._Config.GetNpEnergy()
+        rho_minmax = self._Config.GetDensityBounds()
+        rho_min = rho_minmax[0]
+        rho_max = rho_minmax[1]
+        e_minmax = self._Config.GetEnergyBounds()
+        e_min = e_minmax[0]
+        e_max = e_minmax[1]
+        rho_range = np.linspace(rho_min, rho_max, Np_rho)
+        e_range = np.linspace(e_min, e_max, Np_e)
+        self.rho_grid, self.e_grid = np.meshgrid(rho_range, e_range)
+
+        print(f"Grid Configuration:")
+        print(f"  Density: [{rho_min:.2f}, {rho_max:.2f}] kg/m3 ({Np_rho} points)")
+        print(f"  Energy:  [{e_min:.0f}, {e_max:.0f}] J/kg ({Np_e} points)")
+        print(f"  Total grid points: {Np_rho * Np_e:,}")
+        print()
+
+        shape = self.rho_grid.shape
+        n_points = shape[0] * shape[1]
+
+        # Initialize storage arrays
+        self.state_data = np.zeros([shape[0], shape[1], EntropicVars.N_STATE_VARS.value])
+
+        # Validity mask
+        self.valid_mask = np.zeros(shape, dtype=bool)
+
+        # Flatten for iteration
+        rho_flat = self.rho_grid.flatten()
+        e_flat = self.e_grid.flatten()
+
+        success_count = 0
+        twophase_count = 0
+        fd_fallback_count = 0
+        for i in tqdm(range(n_points), desc="Evaluating"):
+            rho = rho_flat[i]
+            e = e_flat[i]
+            idx_2d = np.unravel_index(i, shape)
+            try:
+                self._DataGenerator.UpdateFluid(rho, e)
+                state_data, correct_phase = self._DataGenerator.GetStateVector()
+                if correct_phase:
+                    self.state_data[idx_2d[0], idx_2d[1], :] = state_data 
+                    success_count += 1
+                    self.valid_mask[idx_2d] = True
+                else:
+                    self.state_data[idx_2d[0], idx_2d[1], :] = None
+            except:
+                self.state_data[idx_2d[0], idx_2d[1], :] = None
+        
+        return 
+    
+    def __CartesianTriangulation(self):
+        """
+        Create Delaunay triangulation of valid grid points.
+        """
+        print("Creating Delaunay triangulation...")
+
+        # Extract valid points
+        rho_table = self.state_data[:,:,EntropicVars.Density.value]
+        e_table = self.state_data[:,:,EntropicVars.Energy.value]
+        rho_valid = rho_table[self.valid_mask].flatten()
+        e_valid = e_table[self.valid_mask].flatten()
+        
+        # Stack as (N, 2) array
+        cv_table = np.column_stack([rho_valid, e_valid])
+
+        self._table_nodes = np.column_stack(tuple(self.state_data[:,:,EntropicVars[v].value][self.valid_mask].flatten() for v in self._table_vars))
+        
+        # Create Delaunay triangulation
+        tri = Delaunay(cv_table)
+        self._table_connectivity = tri.simplices
+
+        # Identify hull nodes
+        edges = np.vstack([tri.simplices[:, [0, 1]],
+                           tri.simplices[:, [1, 2]],
+                           tri.simplices[:, [2, 0]]])
+        edges = np.sort(edges, axis=1)
+        unique_edges, counts = np.unique(edges, axis=0, return_counts=True)
+        boundary_edges = unique_edges[counts == 1]
+        self._table_hullnodes= np.unique(boundary_edges.flatten())
+
+        print(f"  Triangulation nodes: {len(self._table_nodes):,}")
+        print(f"  Triangles: {len(self._table_connectivity):,}")
+        print(f"  Hull nodes: {len(self._table_hullnodes):,}")
+        print()
+        return 
 
     def GenerateTable(self):
         """Initiate table generation process
@@ -238,56 +369,63 @@ class SU2TableGenerator_NICFD:
 
         # Load initial fluid data and scale it
         # TODO: use adaptive refinement or Cartesian refinement based on settings.
+        if self._Config.GetTableDiscretization()=="cartesian":
+            
+            self.__CartesianTableData()
 
-        fluid_data_norm = self.__LoadFluidData()
-        rhoe_norm = fluid_data_norm[:, [EntropicVars.Density.value, EntropicVars.Energy.value]]
+            self.__CartesianTriangulation()
+        else:
+            print("Generating table with adaptive refinement")
 
-        # Generate initial coarse table of fluid data
-        rhoe_mesh_norm_coarse = self.__Compute2DMesh(rhoe_norm)
+            fluid_data_norm = self.__LoadFluidData()
+            rhoe_norm = fluid_data_norm[:, [EntropicVars.Density.value, EntropicVars.Energy.value]]
 
-        # Calculate thermodynamic state variables of initial table nodes
-        fluid_data_norm_coarse = np.zeros([len(rhoe_mesh_norm_coarse), EntropicVars.N_STATE_VARS.value])
-        fluid_data_norm_coarse[:, EntropicVars.Density.value] = rhoe_mesh_norm_coarse[:,0]
-        fluid_data_norm_coarse[:, EntropicVars.Energy.value] = rhoe_mesh_norm_coarse[:,1]
-        fluid_data_coarse = self._fluid_data_scaler.inverse_transform(fluid_data_norm_coarse)
-        fluid_data_coarse = self.__CalcMeshData(fluid_data_coarse)
+            # Generate initial coarse table of fluid data
+            rhoe_mesh_norm_coarse = self.__Compute2DMesh(rhoe_norm)
 
-        # Identify refinement locations
-        fluid_data_norm = self._fluid_data_scaler.transform(fluid_data_coarse)
-        ix_ref = self.__ApplyRefinement(fluid_data_norm)
+            # Calculate thermodynamic state variables of initial table nodes
+            fluid_data_norm_coarse = np.zeros([len(rhoe_mesh_norm_coarse), EntropicVars.N_STATE_VARS.value])
+            fluid_data_norm_coarse[:, EntropicVars.Density.value] = rhoe_mesh_norm_coarse[:,0]
+            fluid_data_norm_coarse[:, EntropicVars.Energy.value] = rhoe_mesh_norm_coarse[:,1]
+            fluid_data_coarse = self._fluid_data_scaler.inverse_transform(fluid_data_norm_coarse)
+            fluid_data_coarse = self.__CalcMeshData(fluid_data_coarse)
 
-        # Regenerate table including refinement locations
-        rhoe_norm_mesh = fluid_data_norm[:, [EntropicVars.Density.value, EntropicVars.Energy.value]]
-        rhoe_norm_ref = rhoe_norm_mesh[ix_ref, :]
-        rhoe_mesh_norm = self.__Compute2DMesh(rhoe_norm, ref_pts=rhoe_norm_ref,show=True)
+            # Identify refinement locations
+            fluid_data_norm = self._fluid_data_scaler.transform(fluid_data_coarse)
+            ix_ref = self.__ApplyRefinement(fluid_data_norm)
 
-        # Extract thermodynamic state variables of refined table
-        fluid_data_norm_ref = np.zeros([len(rhoe_mesh_norm), EntropicVars.N_STATE_VARS.value])
-        fluid_data_norm_ref[:, EntropicVars.Density.value] = rhoe_mesh_norm[:,0]
-        fluid_data_norm_ref[:, EntropicVars.Energy.value] = rhoe_mesh_norm[:,1]
-        fluid_data_ref = self._fluid_data_scaler.inverse_transform(fluid_data_norm_ref)
-        fluid_data_ref = self.__CalcMeshData(fluid_data_ref)
+            # Regenerate table including refinement locations
+            rhoe_norm_mesh = fluid_data_norm[:, [EntropicVars.Density.value, EntropicVars.Energy.value]]
+            rhoe_norm_ref = rhoe_norm_mesh[ix_ref, :]
+            rhoe_mesh_norm = self.__Compute2DMesh(rhoe_norm, ref_pts=rhoe_norm_ref,show=True)
 
-        # Create triangulation of filtered thermodynamic state data
-        fluid_data_norm_ref = self._fluid_data_scaler.transform(fluid_data_ref)
-        DT = Delaunay(fluid_data_norm_ref[:, [EntropicVars.Density.value,EntropicVars.Energy.value]])
+            # Extract thermodynamic state variables of refined table
+            fluid_data_norm_ref = np.zeros([len(rhoe_mesh_norm), EntropicVars.N_STATE_VARS.value])
+            fluid_data_norm_ref[:, EntropicVars.Density.value] = rhoe_mesh_norm[:,0]
+            fluid_data_norm_ref[:, EntropicVars.Energy.value] = rhoe_mesh_norm[:,1]
+            fluid_data_ref = self._fluid_data_scaler.inverse_transform(fluid_data_norm_ref)
+            fluid_data_ref = self.__CalcMeshData(fluid_data_ref)
 
-        # Extract triangulation, hull nodes, and table data
-        Tria = DT.simplices 
-        HullNodes = concave_hull_indexes(fluid_data_norm_ref[:, [EntropicVars.Density.value,EntropicVars.Energy.value]])
+            # Create triangulation of filtered thermodynamic state data
+            fluid_data_norm_ref = self._fluid_data_scaler.transform(fluid_data_ref)
+            DT = Delaunay(fluid_data_norm_ref[:, [EntropicVars.Density.value,EntropicVars.Energy.value]])
 
-        self._table_nodes = fluid_data_ref 
-        self._table_connectivity = Tria 
-        self._table_hullnodes = HullNodes
-        
-        # Add static enthalpy and the specific heat at constant volume
-        self.table_vars.append("Enthalpy")
-        h = self._table_nodes[:, EntropicVars.Energy.value] + self._table_nodes[:, EntropicVars.p.value] / self._table_nodes[:, EntropicVars.Density.value]
-        self._table_nodes = np.hstack((self._table_nodes, h[:,np.newaxis]))
+            # Extract triangulation, hull nodes, and table data
+            Tria = DT.simplices 
+            HullNodes = concave_hull_indexes(fluid_data_norm_ref[:, [EntropicVars.Density.value,EntropicVars.Energy.value]])
 
-        self.table_vars.append("cv")
-        cv = 1 /self._table_nodes[:, EntropicVars.dTde_rho.value]
-        self._table_nodes = np.hstack((self._table_nodes, cv[:,np.newaxis]))
+            self._table_nodes = fluid_data_ref 
+            self._table_connectivity = Tria 
+            self._table_hullnodes = HullNodes
+            
+            # Add static enthalpy and the specific heat at constant volume
+            # self.table_vars.append("Enthalpy")
+            # h = self._table_nodes[:, EntropicVars.Energy.value] + self._table_nodes[:, EntropicVars.p.value] / self._table_nodes[:, EntropicVars.Density.value]
+            # self._table_nodes = np.hstack((self._table_nodes, h[:,np.newaxis]))
+
+            # self.table_vars.append("cv")
+            # cv = 1 /self._table_nodes[:, EntropicVars.dTde_rho.value]
+            # self._table_nodes = np.hstack((self._table_nodes, cv[:,np.newaxis]))
 
         return
 
@@ -302,7 +440,7 @@ class SU2TableGenerator_NICFD:
         :type norm_val_max: float, optional
         :raises Exception: if thermodynamic state variable is unknown to SU2 DataMiner
         """
-        if TD_variable not in self.table_vars:
+        if TD_variable not in self._table_vars:
             raise Exception("%s is not present in fluid data" % TD_variable)
         
         self.refinement_vars.append(TD_variable)
@@ -355,9 +493,9 @@ class SU2TableGenerator_NICFD:
         fid.write("%i\n" % np.shape(self._table_hullnodes)[0])
         fid.write("\n")
 
-        fid.write("[Number of variables]\n%i\n\n" % (len(self.table_vars)))
+        fid.write("[Number of variables]\n%i\n\n" % (len(self._table_vars)))
         fid.write("[Variable names]\n")
-        for iVar, Var in enumerate(self.table_vars):
+        for iVar, Var in enumerate(self._table_vars):
             fid.write(str(iVar + 1)+":"+Var+"\n")
         fid.write("\n")
 
@@ -366,7 +504,7 @@ class SU2TableGenerator_NICFD:
         print("Writing table data...")
         fid.write("<Data>\n")
         for iNode in range(len(self._table_nodes)):
-            for ivar in range(len(self.table_vars)):
+            for ivar in range(len(self._table_vars)):
                 fid.write("\t%+.14e" % self._table_nodes[iNode, ivar])
             fid.write("\n")
         fid.write("</Data>\n\n")
