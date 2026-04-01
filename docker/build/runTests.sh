@@ -15,6 +15,7 @@ branch=""
 testscript=""
 mlpcppb=""
 workdir=$PWD
+repo="https://github.com/EvertBunschoten/SU2_DataMiner.git"
 
 export CCACHE_DIR=$workdir/ccache
 
@@ -22,6 +23,10 @@ if [ "$#" -ne 0 ]; then
   while [ "$(echo $1 | cut -c1)" = "-" ]
     do
         case "$1" in
+            -r)
+                    repo=$2
+                    shift 2
+                ;;
             -b)
                     branch=$2
                     shift 2
@@ -31,7 +36,7 @@ if [ "$#" -ne 0 ]; then
                     shift 2
                 ;;
             -m)
-                    mlpcppb=$3
+                    mlpcppb=$2
                     shift 2
                 ;;
             *)
@@ -50,7 +55,7 @@ if [ ! -z "$branch" ]; then
     mkdir "src"
   fi
   cd "src"
-  git clone --recursive https://github.com/EvertBunschoten/SU2_DataMiner $name
+  git clone --recursive $repo $name
   cd $name
   git config --add remote.origin.fetch '+refs/pull/*/merge:refs/remotes/origin/refs/pull/*/merge'
   git config --add remote.origin.fetch '+refs/heads/*:refs/remotes/origin/refs/heads/*'
@@ -75,7 +80,7 @@ rm -rf /home/ubuntu/pyenv
 python3 -m venv /home/ubuntu/pyenv 
 virtualenv -p /usr/bin/python3 /home/ubuntu/pyenv 
 . /home/ubuntu/pyenv/bin/activate 
-python3 -m pip install -r $SU2DATAMINER_HOME/required_packages.txt > pip_install_log.log
+python3 -m pip install -r $SU2DATAMINER_HOME/required_packages.txt 
 
 
 export PYTHONPATH=$PYTHONPATH:$SU2DATAMINER_HOME
