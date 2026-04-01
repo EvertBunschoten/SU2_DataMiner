@@ -6,6 +6,7 @@ def main():
     tf_mlpcpp_equivalence = TestCase("MLP_eval_tensorflow_MLPCpp")
     tf_mlpcpp_equivalence.config_dir = "MLPCppwrapper"
     tf_mlpcpp_equivalence.config_file = ""
+    tf_mlpcpp_equivalence.timeout = 600
     tf_mlpcpp_equivalence.exec_command = "./test_wrapper.py"
     tf_mlpcpp_equivalence.reference_files = []
     tf_mlpcpp_equivalence.test_files = []
