@@ -47,8 +47,7 @@ class DataGenerator_CoolProp(DataGenerator_Base):
     """
     _Config:Config_NICFD
     fluid = None 
-    __excluded_phases:list[int] = [CoolP.iphase_critical_point, CoolP.iphase_twophase, CoolP.iphase_liquid]
-
+    __accepted_phases:list[int] =  [CoolP.iphase_gas, CoolP.iphase_supercritical_gas, CoolP.iphase_supercritical]
     # Pressure and temperature limits
     __use_PT:bool = DefaultSettings_NICFD.use_PT_grid
     __T_min:float = DefaultSettings_NICFD.T_min
@@ -94,7 +93,7 @@ class DataGenerator_CoolProp(DataGenerator_Base):
 
             self.__two_phase = self._Config.TwoPhase()
             if self.__two_phase:
-                self.__excluded_phases.remove(CoolP.iphase_twophase)
+                self.__accepted_phases.append(CoolP.iphase_twophase)
 
             self.fluid = CP.AbstractState(self._Config.GetEquationOfState(), self._Config.GetFluid())
             self.__auto_range = self._Config.GetAutoRange()
@@ -141,7 +140,7 @@ class DataGenerator_CoolProp(DataGenerator_Base):
                 for j in range(len(p_range)):
                     try:
                         self.fluid.update(CP.PT_INPUTS, pp[i,j], TT[i,j])
-                        if self.fluid.phase() not in self.__excluded_phases:
+                        if self.fluid.phase() in self.__accepted_phases:
                             dd[i,j] = self.fluid.rhomass()
                             uu[i,j] = self.fluid.umass()
                         else:
@@ -344,6 +343,10 @@ class DataGenerator_CoolProp(DataGenerator_Base):
         :type two_phase: bool, optional
         """
         self._Config.EnableTwophase(two_phase)
+        if self._Config.TwoPhase() and CoolP.iphase_twophase not in self.__accepted_phases:
+            self.__accepted_phases.append(CoolP.iphase_twophase)
+        if not self._Config.TwoPhase() and CoolP.iphase_twophase in self.__accepted_phases:
+            self.__accepted_phases.remove(CoolP.iphase_twophase)
         return 
     
     def TwoPhase(self):
@@ -502,7 +505,7 @@ class DataGenerator_CoolProp(DataGenerator_Base):
         state_vector_struct[EntropicVars.T.name] = Temperature
         Pressure = self.fluid.p()#-rho * rho * Temperature * dsdrho_e
         state_vector_struct[EntropicVars.p.name] = Pressure 
-        Enthalpy = e + Pressure / rho
+        Enthalpy = self.fluid.hmass()
         state_vector_struct[EntropicVars.Enthalpy.name] = Enthalpy
 
         dTde_rho = self.fluid.first_partial_deriv(CP.iT, CP.iUmass, CP.iDmass)#-Temperature * Temperature * d2sde2
@@ -522,32 +525,28 @@ class DataGenerator_CoolProp(DataGenerator_Base):
             SoundSpeed2 = self.fluid.speed_sound()**2
         state_vector_struct[EntropicVars.c2.name] = SoundSpeed2
 
-        dhdrho_e = -Pressure * pow(rho, -2) + dPdrho_e / rho
-        dhde_rho = 1 + dPde_rho / rho
+        dhdrho_e = self.fluid.first_partial_deriv(CP.iHmass, CP.iDmass, CP.iUmass)
+        dhde_rho = self.fluid.first_partial_deriv(CP.iHmass, CP.iUmass, CP.iDmass)
 
-        Cv = 1 / dTde_rho
-        dhdrho_P = dhdrho_e - dhde_rho * (1 / dPde_rho) * dPdrho_e
-        dhdP_rho = dhde_rho * (1 / dPde_rho)
-        dsdrho_P = dsdrho_e - dPdrho_e * (1 / dPde_rho) * dsde_rho
-        dsdP_rho = dsde_rho / dPde_rho
+        Cv = self.fluid.cvmass()
+        dhdrho_P = self.fluid.first_partial_deriv(CP.iHmass, CP.iDmass, CP.iP)
+        dhdP_rho = self.fluid.first_partial_deriv(CP.iHmass, CP.iP, CP.iDmass)
+        dsdrho_P = self.fluid.first_partial_deriv(CP.iSmass, CP.iDmass, CP.iP)
+        dsdP_rho = self.fluid.first_partial_deriv(CP.iSmass, CP.iP, CP.iDmass)
 
         # drhode_p = -dPde_rho/dPdrho_e
         # dTde_p = dTde_rho + dTdrho_e*drhode_p
         # dhde_p = dhde_rho + drhode_p*dhdrho_e
         Cp = self.fluid.cpmass()# dhde_p / dTde_p
         state_vector_struct[EntropicVars.cp.name] = Cp
-
-        dhdrho_P = dhdrho_e - dhde_rho * (1 / dPde_rho) * dPdrho_e
+        state_vector_struct[EntropicVars.cv.name] = Cv
         state_vector_struct[EntropicVars.dhdrho_p.name] = dhdrho_P
-        dhdP_rho = dhde_rho * (1 / dPde_rho)
         state_vector_struct[EntropicVars.dhdp_rho.name] = dhdP_rho
-        dsdrho_P = dsdrho_e - dPdrho_e * (1 / dPde_rho) * dsde_rho
         state_vector_struct[EntropicVars.dsdrho_p.name] = dsdrho_P
-        dsdP_rho = dsde_rho / dPde_rho
         state_vector_struct[EntropicVars.dsdp_rho.name] = dsdP_rho
 
-        state_vector_struct[EntropicVars.dhde_rho.name] = self.fluid.first_partial_deriv(CP.iHmass, CP.iUmass, CP.iDmass)
-        state_vector_struct[EntropicVars.dhdrho_e.name] = self.fluid.first_partial_deriv(CP.iHmass, CP.iDmass, CP.iUmass)
+        state_vector_struct[EntropicVars.dhde_rho.name] = dhde_rho
+        state_vector_struct[EntropicVars.dhdrho_e.name] = dhdrho_e
         return 
         
     def __ThermodynamicState(self):
@@ -597,7 +596,7 @@ class DataGenerator_CoolProp(DataGenerator_Base):
         phase = self.fluid.phase()
         q = self.fluid.Q()
         correct_phase = True
-        if phase not in self.__excluded_phases:
+        if phase in self.__accepted_phases:
             state_vals = self.__ThermodynamicState()
             if self._Config.CalcTransportProperties():
                 viscosity, conductivity,vapor_quality = self.__TransportProperties(q)
@@ -627,7 +626,7 @@ class DataGenerator_CoolProp(DataGenerator_Base):
         try:
             self.fluid.update(CP.DmassUmass_INPUTS, rho, e)
             phase = self.fluid.phase()
-            if phase in self.__excluded_phases:
+            if phase not in self.__accepted_phases:
                 return None
             return self.fluid.smass()
         except:
