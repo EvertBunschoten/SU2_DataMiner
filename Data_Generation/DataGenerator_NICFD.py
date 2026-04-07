@@ -524,43 +524,50 @@ class DataGenerator_CoolProp(DataGenerator_Base):
         Enthalpy = self.fluid.hmass()
         state_vector_struct[EntropicVars.Enthalpy.name] = Enthalpy
 
-        dTde_rho = self.fluid.first_partial_deriv(CP.iT, CP.iUmass, CP.iDmass)#-Temperature * Temperature * d2sde2
-        state_vector_struct[EntropicVars.dTde_rho.name] = dTde_rho
-        dTdrho_e = self.fluid.first_partial_deriv(CP.iT, CP.iDmass, CP.iUmass)#-Temperature * Temperature * d2sdedrho
-        state_vector_struct[EntropicVars.dTdrho_e.name] = dTdrho_e
-
-        dPde_rho = self.fluid.first_partial_deriv(CP.iP, CP.iUmass, CP.iDmass)#-rho*rho * Temperature * (-Temperature * (d2sde2 * dsdrho_e) + d2sdedrho)
-        state_vector_struct[EntropicVars.dpde_rho.name] = dPde_rho
-        dPdrho_e = self.fluid.first_partial_deriv(CP.iP, CP.iDmass, CP.iUmass)#- rho * Temperature * (dsdrho_e * (2 - rho * Temperature * d2sdedrho) + rho * d2sdrho2)
-        state_vector_struct[EntropicVars.dpdrho_e.name] = dPdrho_e
-
         phase = self.fluid.phase()
         if phase == CoolP.iphase_twophase:
+            dPde_rho = -rho*rho * Temperature * (-Temperature * (d2sde2 * dsdrho_e) + d2sdedrho)
+            dPdrho_e = - rho * Temperature * (dsdrho_e * (2 - rho * Temperature * d2sdedrho) + rho * d2sdrho2)
             SoundSpeed2 = dPdrho_e - (dsdrho_e / dsde_rho) * dPde_rho
+            dTde_rho = -Temperature * Temperature * d2sde2
+            dTdrho_e = -Temperature * Temperature * d2sdedrho
+            drhode_p = -dPde_rho / dPdrho_e 
+            dhde_rho = 1 + dPde_rho / rho 
+            dhdrho_e = -Pressure * np.power(rho, -2) + dPdrho_e / rho 
+            dTde_p = dTde_rho + dTdrho_e * drhode_p
+            dhde_p = dhde_rho + drhode_p*dhdrho_e 
+            Cp = dhde_p / dTde_p
+            Cv = 1 / (dTde_rho+1e-16)
+            dhdrho_P = dhdrho_e - dhde_rho * (1 / dPde_rho) * dPdrho_e
+            dhdP_rho = dhde_rho * (1 / dPde_rho)
+            dsdrho_P = dsdrho_e - dPdrho_e * (1 / dPde_rho) * dsde_rho
+            dsdP_rho = dsde_rho / dPde_rho
         else:
+            dPde_rho = self.fluid.first_partial_deriv(CP.iP, CP.iUmass, CP.iDmass)
+            dPdrho_e = self.fluid.first_partial_deriv(CP.iP, CP.iDmass, CP.iUmass)
             SoundSpeed2 = self.fluid.speed_sound()**2
+            dTde_rho = self.fluid.first_partial_deriv(CP.iT, CP.iUmass, CP.iDmass)
+            dTdrho_e = self.fluid.first_partial_deriv(CP.iT, CP.iDmass, CP.iUmass)
+            Cp = self.fluid.cpmass()
+            Cv = self.fluid.cvmass()
+            dhdrho_e = self.fluid.first_partial_deriv(CP.iHmass, CP.iDmass, CP.iUmass)
+            dhde_rho = self.fluid.first_partial_deriv(CP.iHmass, CP.iUmass, CP.iDmass)
+            dhdrho_P = self.fluid.first_partial_deriv(CP.iHmass, CP.iDmass, CP.iP)
+            dhdP_rho = self.fluid.first_partial_deriv(CP.iHmass, CP.iP, CP.iDmass)
+            dsdrho_P = self.fluid.first_partial_deriv(CP.iSmass, CP.iDmass, CP.iP)
+            dsdP_rho = self.fluid.first_partial_deriv(CP.iSmass, CP.iP, CP.iDmass)
+
+        state_vector_struct[EntropicVars.dTde_rho.name] = dTde_rho
+        state_vector_struct[EntropicVars.dTdrho_e.name] = dTdrho_e
+        state_vector_struct[EntropicVars.dpde_rho.name] = dPde_rho
+        state_vector_struct[EntropicVars.dpdrho_e.name] = dPdrho_e
         state_vector_struct[EntropicVars.c2.name] = SoundSpeed2
-
-        dhdrho_e = self.fluid.first_partial_deriv(CP.iHmass, CP.iDmass, CP.iUmass)
-        dhde_rho = self.fluid.first_partial_deriv(CP.iHmass, CP.iUmass, CP.iDmass)
-
-        Cv = self.fluid.cvmass()
-        dhdrho_P = self.fluid.first_partial_deriv(CP.iHmass, CP.iDmass, CP.iP)
-        dhdP_rho = self.fluid.first_partial_deriv(CP.iHmass, CP.iP, CP.iDmass)
-        dsdrho_P = self.fluid.first_partial_deriv(CP.iSmass, CP.iDmass, CP.iP)
-        dsdP_rho = self.fluid.first_partial_deriv(CP.iSmass, CP.iP, CP.iDmass)
-
-        # drhode_p = -dPde_rho/dPdrho_e
-        # dTde_p = dTde_rho + dTdrho_e*drhode_p
-        # dhde_p = dhde_rho + drhode_p*dhdrho_e
-        Cp = self.fluid.cpmass()# dhde_p / dTde_p
         state_vector_struct[EntropicVars.cp.name] = Cp
         state_vector_struct[EntropicVars.cv.name] = Cv
         state_vector_struct[EntropicVars.dhdrho_p.name] = dhdrho_P
         state_vector_struct[EntropicVars.dhdp_rho.name] = dhdP_rho
         state_vector_struct[EntropicVars.dsdrho_p.name] = dsdrho_P
         state_vector_struct[EntropicVars.dsdp_rho.name] = dsdP_rho
-
         state_vector_struct[EntropicVars.dhde_rho.name] = dhde_rho
         state_vector_struct[EntropicVars.dhdrho_e.name] = dhdrho_e
         return 
