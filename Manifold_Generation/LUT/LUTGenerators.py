@@ -551,47 +551,36 @@ class SU2TableGenerator_NICFD:
         """Initiate table generation process
         """
 
+        self.__CartesianTableData()
         # Load initial fluid data and scale it
-        # TODO: use adaptive refinement or Cartesian refinement based on settings.
         if self._Config.GetTableDiscretization()=="cartesian":
-            
-            self.__CartesianTableData()
-
             self.__CartesianTriangulation()
         else:
             print("Generating table with adaptive refinement")
 
-            fluid_data_norm = self.__LoadFluidData()
-            rhoe_norm = fluid_data_norm[:, [EntropicVars.Density.value, EntropicVars.Energy.value]]
+            self._table_nodes = np.column_stack(tuple(self.state_data[:,:,i][self.valid_mask].flatten() for i in range(EntropicVars.N_STATE_VARS.value)))
+            
+            fluid_data_norm = self._fluid_data_scaler.fit_transform(self._table_nodes)
+
+            sat_curve_pts_norm = self.__CreateSaturationCurve()
 
             # Generate initial coarse table of fluid data
-            rhoe_mesh_norm_coarse = self.__Compute2DMesh(rhoe_norm)
-
-            # Calculate thermodynamic state variables of initial table nodes
-            fluid_data_norm_coarse = np.zeros([len(rhoe_mesh_norm_coarse), EntropicVars.N_STATE_VARS.value])
-            fluid_data_norm_coarse[:, EntropicVars.Density.value] = rhoe_mesh_norm_coarse[:,0]
-            fluid_data_norm_coarse[:, EntropicVars.Energy.value] = rhoe_mesh_norm_coarse[:,1]
-            fluid_data_coarse = self._fluid_data_scaler.inverse_transform(fluid_data_norm_coarse)
-            fluid_data_coarse = self.__CalcMeshData(fluid_data_coarse)
+            rhoe_norm = fluid_data_norm[:, [EntropicVars.Density.value, EntropicVars.Energy.value]]
+            
+            fluid_data_coarse, _ = self.__GenerateMeshAndData(rhoe_norm, sat_curve_pts_norm)
 
             # Identify refinement locations
             fluid_data_norm = self._fluid_data_scaler.transform(fluid_data_coarse)
             ix_ref = self.__ApplyRefinement(fluid_data_norm)
 
-            # Regenerate table including refinement locations
+            # # Regenerate table including refinement locations
             rhoe_norm_mesh = fluid_data_norm[:, [EntropicVars.Density.value, EntropicVars.Energy.value]]
-            rhoe_norm_ref = rhoe_norm_mesh[ix_ref, :]
-            rhoe_mesh_norm = self.__Compute2DMesh(rhoe_norm, ref_pts=rhoe_norm_ref,show=True)
-
-            # Extract thermodynamic state variables of refined table
-            fluid_data_norm_ref = np.zeros([len(rhoe_mesh_norm), EntropicVars.N_STATE_VARS.value])
-            fluid_data_norm_ref[:, EntropicVars.Density.value] = rhoe_mesh_norm[:,0]
-            fluid_data_norm_ref[:, EntropicVars.Energy.value] = rhoe_mesh_norm[:,1]
-            fluid_data_ref = self._fluid_data_scaler.inverse_transform(fluid_data_norm_ref)
-            fluid_data_ref = self.__CalcMeshData(fluid_data_ref)
-
+        
             # Create triangulation of filtered thermodynamic state data
+            fluid_data_ref, _ = self.__GenerateMeshAndData(rhoe_norm_mesh, sat_curve_pts_norm, ix_ref=ix_ref)
+            
             fluid_data_norm_ref = self._fluid_data_scaler.transform(fluid_data_ref)
+
             DT = Delaunay(fluid_data_norm_ref[:, [EntropicVars.Density.value,EntropicVars.Energy.value]])
 
             # Extract triangulation, hull nodes, and table data
