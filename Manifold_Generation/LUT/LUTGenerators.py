@@ -96,7 +96,9 @@ class SU2TableGenerator_NICFD:
 
     _refined_cell_size:float = 5e-3#2.5e-3#1.5e-3   # Table level refined cell size.
     _refinement_radius:float = 1e-2#5e-2     # Table level radius within which refinement is applied.
-
+    __refinement_vars:list[str] = []
+    __refinement_norm_min:list[float] = []
+    __refinement_norm_max:list[float] = []
     _table_vars:list[str] = [s.name for s in EntropicVars][:-1]
     _table_nodes = []       # Progress variable, total enthalpy, and mixture fraction node values for each table level.
     _table_nodes_norm = []  # Normalized table nodes for each level.
@@ -661,9 +663,9 @@ class SU2TableGenerator_NICFD:
         if TD_variable not in self._table_vars:
             raise Exception("%s is not present in fluid data" % TD_variable)
         
-        self.refinement_vars.append(TD_variable)
-        self.refinement_norm_min.append(norm_val_min)
-        self.refinement_norm_max.append(norm_val_max)
+        self.__refinement_vars.append(TD_variable)
+        self.__refinement_norm_min.append(norm_val_min)
+        self.__refinement_norm_max.append(norm_val_max)
         return 
     
     def __ApplyRefinement(self, fluid_data_norm_ref:np.ndarray[float]):
