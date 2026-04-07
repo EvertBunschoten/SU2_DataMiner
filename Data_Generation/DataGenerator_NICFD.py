@@ -670,6 +670,28 @@ class DataGenerator_CoolProp(DataGenerator_Base):
         self.__fd_step_size_e = fd_step_e
         return 
     
+    def ComputeSaturationCurve(self):
+        """Compute the density and static energy along the fluid saturation curve
+
+        :return: density and static energy array of saturation curve
+        :rtype: np.ndarray[float]
+        """
+        eos_fluid = "%s::%s" % (self._Config.GetEquationOfState(), self._Config.GetFluid())
+        ptriple = CP.PropsSI("PTRIPLE", eos_fluid)
+        pcrit = CP.PropsSI("PCRIT", eos_fluid)
+        Psat = np.linspace(ptriple, pcrit, 2000)
+
+        rhoLiq=CP.PropsSI("D","P",Psat,"Q",0,eos_fluid)
+        rhoVap=CP.PropsSI("D","P",Psat,"Q",1,eos_fluid)
+
+        eLiq=CP.PropsSI("U","P",Psat,"Q",0,eos_fluid)
+        eVap=CP.PropsSI("U","P",Psat,"Q",1,eos_fluid)
+
+        rho_sat=np.concatenate((rhoLiq[:-1],np.flip(rhoVap)))
+        e_sat=np.concatenate((eLiq[:-1],np.flip(eVap)))
+        sat_curve=np.column_stack((rho_sat,e_sat))
+        return sat_curve 
+    
     def GetFDStepSizes(self):
         return self.__fd_step_size_rho, self.__fd_step_size_e
     
