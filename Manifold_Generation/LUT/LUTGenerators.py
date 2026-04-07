@@ -431,12 +431,17 @@ class SU2TableGenerator_NICFD:
         print("Generating table on Cartesian grid")
         Np_rho = self._Config.GetNpDensity()
         Np_e = self._Config.GetNpEnergy()
-        rho_minmax = self._Config.GetDensityBounds()
-        rho_min = rho_minmax[0]
-        rho_max = rho_minmax[1]
-        e_minmax = self._Config.GetEnergyBounds()
-        e_min = e_minmax[0]
-        e_max = e_minmax[1]
+        if self._Config.GetAutoRange():
+            self._DataGenerator.PreprocessData()
+            rho_min, rho_max = self._DataGenerator.GetDensityBounds()
+            e_min, e_max = self._DataGenerator.GetEnergyBounds()
+        else:
+            rho_minmax = self._Config.GetDensityBounds()
+            rho_min = rho_minmax[0]
+            rho_max = rho_minmax[1]
+            e_minmax = self._Config.GetEnergyBounds()
+            e_min = e_minmax[0]
+            e_max = e_minmax[1]
         rho_range = np.linspace(rho_min, rho_max, Np_rho)
         e_range = np.linspace(e_min, e_max, Np_e)
         self.rho_grid, self.e_grid = np.meshgrid(rho_range, e_range)
