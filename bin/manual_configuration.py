@@ -383,6 +383,15 @@ def ManualNICFDConfiguration():
         print("Fluid data grid definition: %s based." % grid_string)
         printhbar()
 
+        InsertEnumerateOption(Config_in.IncludeTransportProperties, [True, False], Config_in.CalcTransportProperties(), "Include calculation of transport properties")
+
+        InsertEnumerateOption(Config_in.EnableTwophase, [True, False], Config_in.TwoPhase(), "Include two-phase fluid data?")
+
+        if (Config_in.TwoPhase() and Config_in.CalcTransportProperties()):
+            InsertEnumerateOption(Config_in.SetConductivityModel, DefaultSettings_NICFD.conductivity_models, Config_in.GetConductivityModel(), "Specify two-phase conductivity model")
+            InsertEnumerateOption(Config_in.SetViscosityModel, DefaultSettings_NICFD.viscosity_models, Config_in.GetViscosityModel(), "Specify two-phase viscosity model")
+            
+
         # 3: Define fluid data manifold bounds.
         correct_x_bounds=False 
         correct_y_bounds=False

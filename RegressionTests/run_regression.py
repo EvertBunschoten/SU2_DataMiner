@@ -41,7 +41,7 @@ def main():
 
     hydrogen_flamelet = TestCase("H2_Flamelet")
     hydrogen_flamelet.config_dir = "FlameletGeneration/Adiabatic_H2/"
-    hydrogen_flamelet.config_file = "adiabatic_flamelets.cfg"
+    hydrogen_flamelet.config_file = ""
     hydrogen_flamelet.exec_command = "./generate_flamelet_data.py"
     hydrogen_flamelet.reference_files = ["flamelet_data.ref"]
     hydrogen_flamelet.test_files = ["freeflame_data/phi_1.0/freeflamelet_phi1.0_Tu300.0.csv"]

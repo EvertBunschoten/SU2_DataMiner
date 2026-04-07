@@ -57,6 +57,13 @@ class Config_NICFD(Config):
     # Fluid definition settings
     __fluid_names:list[str] = ["MM"]                    # List of fluid names used for data generation.
     __fluid_string:str="MM"                             # Fluid string for defining the abstract state in CoolProp
+    # TODO: include options for transport properties 
+    __calc_transport_properties:bool = False
+    __viscosity_model:str = DefaultSettings_NICFD.viscosity_model
+    __conductivity_model:str = DefaultSettings_NICFD.conductivity_model
+    
+    __twophase:bool = False 
+
     __EOS_type:str=DefaultSettings_NICFD.EOS_type       # Equation of state used by CoolProp
     __fluid_mole_fractions:list[float] = [1.0]          # Mole fractions for components in fluid mixture.
     __use_PT:bool = DefaultSettings_NICFD.use_PT_grid   # Use a pressure-temperature based grid for fluid training data.
@@ -78,7 +85,7 @@ class Config_NICFD(Config):
     _state_vars:list[str] = ["s", "T","p","c2"]  # State variable names for which the physics-informed MLP is trained.
 
     # Table Generation Settings
-
+    __Table_discretization:str = DefaultSettings_NICFD.tabulation_method
     __Table_base_cell_size:float = None     # Table base cell size per table level.
     __Table_ref_cell_size:float = None      # Refined cell size per table level.
     __Table_ref_radius:float = None         # Refinement radius within which refined cell size is applied.
@@ -151,6 +158,15 @@ class Config_NICFD(Config):
                 print("Density range: %.2f kg/m3 -> %.2f kg/m3 (%i steps)" % (self.__Rho_lower, self.__Rho_upper, self.__Np_P))
         print("")
         print("State variables considered during physics-informed learning: "+", ".join((v for v in self._state_vars)))
+
+        if self.__twophase:
+            print("Including two-phase fluid data.")
+        if self.__calc_transport_properties:
+            print("Including transport properties in fluid data.")
+            if self.__twophase:
+                print("Two-phase conductivity model: %s" % self.__conductivity_model)
+                print("Two-phase viscosity model: %s" % self.__viscosity_model)
+
         return 
     
 
@@ -207,6 +223,76 @@ class Config_NICFD(Config):
         
         self.__EOS_type=EOS_type_in.upper()
         return
+    
+    def IncludeTransportProperties(self, calc_transport_properties:bool=False):
+        """Include transport properties in fluid data calculation
+
+        :param calc_transport_properties: evaluate transport properties, defaults to False
+        :type calc_transport_properties: bool, optional
+        """
+        self.__calc_transport_properties = calc_transport_properties
+        return 
+    
+    def CalcTransportProperties(self):
+        return self.__calc_transport_properties 
+    
+    def SetConductivityModel(self, conductivity_model:str=DefaultSettings_NICFD.conductivity_model):
+        """Specify the two-phase conductivity model.
+
+        :param conductivity_model: two-phase conductivity model option, defaults to "volume"
+        :type conductivity_model: str, optional
+        :raises Exception: if the specified option is not supported.
+        """
+        if conductivity_model not in DefaultSettings_NICFD.conductivity_models:
+            raise Exception("Two-phase conductivity model should be one of the following: " + ",".join(c for c in DefaultSettings_NICFD.conductivity_models))
+        self.__conductivity_model = conductivity_model
+        if not self.TwoPhase():
+            self.EnableTwophase(True)
+            print("Two-phase conductivity model specified, including two-phase fluid data.")
+        return 
+    
+    def GetConductivityModel(self):
+        """Get two-phase conductivity model.
+
+        :return: two-phase conductivity model option
+        :rtype: str
+        """
+        return self.__conductivity_model
+    
+    def SetViscosityModel(self, viscosity_model:str=DefaultSettings_NICFD.viscosity_model):
+        """Specify the two-phase viscosity model.
+
+        :param viscosity_model: two-phase viscosity model option, defaults to "mcadams"
+        :type viscosity_model: str, optional
+        :raises Exception: if the specified option is not supported.
+        """
+        if viscosity_model not in DefaultSettings_NICFD.viscosity_models:
+            raise Exception("Two-phase viscosity model should be one of the following: " + ",".join(c for c in DefaultSettings_NICFD.viscosity_models))
+        self.__viscosity_model = viscosity_model
+        if not self.TwoPhase():
+            self.EnableTwophase(True)
+            print("Two-phase viscosity model specified, including two-phase fluid data.")
+        return 
+    
+    def GetViscosityModel(self):
+        """Get two-phase viscosity model.
+
+        :return: two-phase viscosity model option
+        :rtype: str
+        """
+        return self.__viscosity_model
+    
+    def EnableTwophase(self, two_phase:bool=False):
+        """Include two-phase region in fluid data.
+
+        :param two_phase: include two-phase data in fluid data, defaults to False
+        :type two_phase: bool, optional
+        """
+        self.__twophase = two_phase 
+        return 
+    
+    def TwoPhase(self):
+        return self.__twophase
     
     def GetEquationOfState(self):
         """Retrieve the equation of state backend used by CoolProp for fluid data calculations.
@@ -488,6 +574,26 @@ class Config_NICFD(Config):
 
         """
         return self.__Np_P
+    
+    def SetTableDiscretization(self, table_method:str=DefaultSettings_NICFD.tabulation_method):
+        """Specify how thermodynamic state space is discretized for look-up table.
+
+        :param table_method: discretization method, defaults to "cartesian"
+        :type table_method: str, optional
+        :raises Exception: if method is not supported
+        """
+        if table_method not in DefaultSettings_NICFD.tabulation_options:
+            raise Exception("Table discretization method should be one of the following: %s" % ",".join(t for t in DefaultSettings_NICFD.tabulation_options))
+        self.__Table_discretization = table_method
+        return 
+    
+    def GetTableDiscretization(self):
+        """Get thermodynamic state space discretization method.
+
+        :return: table discretization method.
+        :rtype: str
+        """
+        return self.__Table_discretization
     
     def SetTableCellSize(self, base_cell_size:float, refined_cell_size:float=None):
         """Define the base and optional refined 2D table cell sizes.
