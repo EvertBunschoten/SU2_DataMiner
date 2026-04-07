@@ -466,8 +466,6 @@ class SU2TableGenerator_NICFD:
         e_flat = self.e_grid.flatten()
 
         success_count = 0
-        twophase_count = 0
-        fd_fallback_count = 0
         for i in tqdm(range(n_points), desc="Evaluating"):
             rho = rho_flat[i]
             e = e_flat[i]
@@ -483,7 +481,6 @@ class SU2TableGenerator_NICFD:
                     self.state_data[idx_2d[0], idx_2d[1], :] = None
             except:
                 self.state_data[idx_2d[0], idx_2d[1], :] = None
-        
         return 
     
     def __CartesianTriangulation(self):
@@ -522,6 +519,34 @@ class SU2TableGenerator_NICFD:
         print()
         return 
 
+    def __CreateSaturationCurve(self):
+        rhoe_sat_curve = self._DataGenerator.ComputeSaturationCurve()
+        rho_min, rho_max = self._DataGenerator.GetDensityBounds()
+        e_min, e_max = self._DataGenerator.GetEnergyBounds()
+        within_bounds_density = np.logical_and(rhoe_sat_curve[:,0] > rho_min, rhoe_sat_curve[:,0] < rho_max)
+        within_bounds_energy = np.logical_and(rhoe_sat_curve[:,1] > e_min, rhoe_sat_curve[:,1] < e_max)
+        within_bounds = np.logical_and(within_bounds_density, within_bounds_energy)
+
+        state_sat_curve = np.zeros([len(rhoe_sat_curve), EntropicVars.N_STATE_VARS.value])
+        state_sat_curve[:, EntropicVars.Density.value] = rhoe_sat_curve[:,0]
+        state_sat_curve[:, EntropicVars.Energy.value] = rhoe_sat_curve[:,1]
+
+        state_sat_curve_norm = self._fluid_data_scaler.transform(state_sat_curve[within_bounds, :])
+
+        sat_curve_pts_norm = state_sat_curve_norm[:, [EntropicVars.Density.value,EntropicVars.Energy.value]]
+        return sat_curve_pts_norm
+    
+    def __GenerateMeshAndData(self, rhoe_norm:np.ndarray[float], sat_curve_pts:np.ndarray[float],ix_ref=[]):
+
+        rhoe_norm_mesh_nodes,tria = self.__Compute2DMesh(rhoe_norm, ref_pts=rhoe_norm[ix_ref,:], show=False, sat_curve_pts=sat_curve_pts)
+        # Calculate thermodynamic state variables of initial table nodes
+        fluid_data_norm = np.zeros([len(rhoe_norm_mesh_nodes), EntropicVars.N_STATE_VARS.value])
+        fluid_data_norm[:, EntropicVars.Density.value] = rhoe_norm_mesh_nodes[:,0]
+        fluid_data_norm[:, EntropicVars.Energy.value] = rhoe_norm_mesh_nodes[:,1]
+        fluid_data_mesh = self._fluid_data_scaler.inverse_transform(fluid_data_norm)
+        fluid_data_mesh = self.__CalcMeshData(fluid_data_mesh)
+        return fluid_data_mesh, tria
+    
     def GenerateTable(self):
         """Initiate table generation process
         """
