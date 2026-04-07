@@ -590,15 +590,60 @@ class SU2TableGenerator_NICFD:
             self._table_nodes = fluid_data_ref 
             self._table_connectivity = Tria 
             self._table_hullnodes = HullNodes
-            
-            # Add static enthalpy and the specific heat at constant volume
-            # self.table_vars.append("Enthalpy")
-            # h = self._table_nodes[:, EntropicVars.Energy.value] + self._table_nodes[:, EntropicVars.p.value] / self._table_nodes[:, EntropicVars.Density.value]
-            # self._table_nodes = np.hstack((self._table_nodes, h[:,np.newaxis]))
+            self.WriteOutParaview()
 
-            # self.table_vars.append("cv")
-            # cv = 1 /self._table_nodes[:, EntropicVars.dTde_rho.value]
-            # self._table_nodes = np.hstack((self._table_nodes, cv[:,np.newaxis]))
+        return
+    
+    def __remove_invalid_nodes_from_mesh(self, connectivity, valid_mask, rhoe_mesh_norm):
+
+        conn = np.asarray(connectivity, dtype=np.int64)
+
+        tri_keep = np.all(valid_mask[conn], axis=1)
+        conn2 = conn[tri_keep]
+
+        keep_nodes = np.flatnonzero(valid_mask)
+        old_to_new = -np.ones(len(rhoe_mesh_norm), dtype=np.int64)
+        old_to_new[keep_nodes] = np.arange(len(keep_nodes), dtype=np.int64)
+
+        conn2 = old_to_new[conn2]
+
+        return conn2
+    def WriteOutParaview(self):
+        """
+        write a file containing all the LuT data that can be opened with Paraview
+        
+        :param connectivity: contains the node index of the created LuT
+        :param data_nodes_2d: contains the LuT nodes
+        :param MainFolder: string indicating the folder where all the outputs are saved
+        :param outpath: string indicating the name and extension of the saved file
+        :param x_vars: name of the variable that varies along the mesh x direction
+        :param y_vars: name of the variable that varies along the mesh y direction
+        :param variables: list of the saved variables, if None all the available variables are saved
+        """
+
+        #x, y = self._table_nodes[:, EntropicVars.Density.value], self._table_nodes[:, EntropicVars.Energy.value]
+        table_data_norm = self._fluid_data_scaler.transform(self._table_nodes)
+        x, y = table_data_norm[:, EntropicVars.Density.value], table_data_norm[:, EntropicVars.Energy.value]
+        # scale_x= self._fluid_data_scaler.data_max_[EntropicVars.Density.value] - self._fluid_data_scaler.data_min_[EntropicVars.Density.value]
+        # scale_y= self._fluid_data_scaler.data_max_[EntropicVars.Energy.value] - self._fluid_data_scaler.data_min_[EntropicVars.Energy.value]
+        
+        pts = np.column_stack([x, y, np.zeros_like(x)])  # z=0
+
+        conn = np.asarray(self._table_connectivity, dtype=np.int64)
+        if conn.min() == 1:
+            conn = conn - 1
+
+        point_data = {}
+        for q in EntropicVars:
+            if q.value < EntropicVars.N_STATE_VARS.value:
+                point_data[q.name] = np.asarray(self._table_nodes[:, q.value])
+
+        mesh = meshio.Mesh(
+            points=pts,
+            cells=[("triangle", conn)],
+            point_data=point_data
+        )
+        mesh.write("vtk_table.vtk")
 
         return
 
