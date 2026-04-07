@@ -411,17 +411,19 @@ class SU2TableGenerator_NICFD:
         :rtype: np.ndarray[float]
         """
         fluid_data_out = fluid_data_mesh.copy()
-        for i in range(len(fluid_data_mesh)):
+        self.valid_mask = np.zeros(len(fluid_data_mesh),dtype=np.bool)
+        for i in tqdm(range(len(fluid_data_mesh)),desc="Evaluating fluid properties..."):
             try:
                 self._DataGenerator.UpdateFluid(fluid_data_mesh[i, EntropicVars.Density.value], fluid_data_mesh[i, EntropicVars.Energy.value])
                 state_vector, correct_phase = self._DataGenerator.GetStateVector()
                 if correct_phase:
                     fluid_data_out[i, :] = state_vector
+                    self.valid_mask[i] = True
                 else:
                     fluid_data_out[i, :] = None
             except:
                 fluid_data_out[i, :] = None
-        fluid_data_out = fluid_data_out[~np.isnan(fluid_data_out[:,0]),:]
+        fluid_data_out = fluid_data_out[self.valid_mask,:]
         return fluid_data_out
     
     # TODO: include derivative and transport validation methods
