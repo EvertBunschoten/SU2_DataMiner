@@ -107,7 +107,7 @@ class SU2TableGenerator_NICFD:
 
     _controlling_variables:list[str]=["Density",\
                                       "Energy"]  # FGM controlling variables
-    _fluid_data_scaler:MinMaxScaler = None   # Scaler for flamelet data controlling variables.
+    _fluid_data_scaler:MinMaxScaler= MinMaxScaler()  # Scaler for flamelet data controlling variables.
 
     # TODO: option for adaptive mesh/Cartesian mesh 
 
@@ -400,9 +400,17 @@ class SU2TableGenerator_NICFD:
                 quads[:, [0, 2, 3]],
             ])
         gmsh.finalize()
-        MeshPoints = np.array([nodes[::3], nodes[1::3]]).T
-        return MeshPoints
+        
+        return MeshPoints, tris
     
+    def __map_tags(self,tags,nodeTags_sorted,order):
+        tags = np.asarray(tags, dtype=np.int64).ravel()
+        pos = np.searchsorted(nodeTags_sorted, tags)
+        ok = (pos < len(nodeTags_sorted)) & (nodeTags_sorted[pos] == tags)
+        if not np.all(ok):
+            missing = np.unique(tags[~ok])
+            raise RuntimeError(f"Node tags non trovati in getNodes(): {missing[:20]} (tot missing={len(missing)})")
+        return order[pos]
     
     def __CalcMeshData(self, fluid_data_mesh:np.ndarray[float]):
         """Calculate the fluid thermodynamic state variables for the table nodes
@@ -671,8 +679,9 @@ class SU2TableGenerator_NICFD:
     def __ApplyRefinement(self, fluid_data_norm_ref:np.ndarray[float]):
         ix_ref = np.array([],dtype=np.int64)
         fluid_vars = [a.name for a in EntropicVars][:-1]
-        for TD_var, val_min, val_max in zip(self.refinement_vars, self.refinement_norm_min, self.refinement_norm_max):
-            norm_data_var = fluid_data_norm_ref[:, fluid_vars.index(TD_var)]
+        fluid_data_inv = self._fluid_data_scaler.inverse_transform(fluid_data_norm_ref)
+        for TD_var, val_min, val_max in zip(self.__refinement_vars, self.__refinement_norm_min, self.__refinement_norm_max):
+            norm_data_var = fluid_data_inv[:, fluid_vars.index(TD_var)]
 
             ix = np.argwhere(np.logical_and(norm_data_var>=val_min, norm_data_var<=val_max))[:,0]
             ix_ref = np.append(ix_ref, ix)
