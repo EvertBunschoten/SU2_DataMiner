@@ -324,6 +324,22 @@ class DataGenerator_CoolProp(DataGenerator_Base):
         """
         return [self.__P_min, self.__P_max]
     
+    def GetDensityBounds(self):
+        """Get fluid density bounds values.
+
+        :return: minimum and maximum fluid density in data set.
+        :rtype: tuple
+        """
+        return self.__rho_min, self.__rho_max 
+    
+    def GetEnergyBounds(self):
+        """Get fluid static energy bounds values.
+
+        :return: minimum and maximum fluid static energy in data set.
+        :rtype: tuple
+        """
+        return self.__e_min, self.__e_max 
+    
     def IncludeTransportProperties(self, calc_transport_properties:bool=False):
         """Include transport properties in fluid data calculation
 
