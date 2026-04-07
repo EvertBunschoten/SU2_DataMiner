@@ -23,22 +23,13 @@
 #=============================================================================================#
 
 import numpy as np 
-import CoolProp.CoolProp as CP
 from Common.Properties import EntropicVars,DefaultSettings_NICFD
 from su2dataminer.generate_data import DataGenerator_CoolProp
-from scipy.spatial import ConvexHull, Delaunay
-from sklearn.preprocessing import MinMaxScaler,RobustScaler,StandardScaler, QuantileTransformer
-import matplotlib.pyplot as plt 
+from scipy.spatial import Delaunay
+from sklearn.preprocessing import MinMaxScaler
 from tqdm import tqdm
-import sys,os
 from Common.DataDrivenConfig import Config_NICFD
-import cantera as ct
 import gmsh 
-import pickle
-from multiprocessing import Pool 
-from sklearn.metrics import mean_squared_error
-from Common.Interpolators import Invdisttree 
-from random import sample 
 from concave_hull import concave_hull, concave_hull_indexes
 
 class SU2TableGenerator_NICFD:
