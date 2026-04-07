@@ -31,6 +31,60 @@ from tqdm import tqdm
 from Common.DataDrivenConfig import Config_NICFD
 import gmsh 
 from concave_hull import concave_hull, concave_hull_indexes
+import meshio 
+
+
+def FiniteDifferenceDerivative(y:np.ndarray[float], x:np.ndarray[float]):
+    """Calculate second-order accurate, one-dimensional finite-difference derivatives of y with respect to x.
+
+    :param y: data to calculate the finite-differences for.
+    :type y: np.ndarray[float]
+    :param x: axial coordinates.
+    :type x: np.ndarray[float]
+    :return: finite-difference derivatives of y with respect to x.
+    :rtype: np.ndarray[float]
+    """
+    Np = len(x)
+    dydx = np.zeros(Np)
+    for i in range(1, Np-1):
+        y_m = y[i-1]
+        y_p = y[i+1]
+        y_0 = y[i]
+        x_m = x[i-1]
+        x_p = x[i+1]
+        x_0 = x[i]
+        dx_1 = x_p - x_0 
+        dx_2 = x_0 - x_m 
+        dx2_1 = dx_1*dx_1 
+        dx2_2 = dx_2*dx_2
+        if (dx_1==0) or (dx_2==0):
+            dydx[i] = 0.0
+        else:
+            dydx[i] = (dx2_2 * y_p + (dx2_1 - dx2_2)*y_0 - dx2_1*y_m)/(dx_1*dx_2*(dx_1+dx_2))
+    dx_1 = x[1] - x[0]
+    dx_2 = x[2] - x[0]
+    dx2_1 = dx_1*dx_1 
+    dx2_2 = dx_2*dx_2 
+    y_0 = y[0]
+    y_p = y[1]
+    y_pp = y[2]
+    if (dx_1==0) or (dx_2==0):
+        dydx[0] = 0.0
+    else:
+        dydx[0] = (dx2_1 * y_pp + (dx2_2 - dx2_1)*y_0 - dx2_2*y_p)/(dx_1*dx_2*(dx_1 - dx_2))
+
+    dx_1 = x[-2] - x[-1]
+    dx_2 = x[-3] - x[-1]
+    dx2_1 = dx_1*dx_1 
+    dx2_2 = dx_2*dx_2 
+    y_0 = y[-1]
+    y_p = y[-2]
+    y_pp = y[-3]
+    if (dx_1==0) or (dx_2==0):
+        dydx[-1] = 0.0
+    else:
+        dydx[-1] = (dx2_1 * y_pp + (dx2_2 - dx2_1)*y_0 - dx2_2*y_p)/(dx_1*dx_2*(dx_1 - dx_2))
+    return dydx 
 
 class SU2TableGenerator_NICFD:
 
