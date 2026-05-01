@@ -18,7 +18,7 @@
 #                                                                                             |
 # Description:                                                                                |
 #   Table generator class for generating SU2-supported tables of flamelet data.               |
-# Version: 3.0.0                                                                              |
+# Version: 3.1.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -222,8 +222,8 @@ class SU2TableGenerator:
     _lookup_tree:Invdisttree = None     # KD tree with inverse distance weighted interpolation for flamelet data interpolation.
     _flamelet_data_scaler:MinMaxScaler = None   # Scaler for flamelet data controlling variables.
     _n_near:int = 14     # Number of nearest neighbors from which to evaluate flamelet data.
-    _p_fac:int = 3      # Power by which to weigh distances from query point.
-    _custom_KDtreeparams:bool = False 
+    _p_fac:int = 2      # Power by which to weigh distances from query point.
+    _custom_KDtreeparams:bool = False
 
     _preprocessed:bool = False 
 
@@ -648,11 +648,11 @@ class SU2TableGenerator:
         :rtype Connecivity: NDarray
         :return MeshNodes: 
         """
-        Coord_refinement, Coord_hull, hull_area,z_norm, CV_mesh, table_level_data  = self.__ComputeCurvature(val_mix_frac)
-        MeshNodes_Norm, table_level_data = self.__Compute2DMesh(XY_hull=Coord_hull, XY_refinement=Coord_refinement,val_mixfrac_norm=z_norm, level_area=hull_area)
-        
+        Coord_refinement, Coord_hull, hull_area, z_norm, CV_mesh, table_level_data = self.__ComputeCurvature(val_mix_frac)
+        MeshNodes_Norm, table_level_data, HullNodes = self.__Compute2DMesh(XY_hull=Coord_hull, XY_refinement=Coord_refinement, val_mixfrac_norm=z_norm, level_area=hull_area)
+
         Tria = Delaunay(MeshNodes_Norm[:, :2])
-        HullNodes = Tria.convex_hull[:, 0]
+        # HullNodes = Tria.convex_hull[:, 0]
         MeshNodes_dim = self._scaler.inverse_transform(MeshNodes_Norm)
         return Tria.simplices, MeshNodes_dim, HullNodes, table_level_data
     
@@ -829,6 +829,16 @@ class SU2TableGenerator:
         gmsh.model.mesh.generate(2)
         nodes = gmsh.model.mesh.getNodes(dim=2, tag=-1, includeBoundary=True, returnParametricCoord=False)[1]
         MeshPoints = np.array([nodes[::3], nodes[1::3]]).T
+        # Extract all surface node tags and coordinates.
+        all_tags, all_coords, _ = gmsh.model.mesh.getNodes(dim=2, tag=-1, includeBoundary=True, returnParametricCoord=False)
+        MeshPoints = np.array([all_coords[::3], all_coords[1::3]]).T
+
+        # Extract boundary node tags from the 1D curve entities (the actual mesh boundary).
+        # This correctly captures concave boundary sections that Delaunay.convex_hull misses.
+        boundary_tags, _, _ = gmsh.model.mesh.getNodes(dim=1, tag=-1, includeBoundary=True)
+        boundary_tag_set = set(boundary_tags.tolist())
+        hull_node_indices = np.array([i for i, tag in enumerate(all_tags) if tag in boundary_tag_set])
+        gmsh.finalize()
 
         # Remove mesh nodes that are out of bounds.
         pv_norm, enth_norm = MeshPoints[:, 0], MeshPoints[:, 1]
@@ -844,8 +854,8 @@ class SU2TableGenerator:
 
         table_level_data = self.__EvaluateFlameletInterpolator(CV_level_dim)
 
-        return MeshPoints, table_level_data
-    
+        return MeshPoints, table_level_data, hull_node_indices
+
     def __GetStochMixtureFraction(self):
         fuel_definition = self._Config.GetFuelDefinition()
         fuel_weights = self._Config.GetFuelWeights()

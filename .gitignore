@@ -1,2 +1,2 @@
-Documentation/html
-Documentation/build
+Documentation/html/*
+_site/*

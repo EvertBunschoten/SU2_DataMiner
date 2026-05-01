@@ -20,7 +20,7 @@
 # Description:                                                                                |
 #  Optimize the progress variable definition for hydrogen flamelets.                          |
 #                                                                                             |  
-# Version: 3.0.0                                                                              |
+# Version: 3.1.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 from su2dataminer.config import Config_FGM

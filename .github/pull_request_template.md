@@ -14,4 +14,5 @@
 - [ ] I am submitting my contribution to the develop branch.
 - [ ] I have updated the list of python modules in [required_packages.txt](../required_packages.txt) and [environment.yml](../environment.yml), if necessary.
 - [ ] I have properly commented my changes.
+- [ ] I have updated the [documentation](../Documentation/), if necessary.
 - [ ] I have added a test case that demonstrates my contribution, if necessary.

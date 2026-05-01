@@ -21,7 +21,7 @@
 #  Initiate a configuration object through the interactive terminal for the SU2 DataMiner     |
 #  workflow.                                                                                  |
 #                                                                                             |  
-# Version: 3.0.0                                                                              |
+# Version: 3.1.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 

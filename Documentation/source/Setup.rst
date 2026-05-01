@@ -3,7 +3,12 @@
 Set-up and Requirements
 =======================
 
-*SU2 DataMiner* is an open-source, python-based software suite that is available on `GitHub <https://github.com/EvertBunschoten/SU2_DataMiner.git>`_. 
+*SU2 DataMiner* is an open-source, python-based software suite that is available on `GitHub <https://github.com/su2code/SU2_DataMiner.git>`_. 
+
+.. important::
+
+    *SU2 DataMiner* was developed for Linux OS. Enabling compatibility with Windows and Mac OS is an ongoing development.
+
 
 Requirements
 ------------
@@ -27,7 +32,7 @@ The *SU2 DataMiner* source code can be downloaded from GitHub by cloning the rep
 
 .. code-block::
 
-    >>> git clone https://github.com/EvertBunschoten/SU2_DataMiner.git <PATH_TO_SOURCE>
+    >>> git clone https://github.com/su2code/SU2_DataMiner.git <PATH_TO_SOURCE>
 
 
 where `<PATH_TO_SOURCE>` refers to the target location where the *SU2 DataMiner* source code will be stored. 
@@ -59,8 +64,15 @@ To create the python environment named `su2dm_venv` with all the required python
 
 .. code-block:: 
 
+    >>> cd ~
     >>> python3 -m venv su2dm_venv
-    >>> virtualenv -p /usr/bin/python3 su2dm_venv
+    >>> virtualenv -p python3 su2dm_venv
     >>> . su2dm_venv/bin/activate 
     >>> python3 -m pip install -r $SU2DATAMINER_HOME/required_packages.txt > pip_install_log.log
 
+
+By adding the following line to your `.bashrc` file, the *SU2 DataMiner* python environment is automatically activated when opening a new terminal.
+
+.. code-block::
+
+    . ~/su2dm_env/bin/activate

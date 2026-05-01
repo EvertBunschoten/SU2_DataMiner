@@ -21,7 +21,7 @@
 #  Initiate the FlameletAI configuration for training physics-informed neural networks for    |
 #  FGM applications.                                                                          |
 #                                                                                             |  
-# Version: 3.0.0                                                                              |
+# Version: 3.1.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 

@@ -30,6 +30,15 @@ def main():
     consistency_EEoS.test_files = ["consistency_check.txt"]
     test_list_NICFD.append(consistency_EEoS)
 
+    tabulation_NICFD = TestCase("Tabulation NICFD")
+    tabulation_NICFD.config_dir = "TableGeneration/NICFD/"
+    tabulation_NICFD.config_file = ""
+    tabulation_NICFD.exec_command = "./twophase_lut.py"
+    tabulation_NICFD.reference_files = ["LUT_test.ref"]
+    tabulation_NICFD.test_files = ["LUT_test.drg"]
+    test_list_NICFD.append(tabulation_NICFD)
+    
+    
     consistency_NICFD_PINN = TestCase("PIML training NICFD")
     consistency_NICFD_PINN.config_dir = "FluidTraining/MM_PINN/"
     consistency_NICFD_PINN.config_file = ""

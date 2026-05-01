@@ -19,7 +19,7 @@
 # Description:                                                                                |
 #  Classes for training multi-layer perceptrons on flamelet data.                             |
 #                                                                                             |
-# Version: 3.0.0                                                                              |
+# Version: 3.1.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 

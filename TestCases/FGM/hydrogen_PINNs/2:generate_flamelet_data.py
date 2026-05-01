@@ -20,7 +20,7 @@
 # Description:                                                                                |
 #  Generate flamelet data for training physics-informed neural networks.                      |
 #                                                                                             |  
-# Version: 3.0.0                                                                              |
+# Version: 3.1.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 from su2dataminer.config import Config_FGM

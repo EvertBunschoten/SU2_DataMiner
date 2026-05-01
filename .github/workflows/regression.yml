@@ -18,18 +18,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Pre Cleanup
-        uses: docker://ghcr.io/evertbunschoten/su2dataminer_test:latest
+        uses: docker://ghcr.io/su2code/su2_dataminer_test:v2
         with:
           entrypoint: /bin/rm 
           args: -rf src/
 
       - name: Run regression tests
-        uses: docker://ghcr.io/evertbunschoten/su2dataminer_test:latest
+        uses: docker://ghcr.io/su2code/su2_dataminer_test:v2
         with:
           args: -b ${{ github.ref }} -s run_regression.py
       
       - name: Post Cleanup
-        uses: docker://ghcr.io/evertbunschoten/su2dataminer_test:latest
+        uses: docker://ghcr.io/su2code/su2_dataminer_test:v2
         with:
           entrypoint: /bin/rm 
           args: -rf src/
@@ -39,18 +39,18 @@ jobs:
     runs-on: ubuntu-latest 
     steps:
       - name: Pre Cleanup
-        uses: docker://ghcr.io/evertbunschoten/su2dataminer_test:latest
+        uses: docker://ghcr.io/su2code/su2_dataminer_test:v2
         with:
           entrypoint: /bin/rm 
           args: -rf src/
           
       - name: MLPCpp integration tests
-        uses: docker://ghcr.io/evertbunschoten/su2dataminer_test:latest
+        uses: docker://ghcr.io/su2code/su2_dataminer_test:v2
         with:
           args: -b ${{ github.ref }} -s MLPCpp_tests.py -m main
 
       - name: Post Cleanup
-        uses: docker://ghcr.io/evertbunschoten/su2dataminer_test:latest
+        uses: docker://ghcr.io/su2code/su2_dataminer_test:v2
         with:
           entrypoint: /bin/rm 
           args: -rf src/

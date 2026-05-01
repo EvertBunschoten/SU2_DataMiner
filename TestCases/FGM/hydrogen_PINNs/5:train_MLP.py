@@ -20,7 +20,7 @@
 # Description:                                                                                |
 #  Train physics-informed neural networks for FGM applications of hydrogen-air problems.      |
 #                                                                                             |  
-# Version: 3.0.0                                                                              |
+# Version: 3.1.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 from su2dataminer.config import Config_FGM 

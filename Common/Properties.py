@@ -19,7 +19,7 @@
 # Description:                                                                                |
 #  Default settings/names/properties for the various steps within the DataMiner workflow.     |                                                                          
 #                                                                                             |  
-# Version: 3.0.0                                                                              |
+# Version: 3.1.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -65,6 +65,11 @@ class EntropicVars(Enum):
     dsdp_rho=auto()
     dsdrho_p=auto()
     cp=auto()
+    cv=auto()
+    Enthalpy=auto()
+    Conductivity=auto()
+    ViscosityDyn=auto()
+    VaporQuality=auto()
     N_STATE_VARS=auto()
 
 class FGMVars(Enum):
@@ -137,6 +142,11 @@ class DefaultSettings_NICFD(DefaultProperties):
     
     fluid_name:str = "Air"
     EOS_type:str = "HEOS"
+    conductivity_models:list[str] = ["volume", "mass"]
+    viscosity_models:list[str] = ["mcadams", "cicchitti", "dukler"]
+    conductivity_model:str = "volume"
+    viscosity_model:str = "mcadams"
+
     use_PT_grid:bool = False 
 
     controlling_variables:list[str] = [EntropicVars.Density.name, \
@@ -152,6 +162,9 @@ class DefaultSettings_NICFD(DefaultProperties):
     config_type:str = "EntropicAI"
     supported_state_vars:list[str] = ["s","T","p","c2","dTdrho_e","dTde_rho","dpdrho_e","dpde_rho"]
     supported_backends:list[str] = ["HEOS","PR", "SRK", "IF97","REFPROP"]
+
+    tabulation_options:list[str] = ["cartesian","adaptive"]
+    tabulation_method:str="cartesian"
     
 class DefaultSettings_FGM(DefaultProperties):
     config_name:str = "config_FGM"
@@ -203,6 +216,22 @@ class DefaultSettings_FGM(DefaultProperties):
     
     affinity_threshold:float = 0.7
     output_file_header:str = "flamelet_data"
+
+    # Grid refinement criteria for Cantera flame solvers
+    freeflame_refine_ratio:float = 2.0
+    freeflame_refine_slope:float = 0.025
+    freeflame_refine_curve:float = 0.025
+    freeflame_refine_prune:float = 0.01
+
+    burnerflame_refine_ratio:float = 3.0
+    burnerflame_refine_slope:float = 0.02
+    burnerflame_refine_curve:float = 0.02
+    burnerflame_refine_prune:float = 0.01
+
+    counterflame_refine_ratio:float = 3.0
+    counterflame_refine_slope:float = 0.04
+    counterflame_refine_curve:float = 0.06
+    counterflame_refine_prune:float = 0.02
     boundary_file_header:str = "boundary_data"
     config_type:str = "FlameletAI"
 
@@ -214,3 +243,4 @@ ActivationFunctionOptions = {"linear" : tf.keras.activations.linear,\
                              "gelu" : tf.keras.activations.gelu,\
                              "sigmoid" : tf.keras.activations.sigmoid,\
                              "swish" : tf.keras.activations.swish}
+

@@ -20,7 +20,7 @@
 #  Derived DataMiner configuration classes for flamelet-generated manifold and NI-CFD         |
 #  applications.                                                                              |
 #                                                                                             |  
-# Version: 3.0.0                                                                              |
+# Version: 3.1.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -57,6 +57,17 @@ class Config_NICFD(Config):
     # Fluid definition settings
     __fluid_names:list[str] = ["MM"]                    # List of fluid names used for data generation.
     __fluid_string:str="MM"                             # Fluid string for defining the abstract state in CoolProp
+
+    __calc_transport_properties:bool = False
+    __viscosity_model:str = DefaultSettings_NICFD.viscosity_model
+    __conductivity_model:str = DefaultSettings_NICFD.conductivity_model
+    
+    # Phases to include in fluid data.
+    __gasphase:bool = True
+    __twophase:bool = False 
+    __liquidphase:bool = False 
+    __supercritical:bool = True 
+
     __EOS_type:str=DefaultSettings_NICFD.EOS_type       # Equation of state used by CoolProp
     __fluid_mole_fractions:list[float] = [1.0]          # Mole fractions for components in fluid mixture.
     __use_PT:bool = DefaultSettings_NICFD.use_PT_grid   # Use a pressure-temperature based grid for fluid training data.
@@ -78,7 +89,7 @@ class Config_NICFD(Config):
     _state_vars:list[str] = ["s", "T","p","c2"]  # State variable names for which the physics-informed MLP is trained.
 
     # Table Generation Settings
-
+    __Table_discretization:str = DefaultSettings_NICFD.tabulation_method
     __Table_base_cell_size:float = None     # Table base cell size per table level.
     __Table_ref_cell_size:float = None      # Refined cell size per table level.
     __Table_ref_radius:float = None         # Refinement radius within which refined cell size is applied.
@@ -151,6 +162,15 @@ class Config_NICFD(Config):
                 print("Density range: %.2f kg/m3 -> %.2f kg/m3 (%i steps)" % (self.__Rho_lower, self.__Rho_upper, self.__Np_P))
         print("")
         print("State variables considered during physics-informed learning: "+", ".join((v for v in self._state_vars)))
+
+        if self.__twophase:
+            print("Including two-phase fluid data.")
+        if self.__calc_transport_properties:
+            print("Including transport properties in fluid data.")
+            if self.__twophase:
+                print("Two-phase conductivity model: %s" % self.__conductivity_model)
+                print("Two-phase viscosity model: %s" % self.__viscosity_model)
+
         return 
     
 
@@ -207,6 +227,137 @@ class Config_NICFD(Config):
         
         self.__EOS_type=EOS_type_in.upper()
         return
+    
+    def IncludeTransportProperties(self, calc_transport_properties:bool=False):
+        """Include transport properties in fluid data calculation
+
+        :param calc_transport_properties: evaluate transport properties, defaults to False
+        :type calc_transport_properties: bool, optional
+        """
+        self.__calc_transport_properties = calc_transport_properties
+        return 
+    
+    def CalcTransportProperties(self):
+        """Whether transport properties are included in the fluid data set.
+
+        :return: calculation of transport properties.
+        :rtype: bool
+        """
+        return self.__calc_transport_properties 
+    
+    def SetConductivityModel(self, conductivity_model:str=DefaultSettings_NICFD.conductivity_model):
+        """Specify the two-phase conductivity model.
+
+        :param conductivity_model: two-phase conductivity model option, defaults to "volume"
+        :type conductivity_model: str, optional
+        :raises Exception: if the specified option is not supported.
+        """
+        if conductivity_model not in DefaultSettings_NICFD.conductivity_models:
+            raise Exception("Two-phase conductivity model should be one of the following: " + ",".join(c for c in DefaultSettings_NICFD.conductivity_models))
+        self.__conductivity_model = conductivity_model
+        if not self.TwoPhase():
+            self.EnableTwophase(True)
+            print("Two-phase conductivity model specified, including two-phase fluid data.")
+        return 
+    
+    def GetConductivityModel(self):
+        """Get two-phase conductivity model.
+
+        :return: two-phase conductivity model option
+        :rtype: str
+        """
+        return self.__conductivity_model
+    
+    def SetViscosityModel(self, viscosity_model:str=DefaultSettings_NICFD.viscosity_model):
+        """Specify the two-phase viscosity model.
+
+        :param viscosity_model: two-phase viscosity model option, defaults to "mcadams"
+        :type viscosity_model: str, optional
+        :raises Exception: if the specified option is not supported.
+        """
+        if viscosity_model not in DefaultSettings_NICFD.viscosity_models:
+            raise Exception("Two-phase viscosity model should be one of the following: " + ",".join(c for c in DefaultSettings_NICFD.viscosity_models))
+        self.__viscosity_model = viscosity_model
+        if not self.TwoPhase():
+            self.EnableTwophase(True)
+            print("Two-phase viscosity model specified, including two-phase fluid data.")
+        return 
+    
+    def GetViscosityModel(self):
+        """Get two-phase viscosity model.
+
+        :return: two-phase viscosity model option
+        :rtype: str
+        """
+        return self.__viscosity_model
+    
+    def EnableGasPhase(self, gas_phase:bool=True):
+        """Include thermophysical state data from the fluid in gas phase
+
+        :param gas_phase: include gas phase data, defaults to True
+        :type gas_phase: bool, optional
+        """
+        self.__gasphase = gas_phase
+        return 
+    
+    def GasPhase(self):
+        """Whether thermophysical state data from the fluid in the gaseous phase are included.
+
+        :return: inclusion of gas phase data.
+        :rtype: bool
+        """
+        return self.__gasphase 
+    
+    def EnableSuperCritical(self, supercritical:bool=True):
+        """Include thermophysical state data of the fluid in supercritial, and of the supercritical gas and liquid phase if specified.
+
+        :param supercritical: include supercritical phase data, defaults to True
+        :type supercritical: bool, optional
+        """
+        self.__supercritical = supercritical
+        return 
+    
+    def EnableTwophase(self, two_phase:bool=False):
+        """Include two-phase thermophysical data of the fluid.
+
+        :param two_phase: include two-phase data in fluid data, defaults to False
+        :type two_phase: bool, optional
+        """
+        self.__twophase = two_phase 
+        return 
+    
+    def EnableLiquidPhase(self, liquid_phase:bool=False):
+        """Include thermodynamic state data from fluid in the liquid phase.
+
+        :param liquid_phase: include liquid-phase data, defaults to False
+        :type liquid_phase: bool, optional
+        """
+        self.__liquidphase = liquid_phase
+        return 
+    
+    def TwoPhase(self):
+        """Whether thermophysical state data from the fluid in the two-phase are included.
+
+        :return: inclusion of two-phase data.
+        :rtype: bool
+        """
+        return self.__twophase
+    
+    def LiquidPhase(self):
+        """Whether thermophysical state data from the fluid in the liquid phase are included.
+
+        :return: inclusion of liquid phase data.
+        :rtype: bool
+        """
+        return self.__liquidphase
+    
+    def SuperCritical(self):
+        """Whether thermophysical state data from the fluid in the supercritical phases are included.
+
+        :return: inclusion of supercritical phase data.
+        :rtype: bool
+        """
+        return self.__supercritical 
     
     def GetEquationOfState(self):
         """Retrieve the equation of state backend used by CoolProp for fluid data calculations.
@@ -489,6 +640,26 @@ class Config_NICFD(Config):
         """
         return self.__Np_P
     
+    def SetTableDiscretization(self, table_method:str=DefaultSettings_NICFD.tabulation_method):
+        """Specify how thermodynamic state space is discretized for look-up table.
+
+        :param table_method: discretization method, defaults to "cartesian"
+        :type table_method: str, optional
+        :raises Exception: if method is not supported
+        """
+        if table_method not in DefaultSettings_NICFD.tabulation_options:
+            raise Exception("Table discretization method should be one of the following: %s" % ",".join(t for t in DefaultSettings_NICFD.tabulation_options))
+        self.__Table_discretization = table_method
+        return 
+    
+    def GetTableDiscretization(self):
+        """Get thermodynamic state space discretization method.
+
+        :return: table discretization method.
+        :rtype: str
+        """
+        return self.__Table_discretization
+    
     def SetTableCellSize(self, base_cell_size:float, refined_cell_size:float=None):
         """Define the base and optional refined 2D table cell sizes.
 
@@ -663,6 +834,22 @@ class Config_FGM(Config):
     __Le_const_sp:np.ndarray[float] = None 
     __Le_avg_eq_ratio:float = None
     __Le_avg_T_unb:float = None
+
+    # Grid refinement criteria for Cantera flame solvers
+    __freeflame_refine_ratio:float = DefaultSettings_FGM.freeflame_refine_ratio
+    __freeflame_refine_slope:float = DefaultSettings_FGM.freeflame_refine_slope
+    __freeflame_refine_curve:float = DefaultSettings_FGM.freeflame_refine_curve
+    __freeflame_refine_prune:float = DefaultSettings_FGM.freeflame_refine_prune
+
+    __burnerflame_refine_ratio:float = DefaultSettings_FGM.burnerflame_refine_ratio
+    __burnerflame_refine_slope:float = DefaultSettings_FGM.burnerflame_refine_slope
+    __burnerflame_refine_curve:float = DefaultSettings_FGM.burnerflame_refine_curve
+    __burnerflame_refine_prune:float = DefaultSettings_FGM.burnerflame_refine_prune
+
+    __counterflame_refine_ratio:float = DefaultSettings_FGM.counterflame_refine_ratio
+    __counterflame_refine_slope:float = DefaultSettings_FGM.counterflame_refine_slope
+    __counterflame_refine_curve:float = DefaultSettings_FGM.counterflame_refine_curve
+    __counterflame_refine_prune:float = DefaultSettings_FGM.counterflame_refine_prune
 
     def __init__(self, load_file:str=None):
         """Class constructor
@@ -1236,6 +1423,112 @@ class Config_FGM(Config):
         self.__generate_counterflames = input 
         return
     
+    def SetFreeFlameCriteria(self, ratio:float=DefaultSettings_FGM.freeflame_refine_ratio,
+                             slope:float=DefaultSettings_FGM.freeflame_refine_slope,
+                             curve:float=DefaultSettings_FGM.freeflame_refine_curve,
+                             prune:float=DefaultSettings_FGM.freeflame_refine_prune):
+        """Set the grid refinement criteria for adiabatic free-flame computations.
+
+        :param ratio: Maximum grid size ratio between adjacent cells, defaults to 2.0
+        :type ratio: float
+        :param slope: Maximum relative change in solution slope, defaults to 0.025
+        :type slope: float
+        :param curve: Maximum relative change in solution curvature, defaults to 0.025
+        :type curve: float
+        :param prune: Threshold below which grid points are removed, defaults to 0.01
+        :type prune: float
+        """
+        self.__freeflame_refine_ratio = ratio
+        self.__freeflame_refine_slope = slope
+        self.__freeflame_refine_curve = curve
+        self.__freeflame_refine_prune = prune
+        return
+
+    def GetFreeFlameCriteria(self):
+        """Get the grid refinement criteria for adiabatic free-flame computations.
+
+        :return: tuple of (ratio, slope, curve, prune)
+        :rtype: tuple[float, float, float, float]
+        """
+        return (self.__freeflame_refine_ratio, self.__freeflame_refine_slope,
+                self.__freeflame_refine_curve, self.__freeflame_refine_prune)
+
+    def SetBurnerFlameCriteria(self, ratio:float=DefaultSettings_FGM.burnerflame_refine_ratio,
+                               slope:float=DefaultSettings_FGM.burnerflame_refine_slope,
+                               curve:float=DefaultSettings_FGM.burnerflame_refine_curve,
+                               prune:float=DefaultSettings_FGM.burnerflame_refine_prune):
+        """Set the grid refinement criteria for burner-stabilized flame computations.
+
+        :param ratio: Maximum grid size ratio between adjacent cells, defaults to 3.0
+        :type ratio: float
+        :param slope: Maximum relative change in solution slope, defaults to 0.02
+        :type slope: float
+        :param curve: Maximum relative change in solution curvature, defaults to 0.02
+        :type curve: float
+        :param prune: Threshold below which grid points are removed, defaults to 0.01
+        :type prune: float
+        """
+        self.__burnerflame_refine_ratio = ratio
+        self.__burnerflame_refine_slope = slope
+        self.__burnerflame_refine_curve = curve
+        self.__burnerflame_refine_prune = prune
+        return
+
+    def GetBurnerFlameCriteria(self):
+        """Get the grid refinement criteria for burner-stabilized flame computations.
+
+        :return: tuple of (ratio, slope, curve, prune)
+        :rtype: tuple[float, float, float, float]
+        """
+        return (self.__burnerflame_refine_ratio, self.__burnerflame_refine_slope,
+                self.__burnerflame_refine_curve, self.__burnerflame_refine_prune)
+
+    def SetCounterFlameCriteria(self, ratio:float=DefaultSettings_FGM.counterflame_refine_ratio,
+                                slope:float=DefaultSettings_FGM.counterflame_refine_slope,
+                                curve:float=DefaultSettings_FGM.counterflame_refine_curve,
+                                prune:float=DefaultSettings_FGM.counterflame_refine_prune):
+        """Set the grid refinement criteria for counter-flow diffusion flame computations.
+
+        :param ratio: Maximum grid size ratio between adjacent cells, defaults to 3.0
+        :type ratio: float
+        :param slope: Maximum relative change in solution slope, defaults to 0.04
+        :type slope: float
+        :param curve: Maximum relative change in solution curvature, defaults to 0.06
+        :type curve: float
+        :param prune: Threshold below which grid points are removed, defaults to 0.02
+        :type prune: float
+        """
+        self.__counterflame_refine_ratio = ratio
+        self.__counterflame_refine_slope = slope
+        self.__counterflame_refine_curve = curve
+        self.__counterflame_refine_prune = prune
+        return
+
+    def GetCounterFlameCriteria(self):
+        """Get the grid refinement criteria for counter-flow diffusion flame computations.
+
+        :return: tuple of (ratio, slope, curve, prune)
+        :rtype: tuple[float, float, float, float]
+        """
+        return (self.__counterflame_refine_ratio, self.__counterflame_refine_slope,
+                self.__counterflame_refine_curve, self.__counterflame_refine_prune)
+
+    def PrintRefineCriteria(self):
+        """Print the active grid refinement criteria for all enabled flame types."""
+        print("Grid refinement criteria:")
+        if self.__generate_freeflames:
+            print("  Free flame:    ratio=%.4g  slope=%.4g  curve=%.4g  prune=%.4g" % (
+                self.__freeflame_refine_ratio, self.__freeflame_refine_slope,
+                self.__freeflame_refine_curve, self.__freeflame_refine_prune))
+        if self.__generate_burnerflames:
+            print("  Burner flame:  ratio=%.4g  slope=%.4g  curve=%.4g  prune=%.4g" % (
+                self.__burnerflame_refine_ratio, self.__burnerflame_refine_slope,
+                self.__burnerflame_refine_curve, self.__burnerflame_refine_prune))
+        if self.__generate_counterflames:
+            print("  Counter flame: ratio=%.4g  slope=%.4g  curve=%.4g  prune=%.4g" % (
+                self.__counterflame_refine_ratio, self.__counterflame_refine_slope,
+                self.__counterflame_refine_curve, self.__counterflame_refine_prune))
+
     def GenerateFreeFlames(self):
         """
         Whether the manifold data contains adiabatic free-flame data.

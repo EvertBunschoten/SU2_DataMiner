@@ -25,3 +25,6 @@ dependencies:
 - pygad
 - paretoset
 - pymoo
+- pydata-sphinx-theme
+- meshio
+- concave_hull

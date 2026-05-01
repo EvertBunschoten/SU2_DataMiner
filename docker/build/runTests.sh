@@ -15,7 +15,7 @@ branch=""
 testscript=""
 mlpcppb=""
 workdir=$PWD
-repo="https://github.com/EvertBunschoten/SU2_DataMiner.git"
+repo="https://github.com/su2code/SU2_DataMiner.git"
 
 export CCACHE_DIR=$workdir/ccache
 
@@ -23,10 +23,6 @@ if [ "$#" -ne 0 ]; then
   while [ "$(echo $1 | cut -c1)" = "-" ]
     do
         case "$1" in
-            -r)
-                    repo=$2
-                    shift 2
-                ;;
             -b)
                     branch=$2
                     shift 2
@@ -71,7 +67,7 @@ else
   cd src/SU2_DataMiner
   export SU2DATAMINER_HOME=$PWD
 fi
-
+export TF_ENABLE_ONEDNN_OPTS=0
 
 # Activate python virtual environment and install required modules
 echo "Installing python modules..."

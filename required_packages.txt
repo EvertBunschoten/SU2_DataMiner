@@ -18,3 +18,5 @@ pygad==3.5.0
 paretoset==1.2.5
 pymoo==0.6.1.6
 pydata-sphinx-theme
+meshio==5.3.5
+concave_hull==0.1.2

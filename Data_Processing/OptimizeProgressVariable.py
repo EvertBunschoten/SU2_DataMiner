@@ -20,7 +20,7 @@
 #  Class for optimizing the definition for the progress variable for a given set of flamelet  |
 #  data.                                                                                      |
 #                                                                                             |
-# Version: 3.0.0                                                                              |
+# Version: 3.1.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -313,7 +313,7 @@ class PVOptimizer:
         #result = avg_fac + np.sum(np.power(fac[pv_term < 0.0],2))
 
         # Max grad:
-        result = np.max(abs_fac) + np.sum(np.power(fac[pv_term < 0.0],2))
+        result = np.nanmax(abs_fac) + np.sum(np.power(fac[pv_term < 0.0],2))
         return result 
     
     def monotonicity_penalty(self, x):
@@ -681,6 +681,10 @@ class PVOptimizer:
         Y_arrays = [x for x in Y_arrays if x is not None]
         self._delta_Y_flamelets = np.vstack(tuple((b for b in deltaY_arrays)))
         self._progress_vector = np.vstack(tuple((b for b in progress_vector)))
+        # Remove degenerate rows where arc-length increment is zero (0/0 NaN in penalty).
+        nonzero_mask = self._progress_vector[:, 0] > 0
+        self._delta_Y_flamelets = self._delta_Y_flamelets[nonzero_mask, :]
+        self._progress_vector = self._progress_vector[nonzero_mask, :]
         self._delta_Y_flamelets_constraints = np.vstack(tuple((deltaY_arrays[b] for b in np.random.choice(NFlamelets, 10))))
         self._Y_flamelets_filtered = np.vstack(tuple(b for b in Y_arrays))
         return 
@@ -760,7 +764,8 @@ class PVOptimizer:
                 I[k] = True 
         I[0] = True 
         
-        k = np.argwhere(pv > (pv[0] + deltacv))[0,0]
+        matches = np.argwhere(pv > (pv[0] + deltacv))
+        k = matches[0, 0] if len(matches) > 0 else 1
         I[1:k-1] = False
         return I
 
@@ -790,6 +795,10 @@ class PVOptimizer_Niu(PVOptimizer):
         progress_vector = [x for x in progress_vector if x is not None]
         self._delta_Y_flamelets = np.vstack(tuple((b for b in deltaY_arrays)))
         self._progress_vector = np.vstack(tuple((b for b in progress_vector)))
+        # Remove degenerate rows where arc-length increment is zero (0/0 NaN in penalty).
+        nonzero_mask = self._progress_vector[:, 0] > 0
+        self._delta_Y_flamelets = self._delta_Y_flamelets[nonzero_mask, :]
+        self._progress_vector = self._progress_vector[nonzero_mask, :]
         self._delta_Y_flamelets_constraints = np.vstack(tuple((deltaY_arrays[b] for b in np.random.choice(NFlamelets, 10))))
         return
     

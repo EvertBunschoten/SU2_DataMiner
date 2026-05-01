@@ -21,7 +21,7 @@
 #  homogeneous distribution of flamelet data along the progress variable, enthalpy, and       |
 #  mixture fraction direction.                                                                |
 #                                                                                             |
-# Version: 3.0.0                                                                              |
+# Version: 3.1.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 
@@ -636,15 +636,19 @@ class FlameletConcatenator:
             BurningFlamelet:bool = True 
 
             # Get flamelet variables
-            fid = open(flamelet_dir + "/" + eq_file + "/" + f, 'r')
+            filepath = flamelet_dir + "/" + eq_file + "/" + f
+            fid = open(filepath, 'r')
             variables = fid.readline().strip().split(',')
             fid.close()
 
             # Load flamelet data
-            if is_equilibrium and self.__write_LUT_data:
-                D = np.loadtxt(flamelet_dir + "/" + eq_file + "/" + f, delimiter=',',skiprows=1,max_rows=1)[np.newaxis, :]
-            else:
-                D = np.loadtxt(flamelet_dir + "/" + eq_file + "/" + f, delimiter=',',skiprows=1)
+            D = np.loadtxt(filepath, delimiter=',', skiprows=1, ndmin=2)
+
+            if len(variables) != np.shape(D)[1]:
+                print("WARNING: skipping '%s' — header has %i variables but data has %i columns. "
+                      "File may be corrupted or from a different code version. Delete and regenerate."
+                      % (filepath, len(variables), np.shape(D)[1]))
+                continue
 
             # Set flamelet controlling variables
             CV_flamelet = np.zeros([len(D), self.__N_control_vars])

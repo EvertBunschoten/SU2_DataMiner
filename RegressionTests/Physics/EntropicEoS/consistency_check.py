@@ -20,7 +20,7 @@
 # Description:                                                                                |
 #  Unit test for verifying the consistency of the equation of state based on entropy potential|
 #                                                                                             |  
-# Version: 3.0.0                                                                              |
+# Version: 3.1.0                                                                              |
 #                                                                                             |
 #=============================================================================================#
 

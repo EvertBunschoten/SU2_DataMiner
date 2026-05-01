@@ -1,3 +1,7 @@
+.. _tutorialconfigs:
+
+.. sectionauthor:: Evert Bunschoten 
+    
 Creating SU2 DataMiner Configurations
 =====================================
 
